@@ -178,6 +178,21 @@ scan(
   file => /[/\\]routes[/\\]/.test(file) && !file.endsWith(".test.ts"),
 );
 
+// ── Routes never touch Prisma directly ───────────────────────────────────────
+// A route that can reach the database can also forget to scope the query.
+// Routes call a service; the service takes AuthContext and owns the where clause.
+scan(
+  "no-prisma-in-routes",
+  "Routes must not import Prisma. Go through a service that takes AuthContext. See AUTH.md.",
+  line => {
+    const code = line.replace(/\/\/.*$/, "");
+    return /from\s+["'][^"']*generated\/client/.test(code)
+        || /from\s+["']@prisma\/client["']/.test(code)
+        || /\bnew\s+PrismaClient\b/.test(code);
+  },
+  file => /[/\\]routes[/\\]/.test(file) && !file.endsWith(".test.ts"),
+);
+
 // ── 10. Route files must actually be registered ──────────────────────────────
 const routesDir = join(SRC, "routes");
 let routeFiles: string[] = [];

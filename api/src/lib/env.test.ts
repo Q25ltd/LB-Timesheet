@@ -18,14 +18,14 @@ test("accepts a minimal valid environment and applies defaults", () => {
 test("rejects a JWT_SECRET shorter than 32 characters", () => {
   const result = EnvSchema.safeParse({ ...valid, JWT_SECRET: "too-short" });
   assert.equal(result.success, false);
-  assert.match(describeEnvFailure(result.error!), /JWT_SECRET must be at least 32 characters/);
+  assert.match(describeEnvFailure(result.error), /JWT_SECRET must be at least 32 characters/);
 });
 
 test("rejects a missing DATABASE_URL", () => {
   const { DATABASE_URL: _omitted, ...withoutUrl } = valid;
   const result = EnvSchema.safeParse(withoutUrl);
   assert.equal(result.success, false);
-  assert.match(describeEnvFailure(result.error!), /DATABASE_URL/);
+  assert.match(describeEnvFailure(result.error), /DATABASE_URL/);
 });
 
 test("rejects an unknown NODE_ENV", () => {
@@ -39,7 +39,7 @@ test("coerces PORT from a string", () => {
 test("describeEnvFailure lists every problem, not just the first", () => {
   const result = EnvSchema.safeParse({ JWT_SECRET: "short" });
   assert.equal(result.success, false);
-  const described = describeEnvFailure(result.error!);
+  const described = describeEnvFailure(result.error);
   assert.match(described, /DATABASE_URL/);
   assert.match(described, /JWT_SECRET/);
 });

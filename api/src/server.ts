@@ -13,8 +13,11 @@ async function shutdown() {
   await prisma.$disconnect();
   process.exit(0);
 }
-process.on("SIGINT",  shutdown);
-process.on("SIGTERM", shutdown);
+// Wrapped rather than passed directly: process.on expects a void-returning
+// listener, so handing it an async function means a rejection during
+// shutdown is swallowed with no trace. Found by eslint no-misused-promises.
+process.on("SIGINT",  () => { shutdown().catch(() => process.exit(1)); });
+process.on("SIGTERM", () => { shutdown().catch(() => process.exit(1)); });
 
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
