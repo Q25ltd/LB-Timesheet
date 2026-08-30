@@ -25,9 +25,12 @@ const repo = shiftRepository(prisma);
 const TAG = `repo-test-${Date.now()}`;
 let ctxA!: TenantContext;
 let ctxB!: TenantContext;
+let ctxA2!: TenantContext;
 let shiftA = "";
 let shiftB = "";
 let segmentB = "";
+let segmentA = "";
+let shiftAExtra = "";
 
 async function cleanup(): Promise<void> {
   await prisma.shiftSubmitJob.deleteMany({ where: { shift: { driverName: { startsWith: TAG } } } });
@@ -70,6 +73,38 @@ before(async () => {
   });
   assert.ok(seg, "setup: company B's own segment must be creatable");
   segmentB = seg.id;
+
+  // A second driver in Company A itself — every test above proves
+  // cross-COMPANY isolation; this is the same-company case F-03 exists for.
+  const driverA2 = await prisma.user.create({
+    data: { email: `${TAG}-a2@example.com`, name: `${TAG}-a2`, passwordHash: "not-a-real-hash" },
+  });
+  const memberA2 = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA2.id } });
+  ctxA2 = TenantContext.trust({ companyId: companyA.id, userId: driverA2.id, membershipId: memberA2.id });
+
+  const segA = await repo.addSegment(ctxA, shiftA, {
+    sequence: 1, truckReg: "AA24 ABC", startedAt: new Date("2026-08-30T05:43:00.000Z"),
+  });
+  assert.ok(segA, "setup: driver A's own segment must be creatable");
+  segmentA = segA.id;
+
+  // A dedicated, CLOSED shift for driver A. Driver A already has shiftA open,
+  // and the one-open-shift index would reject a second open one; closed
+  // shifts aren't limited. Using a fresh, untouched shift for the delete and
+  // enqueue probes below means a broken boundary can't destroy a fixture
+  // other tests still need, and the outbox's own @@unique([shiftId]) can
+  // never fire and mask the ownership check with an unrelated P2002.
+  shiftAExtra = (await prisma.shift.create({
+    data: {
+      membershipId: memberA.id,
+      companyId: companyA.id,
+      userId: driverA.id,
+      driverName: `${TAG}-a`,
+      shiftDate: new Date("2026-08-29T00:00:00.000Z"),
+      startedAt: new Date("2026-08-29T05:00:00.000Z"),
+      status: "voided",
+    },
+  })).id;
 });
 
 after(async () => {
@@ -156,4 +191,66 @@ test("same-company update, segment work and submit all succeed", async () => {
 
   const job = await repo.enqueueSubmitJob(ctxB, shiftB);
   assert.equal(job?.companyId, ctxB.companyId);
+});
+// ── Same-company driver isolation (F-03) ─────────────────────────────────────
+// Everything above proves cross-COMPANY isolation. These prove the narrower,
+// previously-untested case: two drivers who share a company must still be
+// isolated from each other's shifts. Today every method below except
+// listOwn/create is scoped by companyId alone, so driver A2 can currently
+// reach driver A's data just by knowing its ID — that's the bug this proves.
+
+test("driver A2 CANNOT read driver A's shift, though they share a company", async () => {
+  assert.equal(await repo.findById(ctxA2, shiftA), null);
+});
+
+test("driver A2 CANNOT update driver A's shift — and A's data is untouched", async () => {
+  assert.equal(await repo.update(ctxA2, shiftA, { notes: "graffiti from A2" }), null);
+  const fromA = await repo.findById(ctxA, shiftA);
+  assert.equal(fromA?.notes, null, "A's shift must be unmodified by a same-company driver");
+});
+
+test("driver A2 CANNOT attach a segment to driver A's shift", async () => {
+  assert.equal(
+    await repo.addSegment(ctxA2, shiftA, { sequence: 9, truckReg: "ZZ24 XYZ", startedAt: new Date() }),
+    null,
+  );
+  const fromA = await repo.findById(ctxA, shiftA);
+  assert.equal(fromA?.segments.length, 1, "A must still have exactly its own segment");
+});
+
+test("driver A2 CANNOT update driver A's segment", async () => {
+  assert.equal(await repo.updateSegment(ctxA2, segmentA, { notes: "crossed the same-company boundary" }), false);
+  const fromA = await repo.findById(ctxA, shiftA);
+  assert.equal(fromA?.segments[0]?.notes, null, "A's segment must be unmodified");
+});
+
+test("driver A2 CANNOT enqueue a submit job for driver A's shift", async () => {
+  assert.equal(await repo.enqueueSubmitJob(ctxA2, shiftAExtra), null);
+  const jobs = await prisma.shiftSubmitJob.count({ where: { shiftId: shiftAExtra } });
+  assert.equal(jobs, 0, "no outbox row may exist for A's shift, created by A2");
+});
+
+test("driver A2 CANNOT delete driver A's shift — and it survives", async () => {
+  assert.equal(await repo.delete(ctxA2, shiftAExtra), false);
+  assert.equal((await repo.findById(ctxA, shiftAExtra))?.id, shiftAExtra);
+});
+
+test("driver A2 CAN still fully operate on their own same-company shift", async () => {
+  const own = await repo.create(ctxA2, {
+    driverName: `${TAG}-a2`,
+    shiftDate: new Date("2026-08-30T00:00:00.000Z"),
+    startedAt: new Date("2026-08-30T07:15:00.000Z"),
+  });
+
+  const updated = await repo.update(ctxA2, own.id, { notes: "A2's own note" });
+  assert.equal(updated?.notes, "A2's own note");
+
+  const seg = await repo.addSegment(ctxA2, own.id, {
+    sequence: 1, truckReg: "AA24 A2X", startedAt: new Date("2026-08-30T07:15:00.000Z"),
+  });
+  assert.ok(seg, "A2 must be able to add a segment to their own shift");
+  assert.equal(await repo.updateSegment(ctxA2, seg.id, { odometerEnd: 12345 }), true);
+
+  const job = await repo.enqueueSubmitJob(ctxA2, own.id);
+  assert.equal(job?.companyId, ctxA2.companyId);
 });

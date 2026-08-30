@@ -93,10 +93,16 @@ export function shiftRepository(prisma: PrismaClient) {
       });
     },
 
-    /** Company-scoped by the composite unique — null for other tenants' ids. */
+    /**
+     * Scoped by company AND the owning membership (D15) — null for another
+     * tenant's id, and equally null for a same-company colleague's shift.
+     * findFirst (not findUnique) because membershipId isn't part of the
+     * compound unique key; id alone is already globally unique, so this
+     * still returns at most one row.
+     */
     async findById(ctx: TenantContext, shiftId: string) {
-      return prisma.shift.findUnique({
-        where: { id_companyId: { id: shiftId, companyId: ctx.companyId } },
+      return prisma.shift.findFirst({
+        where: { id: shiftId, companyId: ctx.companyId, membershipId: ctx.membershipId },
         include: { segments: { orderBy: { sequence: "asc" } } },
       });
     },
@@ -110,11 +116,19 @@ export function shiftRepository(prisma: PrismaClient) {
       });
     },
 
-    /** Null when the shift is another company's — or simply doesn't exist. */
+    /**
+     * Null when the shift is another tenant's, another same-company driver's,
+     * or simply doesn't exist — all three are the identical P2025 from
+     * Prisma's extended-where-unique input (the unique id_companyId selector
+     * plus an additional non-unique membershipId filter).
+     */
     async update(ctx: TenantContext, shiftId: string, data: UpdateShiftData) {
       try {
         return await prisma.shift.update({
-          where: { id_companyId: { id: shiftId, companyId: ctx.companyId } },
+          where: {
+            id_companyId: { id: shiftId, companyId: ctx.companyId },
+            membershipId: ctx.membershipId,
+          },
           data,
         });
       } catch (error) {
@@ -123,11 +137,14 @@ export function shiftRepository(prisma: PrismaClient) {
       }
     },
 
-    /** False when there was nothing of this company's to delete. */
+    /** False when there was nothing of THIS membership's to delete. */
     async delete(ctx: TenantContext, shiftId: string) {
       try {
         await prisma.shift.delete({
-          where: { id_companyId: { id: shiftId, companyId: ctx.companyId } },
+          where: {
+            id_companyId: { id: shiftId, companyId: ctx.companyId },
+            membershipId: ctx.membershipId,
+          },
         });
         return true;
       } catch (error) {
@@ -163,12 +180,13 @@ export function shiftRepository(prisma: PrismaClient) {
     },
 
     /**
-     * updateMany with a company filter: a cross-tenant id matches zero rows,
-     * which is exactly the same outcome as a nonexistent one.
+     * updateMany filtered through the parent shift's membershipId: a
+     * cross-tenant OR same-company-wrong-driver id matches zero rows, which
+     * is exactly the same outcome as a nonexistent one.
      */
     async updateSegment(ctx: TenantContext, segmentId: string, data: UpdateSegmentData) {
       const result = await prisma.shiftSegment.updateMany({
-        where: { id: segmentId, companyId: ctx.companyId },
+        where: { id: segmentId, companyId: ctx.companyId, shift: { membershipId: ctx.membershipId } },
         data: {
           endedAt: data.endedAt,
           odometerEnd: data.odometerEnd,
