@@ -75,7 +75,7 @@ before(async () => {
   segmentB = seg.id;
 
   // A second driver in Company A itself — every test above proves
-  // cross-COMPANY isolation; this is the same-company case F-03 exists for.
+  // cross-COMPANY isolation; this is the same-company case F-11 exists for.
   const driverA2 = await prisma.user.create({
     data: { email: `${TAG}-a2@example.com`, name: `${TAG}-a2`, passwordHash: "not-a-real-hash" },
   });
@@ -192,7 +192,7 @@ test("same-company update, segment work and submit all succeed", async () => {
   const job = await repo.enqueueSubmitJob(ctxB, shiftB);
   assert.equal(job?.companyId, ctxB.companyId);
 });
-// ── Same-company driver isolation (F-03) ─────────────────────────────────────
+// ── Same-company driver isolation (F-11) ─────────────────────────────────────
 // Everything above proves cross-COMPANY isolation. These prove the narrower,
 // previously-untested case: two drivers who share a company must still be
 // isolated from each other's shifts. Today every method below except
