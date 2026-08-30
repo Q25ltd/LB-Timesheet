@@ -15,6 +15,21 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Lifecycle of a driver's day. OPEN = draft | active | finishing.
+/// CLOSED = submitted | voided. The one-open-shift invariant (see
+/// prisma/invariants.sql) keys off exactly this split, so it must be an enum
+/// rather than a string — a typo must not silently create a second open shift.
+///
+/// NOTE: this is the SHIFT lifecycle, not the delivery pipeline. Whether the
+/// PDF was emailed lives on ShiftSubmitJob.status and nowhere else.
+enum ShiftStatus {
+  draft     /// created; checks not yet complete
+  active    /// day underway
+  finishing /// end-of-shift review, not yet submitted
+  submitted /// handed to the outbox — closed
+  voided    /// abandoned — closed
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tenancy
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,9 +48,6 @@ model Company {
   updatedAt    DateTime  @updatedAt
 
   memberships  CompanyMembership[]
-  shifts       Shift[]
-  segments     ShiftSegment[]
-  submitJobs   ShiftSubmitJob[]
 
   @@index([status])
 }
@@ -51,7 +63,6 @@ model User {
   updatedAt    DateTime  @updatedAt
 
   memberships  CompanyMembership[]
-  shifts       Shift[]
 }
 
 /// Joins a driver to a company. Active/inactive lives HERE, not on User —
@@ -71,7 +82,14 @@ model CompanyMembership {
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  shifts     Shift[]
+
   @@unique([companyId, userId])
+  /// Target for Shift's composite foreign key. Referencing (id, companyId,
+  /// userId) as one unit is what makes the database — not application code —
+  /// guarantee that a shift's denormalised companyId and userId agree with the
+  /// membership that authorised it.
+  @@unique([id, companyId, userId])
   @@index([userId, active])
   @@index([companyId, active])
 }
@@ -82,11 +100,23 @@ model CompanyMembership {
 
 /// One driver's working day for ONE company.
 model Shift {
-  id          String    @id @default(cuid())
-  companyId   String
-  userId      String
+  id           String   @id @default(cuid())
+
+  /// THE authority for this shift: the CompanyMembership that existed and was
+  /// active when it was created. Authorization is membership-based (AUTH.md), so
+  /// the record has to be too — otherwise deactivation, company switching and
+  /// "may submit existing work but start nothing new" have nothing to hang off.
+  membershipId String
+
+  /// Denormalised from the membership and constrained to agree with it by the
+  /// composite foreign key below. Kept for efficient tenant queries and for
+  /// child rows to key against. Never authoritative on their own — the database
+  /// will not let them contradict the membership.
+  companyId    String
+  userId       String
+
   /// Snapshot of the driver's name as it should print on the PDF.
-  driverName  String
+  driverName   String
 
   /// Local calendar date the shift is filed under — derived from startedAt, so
   /// a 22:00 → 06:00 shift files under the day it STARTED (O8, provisional).
@@ -94,24 +124,37 @@ model Shift {
   startedAt   DateTime
   endedAt     DateTime?
 
-  /// draft | submitted | sent | failed
-  status      String    @default("draft")
-  submittedAt DateTime?
+  status       ShiftStatus @default(draft)
+  submittedAt  DateTime?
   /// Set when the driver signs the declaration.
-  declaredAt  DateTime?
-  notes       String?
+  declaredAt   DateTime?
+  notes        String?
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  company     Company        @relation(fields: [companyId], references: [id])
-  user        User           @relation(fields: [userId], references: [id])
-  segments    ShiftSegment[]
-  submitJobs  ShiftSubmitJob[]
+  /// One foreign key carrying three guarantees: the membership exists, it
+  /// belongs to this user, and it belongs to this company. No onDelete — the
+  /// default Restrict is deliberate, so a membership carrying history cannot be
+  /// deleted out from under its shifts.
+  membership   CompanyMembership @relation(fields: [membershipId, companyId, userId], references: [id, companyId, userId])
+  segments     ShiftSegment[]
+  submitJobs   ShiftSubmitJob[]
 
+  /// Lets children key on (shiftId, companyId) so the DATABASE — not a code
+  /// convention — guarantees a child can never sit under a different company
+  /// than its parent shift. Redundant against the primary key by design.
+  @@unique([id, companyId])
+
+  // "At most one OPEN shift per user" cannot be expressed in Prisma — it needs a
+  // PARTIAL unique index. The SQL lives in prisma/invariants.sql and must be
+  // appended to the first migration by hand. It is NOT applied by `db push`, so
+  // until that migration exists the invariant is design intent, not enforcement.
   @@index([companyId, shiftDate])
   @@index([companyId, status])
   @@index([userId, shiftDate])
+  @@index([userId, status])
+  @@index([membershipId, shiftDate])
 }
 
 /// An ASSET-USE segment: which truck + trailer, between which times (PRODUCT.md).
@@ -142,8 +185,10 @@ model ShiftSegment {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  company      Company  @relation(fields: [companyId], references: [id])
-  shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  /// Composite key: companyId must match the parent shift's. Enforced by the
+  /// database, not by remembering to filter. companyId reaches Company through
+  /// Shift, so no second relation to Company is needed here.
+  shift        Shift    @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade)
 
   @@unique([shiftId, sequence])
   @@index([companyId, shiftId])
@@ -171,8 +216,8 @@ model ShiftSubmitJob {
   completedAt   DateTime?
   createdAt     DateTime  @default(now())
 
-  company       Company   @relation(fields: [companyId], references: [id])
-  shift         Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  /// Composite key — see ShiftSegment.
+  shift         Shift     @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
   @@index([companyId, shiftId])

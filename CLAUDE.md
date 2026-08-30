@@ -161,18 +161,34 @@ deleted on sight.
 Delete it. Git history is the archive.
 
 ### The rules above are enforced, not just written
-`npm run check:rules` fails the build on: Node older than 22.12, `any`,
-`console.*` in src, inline error sends, `jwt.verify` outside the auth helpers, an
-unbounded `z.string()`, an empty `.catch(() => {})`, `String @default("")` in the
-schema, a tenant model with no `companyId`, **a route reading `companyId` /
-`membershipId` / `userId` from the request** (AUTH.md), and a route file never
-registered in `app.ts`.
+`npm run check:rules` fails the build on: Node older than 22.12 · `any` ·
+`console.*` in src · inline error sends · `jwt.verify` outside the auth helpers ·
+an unbounded `z.string()` · an empty `.catch(() => {})` · `String @default("")` in
+the schema · a tenant model with no `companyId` · a route file never registered in
+`app.ts`.
+
+Plus four rules protecting the tenant boundary (all detailed in AUTH.md):
+
+| Rule | Fails on |
+|---|---|
+| `no-client-tenant` | a **route or service** reading `companyId` from request input — member access, bracket access, or destructuring (including nested and multi-line) |
+| `no-company-id-in-dto` | a Zod schema declaring a `companyId` field |
+| `no-raw-request-past-route` | a route handing `req` / `req.body` / `req.query` / `req.params` to anything other than a schema `parse` |
+| `no-request-in-services` | a service touching a request object at all |
+
+**Only `companyId` is banned.** `membershipId` and `userId` legitimately arrive in
+a body — `POST /auth/switch-company` takes a `membershipId` by design. They must
+be validated against the authenticated user server-side; that rests on tests, not
+on the linter.
 
 Escape hatch: `// rules-ignore: <id>` on the line, **with a reason**. Reaching for
 it often means the rule is wrong — change the rule, don't paper over it.
 
-Before saying "done": `npm run check` (typecheck → rules → knip → tests) from the
-repo root. Never `npm audit fix --force` — see DEVLOG 2026-08-25.
+Before saying "done": `npm run check` from the repo root (typecheck → eslint →
+check-rules → prisma validate → knip → unit tests), **and** `npm run test:db`,
+which needs a live database and is deliberately not part of `check`.
+
+Never `npm audit fix --force` — see DEVLOG 2026-08-25.
 
 ### When in doubt, stop and ask
 Before dropping a column, renaming a status string, changing a default,

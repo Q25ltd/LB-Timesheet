@@ -93,8 +93,12 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 | Area | State |
 |---|---|
-| Schema | ✅ core models — Company, User, CompanyMembership, Shift, ShiftSegment, ShiftSubmitJob |
-| Typecheck / tests / dead-code guards | ✅ `npm run check` green end to end — tsc, check-rules (10 checks), knip, 10 unit tests. Verified on the Mac 2026-08-25 under Node 22.12.0 |
+| Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; validated, generated, migrated |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — tsc, eslint (type-aware), check-rules (15 checks), prisma validate, knip, 52 unit tests |
+| Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
+| CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
+| Database tenant-integrity proof | ✅ 12/12 against a clean database built by `migrate deploy` (2026-08-30). Includes membership-binding (D15) and one-open-shift, on create AND update. Still outside `npm run check` — F-04 remains open |
+| First migration | ✅ `api/prisma/migrations/20260830132905_init` — includes invariants.sql; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
 | CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to `npm run check` — not yet re-verified green |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |

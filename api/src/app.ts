@@ -1,18 +1,31 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import type { PrismaClient } from "./generated/client.js";
 import { env } from "./lib/env.js";
+import { allowedOrigins } from "./lib/env.schema.js";
 
-export async function buildApp(prisma: PrismaClient): Promise<FastifyInstance> {
+/**
+ * Only the surface the app actually uses today. Structural rather than a Pick of
+ * PrismaClient, so a test can build the app without a database — and so widening
+ * it later is a deliberate act. PrismaClient satisfies this.
+ */
+export interface AppDatabase {
+  $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
+}
+
+export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   const app = Fastify({
     logger: env.NODE_ENV === "development" ? { transport: undefined, level: "info" } : true,
   });
 
-  await app.register(cors, { origin: true, credentials: true });
+  // An explicit, normalised allowlist — never `origin: true`, which reflects
+  // whatever Origin the caller sent and lets any site read the response.
+  // `credentials` stays false: authority travels in an Authorization header
+  // (AUTH.md), not a cookie. Enabling it is an architectural change.
+  await app.register(cors, { origin: allowedOrigins(env), credentials: false });
+
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
 
-  // Health — the only public route for now.
   app.get("/health", async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
     return {

@@ -207,6 +207,34 @@ serverless platform reintroduces the same failure in a form no retry can fix.
 Also relevant: persistent Postgres connections, and the advisory lock that stops
 two instances double-processing the same job.
 
+### D15 — A Shift is owned by a CompanyMembership; one open shift per user (2026-08-30)
+Chosen: membership is the authority, with `companyId`/`userId` retained as
+denormalised fields that the **database** forces to agree with it. One composite
+foreign key — `(membershipId, companyId, userId)` referencing the membership's
+`@@unique([id, companyId, userId])` — carries all three guarantees: the
+membership exists, it belongs to this user, and it belongs to this company. A
+shift row cannot contradict the relationship that authorised it.
+
+Rejected: `userId + companyId` only (structurally valid rows with no authorising
+relationship — everything AUTH.md hangs off deactivation and switching would
+need application checks); `membershipId` alone (loses efficient tenant querying
+and the child composite FKs that key on companyId).
+
+Deletion of a membership carrying history is `Restrict`ed — history cannot be
+orphaned by an admin action.
+
+**Shift lifecycle is now an enum**: `draft | active | finishing` are OPEN;
+`submitted | voided` are CLOSED. Email delivery state lives on `ShiftSubmitJob`,
+never on the shift.
+
+**One open shift per user, across all companies** — a driver has one body; even
+with several memberships he cannot be on shift for two companies at once, and
+AUTH.md's "no switch while a shift is open" needs at most one open shift to
+reason about. Needs a PARTIAL unique index, which Prisma cannot express: the SQL
+lives in `api/prisma/invariants.sql` and must be appended to the first migration
+by hand. **Until that migration exists this invariant is design intent, not
+enforcement.**
+
 ---
 
 ## ❓ Open — ask the user, do not guess

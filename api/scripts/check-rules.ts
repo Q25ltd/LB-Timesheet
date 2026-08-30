@@ -11,6 +11,12 @@
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  readsCompanyIdByMemberAccess,
+  findRequestDestructures,
+  passesRawRequestToCall,
+  declaresCompanyIdInSchema,
+} from "./rules/tenantPatterns.js";
 import { join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +32,7 @@ const REQUIRED_NODE_MINOR = 12;
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
   if (major < REQUIRED_NODE_MAJOR || (major === REQUIRED_NODE_MAJOR && minor < REQUIRED_NODE_MINOR)) {
     console.error(
-      `\n\u2717 Node ${process.versions.node} is too old \u2014 this repo needs ` +
+      `\n✗ Node ${process.versions.node} is too old — this repo needs ` +
       `${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR}+.\n\n` +
       `  Run:  nvm use\n\n` +
       `  It reverts in every new terminal. To fix permanently, add nvm's\n` +
@@ -148,6 +154,12 @@ schemaText.split("\n").forEach((line, i) => {
 const GLOBAL_MODELS = new Set([
   "User",     // global person identity — a driver spans companies (D12)
   "Company",  // is the tenant
+  // AUTH.md: a Session is one authenticated device and SURVIVES company
+  // switching, so it belongs to the User, not to a Company. Listed here before
+  // the model exists, because otherwise this rule would flag it and the fastest
+  // way to a green build would be to add companyId — silently breaking the
+  // frozen contract. Do not "fix" Session by giving it a companyId.
+  "Session",
 ]);
 
 for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {
@@ -164,18 +176,74 @@ for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {
   }
 }
 
-// ── 9. Tenant identity never comes from the client ───────────────────────────
-// AUTH.md: a companyId/membershipId/userId in a request body, query or params is
-// never authority. The value comes from the verified token via AuthContext.
+// ── companyId never comes from the client ────────────────────────────────────
+// AUTH.md: tenant authority comes from the verified token via AuthContext.
+// ONLY companyId is banned — membershipId and userId legitimately arrive in a
+// body (POST /auth/switch-company takes a membershipId by design). Those are
+// validated against the authenticated user server-side, which tests enforce.
+//
+// Predicates live in ./rules/tenantPatterns.ts and each is independently tested.
+// Applied to routes AND services: routes should never receive raw input past the
+// boundary (see the next rule), but defence in depth costs nothing here.
+const TENANT_SCANNED = (file: string) =>
+  /[/\\](?:routes|services)[/\\]/.test(file) && !file.endsWith(".test.ts");
+
 scan(
   "no-client-tenant",
-  "Tenant identity must come from AuthContext, never from the request. See AUTH.md.",
-  line => {
-    const code = line.replace(/\/\/.*$/, "");
-    return /\b(req|request)\s*\.\s*(body|query|params)\b[^;]*\b(companyId|membershipId|userId)\b/.test(code)
-        || /\b(body|query|params)\s*\.\s*(companyId|membershipId|userId)\b/.test(code);
-  },
+  "companyId must come from AuthContext, never from request input. See AUTH.md.",
+  line => readsCompanyIdByMemberAccess(line),
+  TENANT_SCANNED,
+);
+
+// Destructuring needs whole-file brace matching — nested and multi-line forms
+// are invisible to a per-line scan.
+for (const file of files) {
+  if (!TENANT_SCANNED(file)) continue;
+  const source = readFileSync(file, "utf8");
+  const lines = source.split("\n");
+  for (const hit of findRequestDestructures(source)) {
+    const raw = lines[hit.line - 1] ?? hit.text;
+    if (raw.includes("rules-ignore: no-client-tenant")) continue;
+    report(
+      "no-client-tenant", file, hit.line - 1, hit.text,
+      "companyId must come from AuthContext, never from request input. See AUTH.md.",
+    );
+  }
+}
+
+// ── No Zod DTO accepts companyId ─────────────────────────────────────────────
+// A route may parse a body into a DTO and hand the DTO to a service. If the
+// schema accepts companyId, client tenant identity crosses the boundary through
+// an otherwise-compliant route. membershipId/userId stay legal (switch-company).
+scan(
+  "no-company-id-in-dto",
+  "A request schema must not accept companyId — it comes from AuthContext. See AUTH.md.",
+  line => declaresCompanyIdInSchema(line),
+  file => !file.endsWith(".test.ts"),
+);
+
+// ── Raw request input never crosses into a service ───────────────────────────
+// request -> route parses/validates -> service(AuthContext, DTO) -> repository.
+// Handing `req.body` to a service defeats every rule above: routes are scanned,
+// services hold the query, and the unvalidated object crosses between them.
+// `Schema.parse(req.body)` is exempt — that is how a DTO is produced.
+scan(
+  "no-raw-request-past-route",
+  "Parse request input into a DTO first; services take (AuthContext, DTO). See AUTH.md.",
+  line => passesRawRequestToCall(line) !== null,
   file => /[/\\]routes[/\\]/.test(file) && !file.endsWith(".test.ts"),
+);
+
+// ── Services never touch request input ───────────────────────────────────────
+// A service that reads .body/.query/.params has been handed a request object,
+// which the boundary rule above forbids. Belt and braces on the same boundary.
+scan(
+  "no-request-in-services",
+  "Services receive (AuthContext, validated DTO) — never a request object.",
+  line => /\b(?:req|request)\b\s*\.\s*(?:body|query|params)\b|\breq(?:uest)?\s*[,)]/.test(
+    line.replace(/\/\/.*$/, ""),
+  ),
+  file => /[/\\]services[/\\]/.test(file) && !file.endsWith(".test.ts"),
 );
 
 // ── Routes never touch Prisma directly ───────────────────────────────────────
@@ -193,7 +261,7 @@ scan(
   file => /[/\\]routes[/\\]/.test(file) && !file.endsWith(".test.ts"),
 );
 
-// ── 10. Route files must actually be registered ──────────────────────────────
+// ── 9. Route files must actually be registered ───────────────────────────────
 const routesDir = join(SRC, "routes");
 let routeFiles: string[] = [];
 try {

@@ -14,10 +14,13 @@
     "studio": "prisma studio",
     "seed": "tsx scripts/seed.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test --test-timeout=30000 $(find src -name \"*.test.ts\")",
+    "test": "node --import tsx/esm --test --test-timeout=30000 $(find src scripts -name \"*.test.ts\" -not -path \"*/tests/db/*\")",
     "check": "npm run typecheck && npm run check:rules && npm run validate && npm test",
     "check:rules": "tsx scripts/check-rules.ts",
-    "validate": "prisma validate"
+    "validate": "prisma validate",
+    "lint": "eslint .",
+    "test:db": "node --import tsx/esm --test --test-timeout=60000 $(find src/tests/db -name \"*.test.ts\")",
+    "migrate:baseline": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

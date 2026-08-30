@@ -1,19 +1,131 @@
 import { z } from "zod";
 
 /**
- * Pure environment validation — no side effects, no process.exit, safe to
- * import from a test. The loading and the exit-on-failure live in env.ts.
+ * Origins allowed when running development or test WITHOUT an explicit
+ * WEB_ORIGIN. Stated here rather than implied — there is no implicit fallback
+ * anywhere else in the CORS path.
  */
-export const EnvSchema = z.object({
+export const DEV_ORIGINS = [
+  "http://localhost:5173", // Vite dev server (web app)
+  "http://localhost:4173", // Vite preview
+] as const;
+
+const NODE_ENVS = ["development", "test", "production"] as const;
+export type NodeEnv = (typeof NODE_ENVS)[number];
+
+/**
+ * Only these two relax the CORS requirement. Note that NODE_ENV is OPTIONAL in
+ * the schema: an unset NODE_ENV is NOT development. A deploy that forgets to set
+ * it must fail closed, not inherit developer defaults.
+ */
+function isDevLike(nodeEnv: NodeEnv | undefined): boolean {
+  return nodeEnv === "development" || nodeEnv === "test";
+}
+
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * Validate and NORMALISE one origin. Returns the canonical `scheme://host`
+ * form, or null when the value cannot be used as a CORS origin.
+ *
+ * Rejects: "*", any host containing "*", non-https schemes (except http on
+ * localhost when permitted), userinfo, and anything carrying a path, query,
+ * fragment or trailing slash.
+ *
+ * Normalises case and the default port, so `https://A.Example.COM:443` becomes
+ * `https://a.example.com` — which is what a browser actually sends in Origin.
+ */
+export function normaliseOrigin(
+  raw: string,
+  options: { allowInsecureLocalhost: boolean },
+): string | null {
+  const value = raw.trim();
+  if (value === "" || value === "*" || value === "null") return null;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (url.hostname.includes("*")) return null;          // https://*.example.com
+  if (url.username !== "" || url.password !== "") return null;
+  if (url.pathname !== "/" || url.search !== "" || url.hash !== "") return null;
+  if (/\/$/.test(value) || value.split("//")[1]?.includes("/")) return null;
+
+  const isLocalhost = LOCALHOST_HOSTS.has(url.hostname);
+  if (url.protocol === "https:") return url.origin;
+  if (url.protocol === "http:" && options.allowInsecureLocalhost && isLocalhost) return url.origin;
+  return null;
+}
+
+const BaseEnv = z.object({
   DATABASE_URL:     z.string().min(1, "DATABASE_URL is required").max(500),
   JWT_SECRET:       z.string().min(32, "JWT_SECRET must be at least 32 characters").max(500),
   SENDGRID_API_KEY: z.string().max(200).default(""),
   MAIL_FROM:        z.string().max(320).default("timesheets@logisticbay.com"),
+  /** Comma-separated origins allowed to call this API. */
+  WEB_ORIGIN:       z.string().max(2000).default(""),
   PORT:             z.coerce.number().int().positive().max(65535).default(3000),
-  NODE_ENV:         z.enum(["development", "test", "production"]).default("development"),
+  /** Optional on purpose — see isDevLike. */
+  NODE_ENV:         z.enum(NODE_ENVS).optional(),
 });
 
+export const EnvSchema = BaseEnv
+  .superRefine((value, ctx) => {
+    const devLike = isDevLike(value.NODE_ENV);
+    const configured = splitOrigins(value.WEB_ORIGIN);
+
+    if (!devLike && configured.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["WEB_ORIGIN"],
+        message:
+          "WEB_ORIGIN is required unless NODE_ENV is explicitly development or test " +
+          "(comma-separated https origins)",
+      });
+      return;
+    }
+
+    for (const origin of configured) {
+      if (normaliseOrigin(origin, { allowInsecureLocalhost: devLike }) === null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["WEB_ORIGIN"],
+          message:
+            `"${origin}" is not a usable origin — expected scheme://host with no ` +
+            `path, no trailing slash, no wildcard` +
+            (devLike ? " (http allowed only on localhost)" : ", https only"),
+        });
+      }
+    }
+  })
+  .transform(value => ({ ...value, NODE_ENV: value.NODE_ENV ?? "development" }));
+
 export type Env = z.infer<typeof EnvSchema>;
+
+/** Split a comma-separated origin list, trimming blanks. */
+export function splitOrigins(raw: string): string[] {
+  return raw.split(",").map(s => s.trim()).filter(s => s.length > 0);
+}
+
+/**
+ * The effective CORS allowlist, normalised. Every entry goes through
+ * normaliseOrigin here — validation does not live only in the schema, so this
+ * function's guarantee holds however it is called.
+ *
+ * Never returns "*". Returns [] rather than anything permissive when misconfigured.
+ */
+export function allowedOrigins(env: { WEB_ORIGIN: string; NODE_ENV?: NodeEnv | undefined }): string[] {
+  const devLike = isDevLike(env.NODE_ENV);
+  const configured = splitOrigins(env.WEB_ORIGIN);
+  const source = configured.length > 0 ? configured : devLike ? [...DEV_ORIGINS] : [];
+  const normalised = source
+    .map(origin => normaliseOrigin(origin, { allowInsecureLocalhost: devLike }))
+    .filter((origin): origin is string => origin !== null);
+  return [...new Set(normalised)];
+}
 
 /** Human-readable reason a set of environment values is unusable. */
 export function describeEnvFailure(error: z.ZodError): string {

@@ -172,10 +172,54 @@ Denied:
 ### Client-supplied tenant identifiers
 
 A `companyId`, `membershipId` or `userId` arriving in a request body, query or
-path is **never** authority. Enforced mechanically: `check-rules` fails the build
-if anything under `src/routes/` reads them from the request.
+path is **never** authority.
 
----
+### `companyId` is enforced mechanically, by four rules
+
+| Rule | Scope | Fails on |
+|---|---|---|
+| `no-client-tenant` | routes **and** services | reading `companyId` from `body`/`query`/`params` — member access (`req.body.companyId`), bracket access (`req.body["companyId"]`), any receiver name, and destructuring including **nested** and **multi-line** |
+| `no-company-id-in-dto` | all source | a Zod schema declaring a `companyId` field |
+| `no-raw-request-past-route` | routes | handing `req`, `req.body`, `req.query` or `req.params` to anything except a schema `parse`/`safeParse` |
+| `no-request-in-services` | services | touching a request object at all |
+
+Together these close the four paths client tenant identity could take:
+read it directly, alias the request first, declare it on a DTO the route parses,
+or pass the whole request object onward for a service to read.
+
+Predicates live in `api/scripts/rules/tenantPatterns.ts`; each mechanism is
+independently unit-tested, so removing any one of them makes a specific test fail.
+
+### `membershipId` and `userId` are deliberately NOT banned
+
+They legitimately arrive in a body — `POST /auth/switch-company` takes a
+`membershipId` by design. They must be **validated against the authenticated
+user** server-side, never trusted. No pattern can distinguish "received and
+validated" from "trusted as authority", so that guarantee rests on the contract
+tests below (6, 7), not on the linter. **Do not weaken those tests.**
+
+### The trust boundary
+
+```
+request
+  → route: parse and validate into a DTO
+  → auth middleware: trusted AuthContext
+  → service(AuthContext, DTO)
+  → repository / Prisma
+```
+
+A service never sees a request object, and a DTO never carries `companyId`.
+Tenant authority enters only through `AuthContext`.
+
+### Honest limitations
+
+- A `rules-ignore: <id>` comment silences any rule on a line. Nothing verifies a
+  reason is given, and nothing counts how many exist.
+- Detection is text-based, not AST-based. Sufficiently indirect code — several
+  aliases deep, or dynamic property access — will pass.
+- The tenant-isolation contract tests (15–17) are what actually **prove**
+  isolation. The rules raise the cost of the mistake; they do not replace the
+  tests.
 
 ## Contract tests — write these before the implementation
 
