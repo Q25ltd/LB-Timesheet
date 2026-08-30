@@ -8,10 +8,11 @@
     "test": "npm test --prefix api",
     "check:rules": "npm run check:rules --prefix api",
     "knip": "knip",
-    "check": "npm run typecheck && npm run lint && npm run check:rules && npm run validate:schema && npm run knip && npm test",
+    "check": "npm run generate && npm run typecheck && npm run lint && npm run check:rules && npm run validate:schema && npm run knip && npm test && npm run test:db",
     "lint": "eslint .",
     "validate:schema": "npm run validate --prefix api",
-    "test:db": "npm run test:db --prefix api"
+    "test:db": "npm run test:db --prefix api",
+    "generate": "npm run generate --prefix api"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

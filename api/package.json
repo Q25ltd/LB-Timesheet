@@ -19,8 +19,9 @@
     "check:rules": "tsx scripts/check-rules.ts",
     "validate": "prisma validate",
     "lint": "eslint .",
-    "test:db": "node --import tsx/esm --test --test-timeout=60000 $(find src/tests/db -name \"*.test.ts\")",
-    "migrate:baseline": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script"
+    "test:db": "tsx scripts/db-check.ts",
+    "migrate:baseline": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "test:db:run": "node --import tsx/esm --test --test-timeout=60000 $(find src/tests/db -name \"*.test.ts\")"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -41,7 +42,9 @@
     "@types/node": "^25.6.0",
     "@types/pdfkit": "^0.17.5",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "pg": "^8.16.0",
+    "@types/pg": "^8.11.10"
   },
   "engines": {
     "node": ">=22.12.0"

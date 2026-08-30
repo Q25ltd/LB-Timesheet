@@ -48,12 +48,11 @@ jobs:
       - name: Install (api)
         run: npm ci --prefix api
 
-      - name: Push schema
-        run: npm run db:push --prefix api
-
       # Deliberately ONE command, identical to what a developer runs locally:
-      # typecheck -> eslint -> check-rules -> prisma validate -> knip -> tests.
-      # Adding a gate to `npm run check` adds it to CI automatically, so the two
-      # can never drift. Do not re-list the steps individually here.
+      # generate -> typecheck -> eslint -> check-rules -> prisma validate ->
+      # knip -> unit tests -> db integrity tests. The db step provisions its own
+      # clean database from DATABASE_URL's server and applies REAL migrations
+      # with `prisma migrate deploy` — never `db push`. Adding a gate to
+      # `npm run check` adds it to CI automatically; do not re-list steps here.
       - name: Check
         run: npm run check

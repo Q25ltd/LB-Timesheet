@@ -97,7 +97,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — tsc, eslint (type-aware), check-rules (15 checks), prisma validate, knip, 52 unit tests |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
-| Database tenant-integrity proof | ✅ 12/12 against a clean database built by `migrate deploy` (2026-08-30). Includes membership-binding (D15) and one-open-shift, on create AND update. Still outside `npm run check` — F-04 remains open |
+| Database tenant-integrity proof | ✅ 12/12 against a clean database built by `migrate deploy` (2026-08-30). Includes membership-binding (D15) and one-open-shift, on create AND update. Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed pending a green run |
 | First migration | ✅ `api/prisma/migrations/20260830132905_init` — includes invariants.sql; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
 | CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to `npm run check` — not yet re-verified green |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
