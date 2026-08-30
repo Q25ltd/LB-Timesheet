@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
 import { allowedOrigins } from "./lib/env.schema.js";
 import { AppError, registerErrorHandling } from "./lib/errors.js";
+import { requireAuth } from "./lib/auth.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -25,6 +26,26 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // (AUTH.md), not a cookie. Enabling it is an architectural change.
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
 
+  // F-04: every route is authenticated by default. A route becomes public
+  // only through the explicit `config: { public: true }` marker below --
+  // never by omission, and never by living outside some protected structure.
+  // Registered on the root instance before any route, so Fastify's
+  // encapsulation model applies it to every route added afterwards --
+  // including ones later split into their own plugin files -- with no
+  // registration path that skips it.
+  //
+  // Placed AFTER `cors` and BEFORE `rateLimit`: a CORS preflight carries no
+  // Authorization header by design, and cors's own onRequest hook already
+  // replies to OPTIONS and ends the hook chain before this one runs, so
+  // preflight is never blocked here. Placed before rate-limiting so a
+  // rejected request is denied as cheaply as possible, without spending a
+  // rate-limit slot on a request that was never getting through.
+  app.addHook("onRequest", async (request) => {
+    if (request.is404) return; // no route matched -- let 404 handling run
+    if (request.routeOptions.config.public === true) return;
+    await requireAuth(request);
+  });
+
   await app.register(rateLimit, {
     max: 300,
     timeWindow: "1 minute",
@@ -39,7 +60,7 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // own shape and a 500 echoes the exception message to the client.
   registerErrorHandling(app);
 
-  app.get("/health", async () => {
+  app.get("/health", { config: { public: true } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
     return {
       status:  dbOk ? "ok" : "degraded",

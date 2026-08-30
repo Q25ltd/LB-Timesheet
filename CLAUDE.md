@@ -140,9 +140,16 @@ postcodes at 16, vehicle registrations at 16. User-visible strings also `.trim()
 All API errors use `{ error: string, code?: string, details?: unknown }` via
 shared helpers. No inline `reply.status(4xx).send({ error: "..." })`.
 
-### Auth lives in middleware only
-No `jwt.verify` outside the auth middleware / token helpers. Every route touching
-company or driver data declares its auth preHandler.
+### Every route is protected by default
+A root `onRequest` hook in `app.ts` rejects every request unless the matched
+route is explicitly marked `config: { public: true }` (F-04). A route is
+closed the moment it is registered — including inside a child plugin — with
+no preHandler for the author to remember. Making a route public is the
+deliberate, visible exception, not the default. `requireAuth()` in
+`src/lib/auth.ts` is the one place that decides who gets through; no
+`jwt.verify` outside it or the token helpers. `check-rules`' `route-declares-auth`
+enforces only that every registration states its posture — the hook above is
+what actually protects the route, not the static check.
 
 ### Tenant scoping is the law
 Every read filters by `companyId` from the JWT. Every write includes `companyId`

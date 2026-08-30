@@ -14,3 +14,4 @@ const {
   companyId: crossLine,
 } = req.query;
 reply.code(404).send({ error: "inline via code()" });
+app.get("/leaky", handler);

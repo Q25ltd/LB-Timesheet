@@ -119,6 +119,27 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Subscription enforcement | 🔲 |
 | Driver activation-code onboarding | 🔲 |
 
+## Known limitations / cleanup backlog
+
+Tooling gaps that are accepted for now, not blocking, and not forgotten.
+
+- **`route-declares-auth` static check has a parser gap (F-04, 2026-08-30).**
+  `api/scripts/rules/routePatterns.ts`'s paren-depth matcher tracks nesting
+  but not quote/string state (unlike `stripComments`). A route handler
+  containing an unbalanced `(` inside a string or template literal can make
+  the matcher's span overrun past the handler and pick up an unrelated
+  `public:` key elsewhere in the file — a false negative where a genuinely
+  undeclared route is silently treated as declared by the static check.
+  **Not a runtime security gap**: the real enforcement boundary is the
+  default-deny `onRequest` hook in `app.ts`, which has no such blind spot and
+  rejects the request regardless of what the static check saw. Demonstrated
+  with two constructed repro cases during F-04's adversarial review
+  (2026-08-30); accepted as-is rather than expanding F-04's scope to harden a
+  secondary guardrail. Cleanup: teach the paren matcher to track quote state
+  the way `stripComments` already does.
+
+---
+
 ## Infrastructure
 
 | Area | State |

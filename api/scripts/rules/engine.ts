@@ -8,6 +8,7 @@ import {
   passesRawRequestToCall,
   declaresCompanyIdInSchema,
 } from "./tenantPatterns.js";
+import { findUndeclaredRouteRegistrations } from "./routePatterns.js";
 
 
 export interface Violation { id: string; file: string; line: number; text: string; why: string }
@@ -284,6 +285,34 @@ if (routeFiles.length > 0) {
         "Written but never registered in app.ts. Register it, or delete the file.",
       );
     }
+  }
+}
+
+// ── 10. Every route registration declares its auth posture ──────────────────
+// Policy enforcement, not the security boundary: the default-deny `onRequest`
+// hook in app.ts (F-04) protects a route whether or not this rule ever sees
+// it, or even exists. This rule only forces `public: true`/`public: false` to
+// be written down at the call site, so a reviewer sees the posture on read
+// instead of having to know the hook's default by heart. Scoped to app.ts
+// (where /health is registered) and src/routes/* (where feature routes will
+// live) -- not the whole tree, so an unrelated `.get(`/`.post(` style call
+// elsewhere (a Map, a cache, an HTTP client) is never in scope to begin with.
+// See routePatterns.ts for the matching predicate and its documented limits.
+const ROUTE_REGISTRATION_SCANNED = (file: string) =>
+  (file === join(SRC, "app.ts") || /[/\\]routes[/\\]/.test(file)) && !file.endsWith(".test.ts");
+
+for (const file of files) {
+  if (!ROUTE_REGISTRATION_SCANNED(file)) continue;
+  const source = readFileSync(file, "utf8");
+  const lines = source.split("\n");
+  for (const hit of findUndeclaredRouteRegistrations(source)) {
+    const raw = lines[hit.line - 1] ?? hit.text;
+    if (raw.includes("rules-ignore: route-declares-auth")) continue;
+    report(
+      "route-declares-auth", file, hit.line - 1, hit.text,
+      "Every route registration must declare `public: true` or `public: false` in its config. " +
+      "The default-deny onRequest hook in app.ts is the real boundary -- this just makes the posture visible. See F-04.",
+    );
   }
 }
 

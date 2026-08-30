@@ -101,3 +101,64 @@ test("/health reports degraded when the query fails", async () => {
   assert.equal(parsed.db, "down");
   await app.close();
 });
+
+// ── F-04: default-deny routing ───────────────────────────────────────────────
+// The invariant: every route is authenticated by default. A route becomes
+// unauthenticated only by an explicit `config: { public: true }` marker — not
+// by omission, not by living outside some protected structure. Registered
+// here, after buildApp() returns, exactly the way any future feature route
+// would be added: no config, no preHandler wired by hand. That is the whole
+// point — this must be denied WITHOUT the route author doing anything extra.
+test("a newly registered route with no auth marker is protected by default (F-04)", async () => {
+  const app = await buildApp(db);
+  app.get("/test-only/unmarked", () => ({ ok: true }));
+  const res = await app.inject({ method: "GET", url: "/test-only/unmarked" });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.json(), { error: "Not authenticated", code: "UNAUTHENTICATED" });
+  await app.close();
+});
+
+test("a route with a config object that omits public stays protected (F-04)", async () => {
+  const app = await buildApp(db);
+  // `config` present but empty -- distinct from the no-config case above.
+  // Anything short of an exact `public: true` must fail closed.
+  app.get("/test-only/empty-config", { config: {} }, () => ({ ok: true }));
+  const res = await app.inject({ method: "GET", url: "/test-only/empty-config" });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.json(), { error: "Not authenticated", code: "UNAUTHENTICATED" });
+  await app.close();
+});
+
+test("a route explicitly marked public: false stays protected (F-04)", async () => {
+  const app = await buildApp(db);
+  app.get("/test-only/explicitly-private", { config: { public: false } }, () => ({ ok: true }));
+  const res = await app.inject({ method: "GET", url: "/test-only/explicitly-private" });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.json(), { error: "Not authenticated", code: "UNAUTHENTICATED" });
+  await app.close();
+});
+
+test("a route explicitly marked public: true is let through (F-04)", async () => {
+  const app = await buildApp(db);
+  app.get("/test-only/public", { config: { public: true } }, () => ({ ok: true }));
+  const res = await app.inject({ method: "GET", url: "/test-only/public" });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json(), { ok: true });
+  await app.close();
+});
+
+test("a route registered inside a child plugin is still denied by default -- no registration path skips the guard (F-04)", async () => {
+  const app = await buildApp(db);
+  // Registered the way a real feature would eventually split routes into
+  // their own plugin file: app.register(subPlugin). The guard hook was
+  // added on the root instance before this registration, so Fastify's
+  // encapsulation model must still apply it here -- proving the "cannot
+  // bypass by registering directly" guarantee is structural, not incidental.
+  await app.register((child) => {
+    child.get("/test-only/child-plugin-route", () => ({ ok: true }));
+  });
+  const res = await app.inject({ method: "GET", url: "/test-only/child-plugin-route" });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.json(), { error: "Not authenticated", code: "UNAUTHENTICATED" });
+  await app.close();
+});

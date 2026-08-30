@@ -38,6 +38,7 @@ const EXPECTED_BAD = [
   "no-raw-request-past-route  src/routes/leaky.ts:7",
   "no-request-in-services  src/services/svc.ts:1",
   "no-request-in-services  src/services/svc.ts:2",
+  "route-declares-auth  src/routes/leaky.ts:17",
   "route-registered  src/routes/leaky.ts:1",
   "schema-nullable  prisma/schema.prisma:3",
   "tenant-context-trust-sites  src/services/svc.ts:4",
@@ -60,7 +61,7 @@ test("every rule in the engine fires at least once on the bad tree", () => {
     "no-empty-catch", "schema-nullable", "tenant-scoped", "no-client-tenant",
     "no-company-id-in-dto", "no-raw-request-past-route", "no-request-in-services",
     "tenant-models-via-repository", "tenant-context-trust-sites",
-    "no-prisma-in-routes", "route-registered",
+    "no-prisma-in-routes", "route-registered", "route-declares-auth",
   ];
   for (const id of ROSTER) {
     assert.ok(firedIds.has(id), `rule "${id}" never fires on the bad fixture — unwired or fixture gap`);

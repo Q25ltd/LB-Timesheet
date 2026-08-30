@@ -33,16 +33,21 @@ function envelope(payload: unknown): z.infer<typeof Envelope> {
  */
 async function appWithFailingRoutes(): Promise<FastifyInstance> {
   const app = await buildApp(db);
+  // F-04 protects every route by default, these included -- these routes
+  // exist only to exercise error-envelope masking (F-05), not auth, so they
+  // are deliberately marked public rather than fighting the default-deny
+  // guard with a fake authenticated request.
   app.post("/boom-sync", {
+    config: { public: true },
     schema: { body: { type: "object", required: ["truckReg"], properties: { truckReg: { type: "string" } } } },
   }, () => {
     throw new Error("INTERNAL-MARKER sync: pg password=hunter2 at /Users/nk/secret.ts:12");
   });
-  app.get("/boom-async", async () => {
+  app.get("/boom-async", { config: { public: true } }, async () => {
     await Promise.resolve();
     throw new Error("INTERNAL-MARKER async: PrismaClientKnownRequestError P2002 on Shift_one_open_per_user");
   });
-  app.get("/deliberate", () => {
+  app.get("/deliberate", { config: { public: true } }, () => {
     throw new AppError(409, "Shift already submitted", "SHIFT_ALREADY_SUBMITTED", { shiftId: "abc" });
   });
   return app;
@@ -120,7 +125,9 @@ test("an unknown error with a fabricated 4xx statusCode is masked, not trusted",
   // therefore pass through" — anything else, whatever it claims, is masked
   // the same way an unlabelled 500 already is.
   const app = await buildApp(db);
-  app.get("/teapot", () => {
+  // Same reasoning as appWithFailingRoutes: this route tests error masking,
+  // not auth, so it is deliberately public under F-04's default-deny.
+  app.get("/teapot", { config: { public: true } }, () => {
     const error = new Error("INTERNAL-MARKER fabricated: rate limit exceeded, retry in 1 minute") as Error & {
       statusCode: number;
     };
