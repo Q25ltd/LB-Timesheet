@@ -186,7 +186,7 @@ for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {
 // Applied to routes AND services: routes should never receive raw input past the
 // boundary (see the next rule), but defence in depth costs nothing here.
 const TENANT_SCANNED = (file: string) =>
-  /[/\\](?:routes|services)[/\\]/.test(file) && !file.endsWith(".test.ts");
+  /[/\\](?:routes|services|repositories)[/\\]/.test(file) && !file.endsWith(".test.ts");
 
 scan(
   "no-client-tenant",
@@ -249,6 +249,32 @@ scan(
 // ── Routes never touch Prisma directly ───────────────────────────────────────
 // A route that can reach the database can also forget to scope the query.
 // Routes call a service; the service takes AuthContext and owns the where clause.
+// ── Tenant models are reached through the repository, nowhere else ───────────
+// prisma.shift / prisma.shiftSegment / prisma.shiftSubmitJob outside
+// src/repositories is an ID-only-query waiting to happen: the repository is
+// where selectors get their companyId from TenantContext. Global models
+// (user, company, companyMembership), $queryRaw, tests, seeds and the
+// generated client itself stay unrestricted. Guardrail, not proof — the proof
+// is src/tests/db/repositoryTenantBoundary.test.ts.
+scan(
+  "tenant-models-via-repository",
+  "Shift/ShiftSegment/ShiftSubmitJob queries live in src/repositories — use shiftRepository with a TenantContext.",
+  line => /\bprisma\s*\.\s*(?:shift|shiftSegment|shiftSubmitJob)\s*\./.test(line.replace(/\/\/.*$/, "")),
+  file => !/[/\\](?:repositories|tests|generated)[/\\]/.test(file) && !file.endsWith(".test.ts"),
+);
+
+// ── TenantContext.trust is a liability, not a convenience ────────────────────
+// The one constructor for trusted tenant identity. Legitimate call sites:
+// the auth middleware (src/lib/auth*, src/plugins/*), tests and seeds. A
+// route or service calling trust() is laundering client input into authority.
+scan(
+  "tenant-context-trust-sites",
+  "TenantContext.trust() may only be called from auth middleware, tests or seeds. See tenantContext.ts.",
+  line => /\bTenantContext\s*\.\s*trust\s*\(/.test(line.replace(/\/\/.*$/, "")),
+  file => !/[/\\](?:tests|plugins)[/\\]|lib[/\\]auth|lib[/\\]tenantContext\.ts$|scripts[/\\]seed/.test(file)
+       && !file.endsWith(".test.ts"),
+);
+
 scan(
   "no-prisma-in-routes",
   "Routes must not import Prisma. Go through a service that takes AuthContext. See AUTH.md.",
