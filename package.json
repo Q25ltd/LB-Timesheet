@@ -1,0 +1,17 @@
+{
+  "name": "lb-timesheet",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix api",
+    "typecheck": "npm run typecheck --prefix api",
+    "test": "npm test --prefix api",
+    "check:rules": "npm run check:rules --prefix api",
+    "knip": "knip",
+    "check": "npm run typecheck && npm run check:rules && npm run knip && npm test"
+  },
+  "devDependencies": {
+    "knip": "^6.14.2"
+  },
+  "engines": { "node": ">=22.12.0" }
+}

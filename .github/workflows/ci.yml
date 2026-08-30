@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/lb_timesheet_test
+      JWT_SECRET: ci-secret-at-least-thirty-two-characters-long
+      NODE_ENV: test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: lb_timesheet_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install
+        run: npm ci --prefix api
+
+      - name: Typecheck
+        run: npm run typecheck --prefix api
+
+      - name: Rules (CLAUDE.md, enforced)
+        run: npm run check:rules --prefix api
+
+      - name: Dead code and unused dependencies
+        run: npx knip
+
+      - name: Push schema
+        run: npm run db:push --prefix api
+
+      - name: Tests
+        run: npm test --prefix api

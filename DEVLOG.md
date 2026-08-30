@@ -1,0 +1,329 @@
+# LogisticBay Timesheets — Devlog
+
+> Newest entry first. What was built, what was decided, what was deferred.
+
+---
+
+## 2026-08-25 — Auth contract designed and frozen (no code yet)
+
+Deliberately designed and written down **before** implementation, on the grounds
+that every protected route inherits whatever auth gets built — so a mistake here
+is not a refactor, it is a rewrite of every route.
+
+Full contract in the new **AUTH.md**; decision summary as D13.
+
+**A correction worth recording.** The claim that putting `companyId` in the token
+makes scoping "automatic" was wrong, and the user pushed back on it. It does not.
+It removes the client from the decision and gives the server a claim to validate
+against — prevention still requires middleware resolving a trusted AuthContext,
+every query using it, and something stopping a developer reaching past it.
+
+That last part is now mechanical: `check-rules` gained a **`no-client-tenant`**
+check that fails the build if anything under `src/routes/` reads `companyId`,
+`membershipId` or `userId` from a request body, query or params. Verified against
+a probe route before shipping — it fires, and it stops firing when the probe is
+removed.
+
+**Interaction nobody had considered: offline vs token lifetime.** 15-minute access
+tokens are fine for a driver in a dead zone only because work queues locally and
+syncs later — but the *refresh* token has to be generous (90 days) or a driver
+returning from a fortnight off gets a forced re-login at the worst moment.
+Rotation uses a 60-second grace window for the same reason: strict rotation logs
+a driver out if signal drops mid-exchange.
+
+**25 contract tests are specified in AUTH.md and are to be written before the
+implementation**, not after.
+
+---
+
+## 2026-08-25 — `npm run check` verified green on the Mac
+
+Full chain passes under Node 22.12.0: typecheck clean, check-rules clean, knip
+finds no issues, 10/10 tests pass. The guard rails are real, not aspirational.
+
+Phase 0 is complete. Nothing is committed to git yet.
+
+---
+
+## 2026-08-25 — Guard rails green; Node-version trap made loud
+
+`npm run check` now passes end to end: typecheck, check-rules, knip (clean), 10
+tests.
+
+Two last fixes, both traceable to the same root cause — the Mac shell reverting
+to Node 20:
+
+- **`node --test` only expands globs from Node 22**, so the quoted
+  `"src/**/*.test.ts"` was passed through literally and the runner reported
+  "Could not find". Replaced with `$(find src -name "*.test.ts")`, which behaves
+  identically on any Node and in both zsh and bash.
+- **Added a Node-version guard as check #0 in check-rules**, because every
+  symptom of running Node 20 here (Prisma engine errors, missing generated
+  client, the glob failure above) appears far from its cause. It now says so
+  directly and tells you to run `nvm use`.
+
+The permanent fix is still nvm's directory hook in `~/.zshrc` — `.nvmrc` alone
+does nothing unless something reads it.
+
+---
+
+## 2026-08-25 — knip config fixed; Node version keeps regressing
+
+`npm run check` got as far as knip and stopped. Two real problems, both fixed and
+re-verified in the cloud container against a stubbed `src/generated/client.ts`
+so the tree shape matched the Mac's:
+
+1. **`@prisma/client` reported unused.** It is used, but only from generated code
+   that knip deliberately does not follow. Added to `ignoreDependencies`.
+2. **`prisma.config.ts` could not resolve `DATABASE_URL`.** knip loads it from the
+   repo ROOT, where `import "dotenv/config"` looks for `./.env` — but the file
+   lives at `api/.env`. Now resolved relative to the config file itself, so it
+   works whatever the cwd.
+
+Also applied knip's own configuration hints: `src/server.ts` and
+`prisma.config.ts` are auto-detected as entry points and no longer listed, and
+`src/generated/**` moved from a separate `ignore` key into a `!` negation in
+`project`. One informational hint remains (`.prisma` compiled extension) — it
+does not fail the run.
+
+**Recurring trap: Node version.** The Mac shell keeps reverting to v20.20.0
+between sessions, so `npm install` runs under the wrong Node unless `nvm use` is
+run first, every time, in every new terminal. `.nvmrc` only helps if something
+reads it. Worth adding nvm's directory hook to `.zshrc` — otherwise this will
+keep resurfacing as confusing Prisma failures.
+
+---
+
+## 2026-08-25 — Guard rails: tests, enforced rules, dead-code detection
+
+Added before writing any real feature, on the principle that a rule nobody can
+run is a suggestion.
+
+**`api/scripts/check-rules.ts`** turns CLAUDE.md into a failing build. Nine
+checks: no `any`; no `console.*` in src; no inline `reply.status(4xx)` (errors go
+through `lib/errors.ts`); no `jwt.verify` outside the auth helpers; every
+`z.string()` bounded with `.max()`; no empty `.catch(() => {})`; no
+`String @default("")` in the schema; every tenant model carries `companyId`
+(allowlist: `User`, `Company`, with reasons); every file in `src/routes/`
+actually registered in `app.ts`. Escape hatch is `// rules-ignore: <id>` with a
+reason.
+
+**Tests** — 10 unit tests via `node:test`, covering environment validation and
+the error envelope.
+
+**knip** for dead code and unused dependencies, plus a root `package.json` (knip
+needs one for workspaces, and web/ and mobile/ will want it shortly).
+
+**CI** — `.github/workflows/ci.yml` runs install → typecheck → rules → knip →
+db:push → tests against a real Postgres. Never executed: there is no remote repo
+yet.
+
+**Design change forced by testing.** `env.ts` called `process.exit(1)` at module
+scope, so importing it from a test killed the test run. Split into
+`env.schema.ts` (pure, testable) and `env.ts` (loads and exits). Worth noting as
+a pattern — the side effect and the validation are now separable, which is why
+the test could be written at all.
+
+**Two bugs in the guards, caught before they reached the Mac.** check-rules
+flagged the schema comment that *describes* the nullable rule (now skips comment
+lines), and knip could not run without a root package.json. Both found by
+executing the checks in the cloud container first rather than handing over
+untested tooling.
+
+*Caveat:* the cloud container cannot reach `binaries.prisma.sh` either, so
+`prisma generate` never ran there and the full `tsc --noEmit` was verified only
+across `src/lib` and `scripts` (via `tsconfig.check.json`). `app.ts` and
+`server.ts` typecheck on the Mac, where the client exists.
+
+---
+
+## 2026-08-25 — Skeleton running end to end
+
+`npm install`, `db:push` and `npm run dev` all succeed on the Mac under Node
+22.12.0. Database in sync, API listening on :3000, `/health` served. The
+skeleton is real.
+
+Root cause of the whole run of failures was Node 20 + Prisma 7: once 22.12.0 was
+in place (via the new `.nvmrc`) and `prisma.config.ts` loaded dotenv, everything
+downstream resolved — including the `src/generated/client.js` not-found error,
+which was only ever a symptom of `prisma generate` never having run.
+
+**Known issue, not yet acted on.** `npm audit` reports 3 high-severity advisories,
+all one chain: `prisma` → `@prisma/config` → `deepmerge-ts <8.0.0` (stack
+exhaustion on recursive object graphs, GHSA-ggr8-5vv4-36mx). The only offered fix
+is `--force`, which would *downgrade* to prisma 6.12.0 — a breaking change and the
+wrong direction. It is a build-time CLI dependency, not something reachable from a
+request, so the exposure locally is negligible. **Revisit when Prisma 8 ships**
+(8.0.0-rc is already out) rather than downgrading. Do not run `npm audit fix
+--force` on this repo.
+
+**Not yet done:** nothing is committed to git. No migration files exist either —
+`db:push` syncs the schema without recording a migration, which is fine for now
+but must switch to `prisma migrate dev` before anything reaches a shared or
+production database.
+
+---
+
+## 2026-08-25 — First run on the Mac: three fixes
+
+The skeleton did not run first time. Causes and fixes:
+
+1. **Prisma 7 removed `url` from the datasource block.** The schema had
+   `url = env("DATABASE_URL")`, which 7.x rejects (P1012). Connection URLs now
+   live in `prisma.config.ts` — added, matching the TMS's file exactly. The
+   schema's datasource is now `provider` only; the runtime connection comes from
+   the `PrismaPg` adapter, the CLI's from the config file.
+2. **Port 5433 was already allocated** on the Mac, so the container could not
+   bind. Moved to **5544** in docker-compose, `.env.example` and README.
+3. **`node_modules` was installed from the wrong platform.** Dependencies were
+   installed from the Linux sandbox shell, which wrote linux-arm64 binaries into
+   the repo; esbuild then refused to run under macOS. Fixed by deleting
+   `node_modules` and `package-lock.json` and reinstalling on the Mac.
+   **Lesson: never run `npm install` for this repo from the sandboxed shell** —
+   it also cannot reach `binaries.prisma.sh`. Installs happen on the Mac.
+
+Also noted: interactive zsh does not treat `#` as a comment, so trailing
+explanatory comments in pasted commands become arguments (`cp .env.example .env
+# then set...` failed with `cp: long: Not a directory`). README updated.
+
+---
+
+## 2026-08-25 — Build started: repo skeleton, first schema, API boots
+
+**Built.** `git init` on `main`. Root `.gitignore`, `docker-compose.yml`
+(Postgres 16 on **port 5433** — deliberately not 5432, so it can never collide
+with the TMS's database), `README.md`. `api/` with package.json (Fastify 5,
+Prisma 7, zod 4, tsx — same stack as the TMS so the fork lands cleanly),
+tsconfig (strict, `noUncheckedIndexedAccess`), `.env.example`.
+
+`src/lib/env.ts` validates the environment with zod and exits with a readable
+message rather than failing at first use. `src/lib/errors.ts` is the single error
+envelope. `src/app.ts` + `src/server.ts` boot Fastify with CORS and rate limiting
+and expose `GET /health`, which also pings the database.
+
+**First schema** (`api/prisma/schema.prisma`, 180 lines) — Company, User,
+CompanyMembership, Shift, ShiftSegment, ShiftSubmitJob. Notes:
+
+- Multi-company from the first migration (D12). `active` lives on the membership,
+  not the user.
+- Times are real `DateTime`. `Shift.shiftDate` is a `@db.Date` derived from
+  `startedAt`, which resolves O8 by construction — an overnight shift files under
+  the day it started. **Provisional, still worth confirming.**
+- A defect is a failed check item plus a note inside the checks JSON. With photos
+  gone (D10) it needs no table of its own — reconsider only if the PDF's defect
+  section proves awkward to build from JSON.
+- Deliberately **excluded**: fuel/AdBlue (O6 unanswered) and any deliveries table
+  (O2 unanswered). Both are additive later; neither blocks the skeleton.
+- `ShiftSubmitJob` carries a comment explaining why the outbox exists, so nobody
+  "simplifies" it back into the request handler.
+
+**Blocked in the sandbox.** `npm install` fetched all 205 packages, but the
+`postinstall` (`prisma generate`) failed — `binaries.prisma.sh` returns 403 from
+the local shell's network. Not a code problem. The first real run must happen in
+a Mac terminal, where Docker also lives.
+
+**Next.** Start Postgres, push the schema, confirm `/health` returns `db: up`.
+Then auth, then the shift flow.
+
+---
+
+## 2026-08-25 (later still) — Multi-company drivers; D6 hardened to zero sharing
+
+**D12 — a driver can work for multiple companies.** Agency and casual driving is
+normal in UK haulage, so driver identity is global with a membership per company
+(the TMS's `CompanyMembership` shape). Closes O9, which had leaned the other way.
+Modelled from the first migration because retrofitting it would mean migrating
+every shift record. The morning flow gains a company picker that is shown **only**
+to drivers holding more than one active membership, so the single-company case
+loses no taps.
+
+**D6 revised — no shared surface at all.** The earlier version kept design tokens
+and check definitions shared between the two products with a "keep identical"
+rule. Dropped: any shared surface means a change in one app forces a change in the
+other, which is the coupling D1 exists to prevent. Parity comes from copying once
+at fork time; afterwards the two apps are free to drift. Accepted cost: the
+"familiar on upgrade" promise weakens over time.
+
+**Knock-on effects.** Active/inactive becomes per membership. Check config and
+destination email follow the selected company. Activation codes attach a
+membership. The privacy rule hardens — Company A must never learn the driver also
+works for Company B, which is now written into CLAUDE.md as a query-level rule.
+And the private diary gets *more* valuable: an agency driver gets one view of
+hours and earnings across every company he drives for.
+
+---
+
+## 2026-08-25 (later) — Retention, defect photos and data roles decided
+
+**Decided.** D9 submitted records are kept — storage is cheap and a company that
+loses the email can always re-download. D10 no defect photographs in V1; a defect
+is a written description. D11 Q25 Ltd is the owning entity, and the app holds two
+different data-protection roles at once — processor for employer timesheet data,
+controller for the driver's private diary.
+
+**Effect on the build.** Object storage leaves the scope entirely — with no photos
+and no stored PDFs there is no heavy artifact, so the datastore is pure rows. The
+submission pipeline is unblocked. The offline story gets materially easier: text
+queues and syncs over bad signal; photo uploads do not.
+
+**Docs updated.** CLAUDE.md — retention section rewritten, privacy boundary now
+stated as a legal boundary rather than a preference. PRODUCT.md — defects are text
+only, plus a sharper value point (three trailers on paper means three check sheets
+to fill in and carry). STATUS.md — object-storage row removed, retention row
+unblocked. DECISIONS.md — D9–D11 added, O1 rewritten.
+
+**Still open.** O1 is narrower but not closed: the retention *period* needs an
+actual number for the privacy policy, and there is no rule yet for what happens to
+a company's records when they cancel. O2 (whether the PDF keeps a loads/ticket
+section) is unchanged and still needs a deliberate answer.
+
+---
+
+## 2026-08-25 — Repo created, product scoped, docs seeded
+
+**Context.** LogisticBay Timesheets was scoped out as a standalone product,
+separate from the LogisticBay TMS. This repo (`~/LB-Timesheet`) was created empty
+and seeded with documentation only. No code was written.
+
+**Done**
+
+- Surveyed the TMS (`~/timesheet-app`, `main`, 669 commits) read-only to establish
+  what already exists and can be forked. Findings recorded in STATUS.md
+  "Fork inventory".
+- Wrote `CLAUDE.md` (identity guard + rules), `PRODUCT.md` (scope + boundary),
+  `DECISIONS.md` (8 settled, 9 open), `STATUS.md` (all 🔲), this file.
+- Added a matching "which project am I in?" guard block to the **TMS's**
+  `CLAUDE.md` (user-approved, docs only, no code touched), so the protection
+  works in both directions.
+
+**Key finding.** Most of the driver-facing half of this product already exists
+inside the TMS — shift + segment models, DVSA check lists, the full
+start→check→swap→finish→submit screen flow, PDF generation, SendGrid delivery,
+and a properly-built outbox/retry worker. This is largely an **extraction and
+subtraction** job, not a greenfield build.
+
+The parts with **no** TMS source at all: the driver's private salary/hours diary,
+and the entire company SaaS layer (self-serve signup, subscription/billing,
+activation codes, settings, retention).
+
+**Decided this session.** D1 separate everything · D2 separate auth · D3 domain
+layout with the marketing site as the only shared surface · D4 two apps rather
+than one plan-gated app · D5 upgrading to the TMS is a commercial event, not a
+data migration · D6 driver UX stays familiar to the TMS app · D7 company can
+re-download submissions, regenerating PDFs rather than storing them · D8 fork by
+copying, no git history carried over. Full reasoning in DECISIONS.md.
+
+**Deferred / open.** O1 retention rule is **blocking** the submission pipeline.
+Also open: whether the PDF keeps a loads/ticket section (O2), driver salary
+history portability (O3), whether the TMS app eventually needs the salary tracker
+too (O4), admin subdomain (O5), fuel/AdBlue modelling (O6), pricing (O7),
+overnight shifts (O8), multi-company drivers (O9).
+
+**Housekeeping note.** The folder was created as `LB-Timesheet ` with a trailing
+space (breaks shell quoting, upsets git/npm/deploy tooling); renamed to
+`LB-Timesheet` and re-connected the same day.
+
+**Next session should.** Read STATUS.md and DECISIONS.md first. Do not start the
+submission pipeline until O1 is answered. Likely first build step is the schema
+plus the company web app skeleton, since that half has no TMS source and is the
+critical path.
