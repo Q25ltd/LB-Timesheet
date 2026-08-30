@@ -60,9 +60,48 @@ export function normaliseOrigin(
   return null;
 }
 
+/**
+ * Values that mean "someone copied an example". Matched case-insensitively as
+ * substrings and rejected in EVERY environment — a known signing secret means
+ * every token is forgeable, and a placeholder that boots is a placeholder that
+ * ships. No entropy scoring: these two checks (blocklist + distinct characters)
+ * are dumb on purpose, because clever scoring rejects real secrets and gets
+ * deleted. A rejected good secret costs a regeneration; an accepted bad one
+ * costs the auth system.
+ */
+const JWT_PLACEHOLDER_FRAGMENTS = [
+  "change-me", "changeme", "replace-me", "replaceme",
+  "example", "placeholder", "password", "secret",
+] as const;
+
+const JWT_MIN_LENGTH = 32;            // dev/test floor (unchanged)
+const JWT_MIN_LENGTH_PRODUCTION = 64; // e.g. `openssl rand -hex 32` = 64 chars = 32 bytes
+const JWT_MIN_DISTINCT_CHARS = 10;    // rejects "xxxx…", "abab…", keyboard mashes
+
+/** Why this secret is unusable, or null when it is acceptable. Not exported:
+ *  the tests exercise it through EnvSchema, which is the only caller. */
+function jwtSecretProblem(rawSecret: string, isProductionLike: boolean): string | null {
+  const secret = rawSecret.trim();
+  const minLength = isProductionLike ? JWT_MIN_LENGTH_PRODUCTION : JWT_MIN_LENGTH;
+  if (secret.length < minLength) {
+    return `JWT_SECRET must be at least ${String(minLength)} characters` +
+      (isProductionLike ? " in production (try: openssl rand -hex 32)" : "");
+  }
+  const lower = secret.toLowerCase();
+  for (const fragment of JWT_PLACEHOLDER_FRAGMENTS) {
+    if (lower.includes(fragment)) {
+      return `JWT_SECRET looks like a placeholder (contains "${fragment}") — generate a real one: openssl rand -hex 32`;
+    }
+  }
+  if (new Set(secret).size < JWT_MIN_DISTINCT_CHARS) {
+    return "JWT_SECRET has too little variety (repeated characters) — generate a real one: openssl rand -hex 32";
+  }
+  return null;
+}
+
 const BaseEnv = z.object({
   DATABASE_URL:     z.string().min(1, "DATABASE_URL is required").max(500),
-  JWT_SECRET:       z.string().min(32, "JWT_SECRET must be at least 32 characters").max(500),
+  JWT_SECRET:       z.string().min(1, "JWT_SECRET is required").max(500),
   SENDGRID_API_KEY: z.string().max(200).default(""),
   MAIL_FROM:        z.string().max(320).default("timesheets@logisticbay.com"),
   /** Comma-separated origins allowed to call this API. */
@@ -75,6 +114,15 @@ const BaseEnv = z.object({
 export const EnvSchema = BaseEnv
   .superRefine((value, ctx) => {
     const devLike = isDevLike(value.NODE_ENV);
+
+    // Same fail-closed posture as WEB_ORIGIN: anything not explicitly dev/test
+    // gets the production rules. A deploy that forgets NODE_ENV must not get
+    // the lenient floor.
+    const secretProblem = jwtSecretProblem(value.JWT_SECRET, !devLike);
+    if (secretProblem !== null) {
+      ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: secretProblem });
+    }
+
     const configured = splitOrigins(value.WEB_ORIGIN);
 
     if (!devLike && configured.length === 0) {

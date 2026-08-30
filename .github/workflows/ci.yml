@@ -12,7 +12,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://testuser:testpass@localhost:5432/lb_timesheet_test
-      JWT_SECRET: ci-secret-at-least-thirty-two-characters-long
+      JWT_SECRET: 3e7a1f9c4b8d2e6a0c5f3b7d9e1a4c8f2b6d0e5a9c3f7b1d4e8a2c6f0b5d9e3a
       NODE_ENV: test
 
     services:

@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 
 // env.ts validates process.env at import time — set before the dynamic import.
 process.env.DATABASE_URL = "postgresql://app:app@localhost:5544/lb_timesheet_unused";
-process.env.JWT_SECRET   = "x".repeat(40);
+process.env.JWT_SECRET   = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
 process.env.NODE_ENV     = "test";
 process.env.WEB_ORIGIN   = "https://allowed.example.com";
 

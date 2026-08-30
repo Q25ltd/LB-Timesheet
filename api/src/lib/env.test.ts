@@ -11,7 +11,7 @@ import {
 
 const valid = {
   DATABASE_URL: "postgresql://app:app@localhost:5544/lb_timesheet",
-  JWT_SECRET:   "x".repeat(32),
+  JWT_SECRET:   "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c244f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24",
 };
 
 const prod = { ...valid, NODE_ENV: "production", WEB_ORIGIN: "https://timesheets.logisticbay.com" };
@@ -26,10 +26,63 @@ test("accepts a minimal valid environment and applies defaults", () => {
   assert.equal(parsed.MAIL_FROM, "timesheets@logisticbay.com");
 });
 
-test("rejects a JWT_SECRET shorter than 32 characters", () => {
-  const result = EnvSchema.safeParse({ ...prod, JWT_SECRET: "too-short" });
+// ── JWT secret quality (F-06) ────────────────────────────────────────────────
+
+const PLACEHOLDER = "change-me-to-a-long-random-string-change-me-to-a-long-random-string";
+
+test("the public example placeholder is rejected in EVERY environment", () => {
+  for (const nodeEnv of ["development", "test", "production"] as const) {
+    const result = EnvSchema.safeParse({ ...prod, NODE_ENV: nodeEnv, JWT_SECRET: PLACEHOLDER });
+    assert.equal(result.success, false, `placeholder must not boot ${nodeEnv}`);
+    assert.match(describeEnvFailure(result.error), /looks like a placeholder/);
+  }
+});
+
+test("production cannot boot with the .env.example value", () => {
+  const result = EnvSchema.safeParse({
+    ...prod, JWT_SECRET: "REPLACE-ME-run--openssl-rand-hex-32--and-paste-the-result-here",
+  });
   assert.equal(result.success, false);
-  assert.match(describeEnvFailure(result.error), /JWT_SECRET must be at least 32 characters/);
+});
+
+test("a repeated-character secret is rejected even when long enough", () => {
+  const result = EnvSchema.safeParse({ ...prod, JWT_SECRET: "ababababab".repeat(10) });
+  assert.equal(result.success, false);
+  assert.match(describeEnvFailure(result.error), /too little variety/);
+});
+
+test("production requires 64+ characters; dev floor stays 32", () => {
+  const fortyEight = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
+  assert.equal(fortyEight.length, 48);
+  assert.equal(EnvSchema.safeParse({ ...prod, JWT_SECRET: fortyEight }).success, false,
+    "48 chars must NOT satisfy production");
+  assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "development", JWT_SECRET: fortyEight }).success, true,
+    "48 chars is fine in development");
+});
+
+test("an UNSET NODE_ENV gets the production JWT rules — fail closed", () => {
+  const fortyEight = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
+  const result = EnvSchema.safeParse({
+    ...valid, WEB_ORIGIN: "https://timesheets.logisticbay.com", JWT_SECRET: fortyEight,
+  });
+  assert.equal(result.success, false);
+  assert.match(describeEnvFailure(result.error), /at least 64 characters in production/);
+});
+
+test("a strong random secret is accepted everywhere", () => {
+  const strong = "9c1d4e7f2a8b3c6d0e5f1a4b7c2d8e3f6a9b0c5d1e4f7a2b8c3d6e9f0a5b1c4d";
+  assert.equal(EnvSchema.safeParse({ ...prod, JWT_SECRET: strong }).success, true);
+  assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "test", JWT_SECRET: strong }).success, true);
+});
+
+test("rejects a short JWT_SECRET, with the environment's own floor in the message", () => {
+  const short = EnvSchema.safeParse({ ...prod, JWT_SECRET: "too-short" });
+  assert.equal(short.success, false);
+  assert.match(describeEnvFailure(short.error), /at least 64 characters in production/);
+
+  const dev = EnvSchema.safeParse({ ...valid, NODE_ENV: "development", JWT_SECRET: "too-short" });
+  assert.equal(dev.success, false);
+  assert.match(describeEnvFailure(dev.error), /at least 32 characters/);
 });
 
 test("rejects a missing DATABASE_URL", () => {
@@ -48,7 +101,7 @@ test("coerces PORT from a string", () => {
 });
 
 test("describeEnvFailure lists every problem, not just the first", () => {
-  const result = EnvSchema.safeParse({ JWT_SECRET: "short" });
+  const result = EnvSchema.safeParse({});
   assert.equal(result.success, false);
   const described = describeEnvFailure(result.error);
   assert.match(described, /DATABASE_URL/);
