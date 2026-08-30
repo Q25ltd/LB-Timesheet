@@ -81,7 +81,7 @@ scan(
 scan(
   "error-envelope",
   "Send errors through src/lib/errors.ts, never inline.",
-  line => /reply\s*\.\s*status\s*\(\s*[45]\d\d\s*\)/.test(line),
+  line => /reply\s*\.\s*(status|code)\s*\(\s*[45]\d\d\s*\)/.test(line),
   file => !file.endsWith("errors.ts"),
 );
 

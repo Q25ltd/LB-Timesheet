@@ -52,6 +52,26 @@ export const serverError  = (r: FastifyReply, e = "Something went wrong",     co
 const INTERNAL: ErrorBody = { error: "Something went wrong", code: "INTERNAL" };
 
 /**
+ * The exact set of Fastify-authored error codes trusted to pass their own
+ * status and message straight to the client. Each of these is a fixed,
+ * non-interpolated string describing the CLIENT's own malformed request
+ * (fastify/lib/errors.js) -- never server state, never a provider detail.
+ *
+ * This is an exact membership test, not a prefix test. A future Fastify
+ * error code -- even one that looks related -- is NOT trusted until someone
+ * deliberately adds it here having checked its message is client-safe.
+ * Anything not in this set is masked exactly like an unlabelled 500,
+ * regardless of what statusCode it claims.
+ */
+const SAFE_FASTIFY_CODES: ReadonlySet<string> = new Set([
+  "FST_ERR_CTP_BODY_TOO_LARGE",
+  "FST_ERR_CTP_INVALID_MEDIA_TYPE",
+  "FST_ERR_CTP_INVALID_CONTENT_LENGTH",
+  "FST_ERR_CTP_EMPTY_JSON_BODY",
+  "FST_ERR_CTP_INVALID_JSON_BODY",
+]);
+
+/**
  * Global error + not-found handling. Lives HERE, next to the envelope, so the
  * check-rules "one error envelope" rule (which allows reply.status only in
  * this file) covers it — and so nobody can change the envelope and the
@@ -85,7 +105,7 @@ export function registerErrorHandling(app: FastifyInstance): void {
     }
 
     const status = typeof error.statusCode === "number" ? error.statusCode : 500;
-    if (status >= 400 && status < 500) {
+    if (status >= 400 && status < 500 && typeof error.code === "string" && SAFE_FASTIFY_CODES.has(error.code)) {
       return send(reply, status, error.message, error.code);
     }
 

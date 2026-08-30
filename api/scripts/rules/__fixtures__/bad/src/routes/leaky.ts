@@ -13,3 +13,4 @@ export async function handler(req: any, reply) {
 const {
   companyId: crossLine,
 } = req.query;
+reply.code(404).send({ error: "inline via code()" });

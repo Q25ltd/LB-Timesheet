@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
 import { allowedOrigins } from "./lib/env.schema.js";
-import { registerErrorHandling } from "./lib/errors.js";
+import { AppError, registerErrorHandling } from "./lib/errors.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -25,7 +25,14 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // (AUTH.md), not a cookie. Enabling it is an architectural change.
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
 
-  await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
+  await app.register(rateLimit, {
+    max: 300,
+    timeWindow: "1 minute",
+    // Route rate-limit rejections through the app's own envelope with a
+    // fixed, safe message -- not the plugin's default body, and not the
+    // generic 4xx-passthrough this replaces (F-05).
+    errorResponseBuilder: () => new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED"),
+  });
 
   // Every error path — thrown, validation, unknown route, crash — leaves
   // through the one envelope. Without this, Fastify's defaults return their

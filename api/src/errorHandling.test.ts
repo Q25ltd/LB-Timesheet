@@ -114,17 +114,52 @@ test("a deliberate AppError keeps its status, message, code and details exactly"
   await app.close();
 });
 
-test("rate-limit style Fastify 4xx errors keep their status and pass through the envelope", async () => {
+test("an unknown error with a fabricated 4xx statusCode is masked, not trusted", async () => {
+  // The exact shape the F-05 audit demonstrated: a "4xx therefore safe"
+  // handler would forward this verbatim. The fix is "explicitly known-safe
+  // therefore pass through" — anything else, whatever it claims, is masked
+  // the same way an unlabelled 500 already is.
   const app = await buildApp(db);
-  // Same shape @fastify/rate-limit and friends produce: statusCode + message.
   app.get("/teapot", () => {
-    const error = new Error("Rate limit exceeded, retry in 1 minute") as Error & { statusCode: number };
+    const error = new Error("INTERNAL-MARKER fabricated: rate limit exceeded, retry in 1 minute") as Error & {
+      statusCode: number;
+    };
     error.statusCode = 429;
     throw error;
   });
   const res = await app.inject({ method: "GET", url: "/teapot" });
-  assert.equal(res.statusCode, 429);
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.json(), { error: "Something went wrong", code: "INTERNAL" });
+  assert.ok(!res.body.includes("INTERNAL-MARKER"), "the fabricated error's message must not leak");
+  await app.close();
+});
+
+test("a malformed JSON body surfaces Fastify's own safe content-type error, not a mask", async () => {
+  // FST_ERR_CTP_INVALID_JSON_BODY is on the explicit allowlist: fixed,
+  // Fastify-authored text describing the CLIENT's own malformed request,
+  // never interpolated with server internals. This must keep working once
+  // the fallback branch stops trusting statusCode alone.
+  const app = await appWithFailingRoutes();
+  const res = await app.inject({
+    method: "POST",
+    url: "/boom-sync",
+    headers: { "content-type": "application/json" },
+    payload: "{not valid json",
+  });
+  assert.equal(res.statusCode, 400);
   const body = envelope(res.json());
-  assert.equal(body.error, "Rate limit exceeded, retry in 1 minute");
+  assert.equal(body.code, "FST_ERR_CTP_INVALID_JSON_BODY");
+  assert.equal(body.error, "Body is not valid JSON but content-type is set to 'application/json'");
+  await app.close();
+});
+
+test("the real rate-limit plugin surfaces a safe, fixed AppError body once the limit is hit", async () => {
+  const app = await buildApp(db);
+  let last = await app.inject({ method: "GET", url: "/health" });
+  for (let i = 1; i < 301; i++) {
+    last = await app.inject({ method: "GET", url: "/health" });
+  }
+  assert.equal(last.statusCode, 429);
+  assert.deepEqual(last.json(), { error: "Too many requests, try again shortly", code: "RATE_LIMITED" });
   await app.close();
 });

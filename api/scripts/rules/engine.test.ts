@@ -24,6 +24,7 @@ function report(tree: "bad" | "good"): string[] {
 /** The complete, exact output on the known-bad tree. Update DELIBERATELY. */
 const EXPECTED_BAD = [
   "error-envelope  src/routes/leaky.ts:6",
+  "error-envelope  src/routes/leaky.ts:16",
   "jwt-centralised  src/routes/leaky.ts:8",
   "no-any  src/routes/leaky.ts:3",
   "no-client-tenant  src/routes/leaky.ts:11",
