@@ -8,7 +8,6 @@
     "start": "tsx src/server.ts",
     "postinstall": "prisma generate",
     "generate": "prisma generate",
-    "db:push": "prisma db push",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "studio": "prisma studio",
@@ -21,7 +20,8 @@
     "lint": "eslint .",
     "test:db": "tsx scripts/db-check.ts",
     "migrate:baseline": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
-    "test:db:run": "node --import tsx/esm --test --test-timeout=60000 $(find src/tests/db -name \"*.test.ts\")"
+    "test:db:run": "node --import tsx/esm --test --test-timeout=60000 $(find src/tests/db -name \"*.test.ts\")",
+    "db:smoke": "tsx scripts/db-smoke.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
