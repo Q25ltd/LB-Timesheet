@@ -189,6 +189,24 @@ Honest note: because membership is revalidated on every request, the token's
 cannot come from the client, a stolen token is useless against another tenant,
 and there is a claim to validate the row against.
 
+### D14 — The API is not serverless; it deploys to Railway (2026-08-25)
+**API → Railway. Web → Vercel** (root directory scoped to `web/`, never the repo
+root). Vercel auto-detects `api/` as a Fastify project and will offer to import
+it — **decline, every time.**
+
+*Why this is not a preference:* submission delivery depends on a **long-running
+worker** that polls the `ShiftSubmitJob` outbox on a loop and holds a Postgres
+advisory lock. Serverless functions are short-lived and have no process to run
+that loop, so submitted timesheets would sit in the outbox and no PDF would ever
+reach a customer.
+
+This is not hypothetical. The TMS lost PDFs on redeploy because submit did the
+work inline; the outbox exists because of that incident. Deploying this API to a
+serverless platform reintroduces the same failure in a form no retry can fix.
+
+Also relevant: persistent Postgres connections, and the advisory lock that stops
+two instances double-processing the same job.
+
 ---
 
 ## ❓ Open — ask the user, do not guess

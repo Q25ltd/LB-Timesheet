@@ -95,7 +95,8 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 |---|---|
 | Schema | ✅ core models — Company, User, CompanyMembership, Shift, ShiftSegment, ShiftSubmitJob |
 | Typecheck / tests / dead-code guards | ✅ `npm run check` green end to end — tsc, check-rules (10 checks), knip, 10 unit tests. Verified on the Mac 2026-08-25 under Node 22.12.0 |
-| CI (GitHub Actions) | 🔶 workflow written; no remote repo yet, so it has never run |
+| CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to `npm run check` — not yet re-verified green |
+| Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
 | Auth implementation (login, select, switch, refresh, middleware) | 🔲 |
 | Session model + refresh rotation | 🔲 |

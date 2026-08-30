@@ -17,8 +17,7 @@
     "test": "node --import tsx/esm --test --test-timeout=30000 $(find src -name \"*.test.ts\")",
     "check": "npm run typecheck && npm run check:rules && npm run validate && npm test",
     "check:rules": "tsx scripts/check-rules.ts",
-    "validate": "prisma validate",
-    "lint": "eslint ."
+    "validate": "prisma validate"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

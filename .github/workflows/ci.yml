@@ -36,22 +36,24 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: api/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
 
-      - name: Install
+      # Both workspaces. eslint and knip live at the root; installing only api
+      # is what made run #1 fail with "Unlisted binaries".
+      - name: Install (root)
+        run: npm ci
+
+      - name: Install (api)
         run: npm ci --prefix api
-
-      - name: Typecheck
-        run: npm run typecheck --prefix api
-
-      - name: Rules (CLAUDE.md, enforced)
-        run: npm run check:rules --prefix api
-
-      - name: Dead code and unused dependencies
-        run: npx knip
 
       - name: Push schema
         run: npm run db:push --prefix api
 
-      - name: Tests
-        run: npm test --prefix api
+      # Deliberately ONE command, identical to what a developer runs locally:
+      # typecheck -> eslint -> check-rules -> prisma validate -> knip -> tests.
+      # Adding a gate to `npm run check` adds it to CI automatically, so the two
+      # can never drift. Do not re-list the steps individually here.
+      - name: Check
+        run: npm run check

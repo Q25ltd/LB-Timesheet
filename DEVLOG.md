@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-08-25 — Pushed to GitHub; CI run #1 failed and was rebuilt
+
+Repo is live at `github.com/Q25ltd/LB-Timesheet`, baseline `13456ac` plus
+`74ab318` (eslint, prisma validate, no-prisma-in-routes, the Phase 0 audit).
+
+**CI run #1 failed at `npx knip`** with "Unlisted binaries: eslint, knip". Cause:
+the workflow ran `npm ci --prefix api` only, and both eslint and knip are **root**
+devDependencies — so their binaries did not exist in CI. It passes locally purely
+because the root `node_modules` is present there.
+
+I had predicted this would pass hollowly rather than fail. It failed, which is
+the better outcome; the prediction was wrong.
+
+**Workflow rebuilt around a single principle: CI runs exactly what a developer
+runs.** It now installs both workspaces, pushes the schema, then calls
+`npm run check` as one step. Adding a gate locally now adds it to CI
+automatically — the two cannot drift, and nobody has to remember to update a
+list of steps. The previous version enumerated steps individually and had
+silently omitted eslint and prisma validate entirely.
+
+**Also fixed:** `api/package.json` declared a `lint` script for a binary it does
+not own (eslint is a root devDependency). Removed — the root `eslint .` already
+covers every workspace, and knip was right to flag it.
+
+**`.nvmrc` 22.12.0 → 22.13.0**, clearing the `EBADENGINE` warning from
+`eslint-visitor-keys` (wants `^22.13.0`). Still satisfies Prisma 7's floor.
+Requires `nvm install 22.13.0` locally.
+
+**D14 recorded** after Vercel emailed offering to import `api/` as a Fastify
+project: the API is not serverless and goes to Railway. The outbox worker needs a
+long-running process; a serverless API would leave submitted timesheets
+undelivered — the exact failure the outbox was built to prevent.
+
+---
+
 ## 2026-08-25 — Auth contract designed and frozen (no code yet)
 
 Deliberately designed and written down **before** implementation, on the grounds
