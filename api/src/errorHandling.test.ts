@@ -33,7 +33,7 @@ function envelope(payload: unknown): z.infer<typeof Envelope> {
  */
 async function appWithFailingRoutes(): Promise<FastifyInstance> {
   const app = await buildApp(db);
-  // F-04 protects every route by default, these included -- these routes
+  // F-10 protects every route by default, these included -- these routes
   // exist only to exercise error-envelope masking (F-05), not auth, so they
   // are deliberately marked public rather than fighting the default-deny
   // guard with a fake authenticated request.
@@ -126,7 +126,7 @@ test("an unknown error with a fabricated 4xx statusCode is masked, not trusted",
   // the same way an unlabelled 500 already is.
   const app = await buildApp(db);
   // Same reasoning as appWithFailingRoutes: this route tests error masking,
-  // not auth, so it is deliberately public under F-04's default-deny.
+  // not auth, so it is deliberately public under F-10's default-deny.
   app.get("/teapot", { config: { public: true } }, () => {
     const error = new Error("INTERNAL-MARKER fabricated: rate limit exceeded, retry in 1 minute") as Error & {
       statusCode: number;

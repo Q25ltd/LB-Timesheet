@@ -290,7 +290,7 @@ if (routeFiles.length > 0) {
 
 // ── 10. Every route registration declares its auth posture ──────────────────
 // Policy enforcement, not the security boundary: the default-deny `onRequest`
-// hook in app.ts (F-04) protects a route whether or not this rule ever sees
+// hook in app.ts (F-10) protects a route whether or not this rule ever sees
 // it, or even exists. This rule only forces `public: true`/`public: false` to
 // be written down at the call site, so a reviewer sees the posture on read
 // instead of having to know the hook's default by heart. Scoped to app.ts
@@ -311,7 +311,7 @@ for (const file of files) {
     report(
       "route-declares-auth", file, hit.line - 1, hit.text,
       "Every route registration must declare `public: true` or `public: false` in its config. " +
-      "The default-deny onRequest hook in app.ts is the real boundary -- this just makes the posture visible. See F-04.",
+      "The default-deny onRequest hook in app.ts is the real boundary -- this just makes the posture visible. See F-10.",
     );
   }
 }

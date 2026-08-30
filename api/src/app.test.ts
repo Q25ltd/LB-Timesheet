@@ -102,14 +102,14 @@ test("/health reports degraded when the query fails", async () => {
   await app.close();
 });
 
-// ── F-04: default-deny routing ───────────────────────────────────────────────
+// ── F-10: default-deny routing ───────────────────────────────────────────────
 // The invariant: every route is authenticated by default. A route becomes
 // unauthenticated only by an explicit `config: { public: true }` marker — not
 // by omission, not by living outside some protected structure. Registered
 // here, after buildApp() returns, exactly the way any future feature route
 // would be added: no config, no preHandler wired by hand. That is the whole
 // point — this must be denied WITHOUT the route author doing anything extra.
-test("a newly registered route with no auth marker is protected by default (F-04)", async () => {
+test("a newly registered route with no auth marker is protected by default (F-10)", async () => {
   const app = await buildApp(db);
   app.get("/test-only/unmarked", () => ({ ok: true }));
   const res = await app.inject({ method: "GET", url: "/test-only/unmarked" });
@@ -118,7 +118,7 @@ test("a newly registered route with no auth marker is protected by default (F-04
   await app.close();
 });
 
-test("a route with a config object that omits public stays protected (F-04)", async () => {
+test("a route with a config object that omits public stays protected (F-10)", async () => {
   const app = await buildApp(db);
   // `config` present but empty -- distinct from the no-config case above.
   // Anything short of an exact `public: true` must fail closed.
@@ -129,7 +129,7 @@ test("a route with a config object that omits public stays protected (F-04)", as
   await app.close();
 });
 
-test("a route explicitly marked public: false stays protected (F-04)", async () => {
+test("a route explicitly marked public: false stays protected (F-10)", async () => {
   const app = await buildApp(db);
   app.get("/test-only/explicitly-private", { config: { public: false } }, () => ({ ok: true }));
   const res = await app.inject({ method: "GET", url: "/test-only/explicitly-private" });
@@ -138,7 +138,7 @@ test("a route explicitly marked public: false stays protected (F-04)", async () 
   await app.close();
 });
 
-test("a route explicitly marked public: true is let through (F-04)", async () => {
+test("a route explicitly marked public: true is let through (F-10)", async () => {
   const app = await buildApp(db);
   app.get("/test-only/public", { config: { public: true } }, () => ({ ok: true }));
   const res = await app.inject({ method: "GET", url: "/test-only/public" });
@@ -147,7 +147,7 @@ test("a route explicitly marked public: true is let through (F-04)", async () =>
   await app.close();
 });
 
-test("a route registered inside a child plugin is still denied by default -- no registration path skips the guard (F-04)", async () => {
+test("a route registered inside a child plugin is still denied by default -- no registration path skips the guard (F-10)", async () => {
   const app = await buildApp(db);
   // Registered the way a real feature would eventually split routes into
   // their own plugin file: app.register(subPlugin). The guard hook was

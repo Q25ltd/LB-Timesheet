@@ -2,7 +2,7 @@ import { stripComments } from "./tenantPatterns.js";
 
 /**
  * Finds Fastify route registrations that don't declare an explicit
- * `public: true|false` (F-04's `route-declares-auth`).
+ * `public: true|false` (F-10's `route-declares-auth`).
  *
  * This is a guardrail, not the security boundary -- the boundary is the
  * default-deny `onRequest` hook in app.ts, which protects a route whether or

@@ -142,7 +142,7 @@ shared helpers. No inline `reply.status(4xx).send({ error: "..." })`.
 
 ### Every route is protected by default
 A root `onRequest` hook in `app.ts` rejects every request unless the matched
-route is explicitly marked `config: { public: true }` (F-04). A route is
+route is explicitly marked `config: { public: true }` (F-10). A route is
 closed the moment it is registered — including inside a child plugin — with
 no preHandler for the author to remember. Making a route public is the
 deliberate, visible exception, not the default. `requireAuth()` in

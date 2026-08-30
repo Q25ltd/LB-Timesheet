@@ -4,7 +4,7 @@ import { AppError } from "./errors.js";
 /**
  * The route-registration marker consumed by the default-deny `onRequest` hook
  * in app.ts, and (as a static hint only, never the security boundary) flagged
- * when absent by the `route-declares-auth` check-rules rule. F-04.
+ * when absent by the `route-declares-auth` check-rules rule. F-10.
  */
 declare module "fastify" {
   interface FastifyContextConfig {

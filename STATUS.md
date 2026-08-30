@@ -123,7 +123,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 Tooling gaps that are accepted for now, not blocking, and not forgotten.
 
-- **`route-declares-auth` static check has a parser gap (F-04, 2026-08-30).**
+- **`route-declares-auth` static check has a parser gap (F-10, 2026-08-30).**
   `api/scripts/rules/routePatterns.ts`'s paren-depth matcher tracks nesting
   but not quote/string state (unlike `stripComments`). A route handler
   containing an unbalanced `(` inside a string or template literal can make
@@ -133,8 +133,8 @@ Tooling gaps that are accepted for now, not blocking, and not forgotten.
   **Not a runtime security gap**: the real enforcement boundary is the
   default-deny `onRequest` hook in `app.ts`, which has no such blind spot and
   rejects the request regardless of what the static check saw. Demonstrated
-  with two constructed repro cases during F-04's adversarial review
-  (2026-08-30); accepted as-is rather than expanding F-04's scope to harden a
+  with two constructed repro cases during F-10's adversarial review
+  (2026-08-30); accepted as-is rather than expanding F-10's scope to harden a
   secondary guardrail. Cleanup: teach the paren matcher to track quote state
   the way `stripComments` already does.
 

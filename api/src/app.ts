@@ -26,7 +26,7 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // (AUTH.md), not a cookie. Enabling it is an architectural change.
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
 
-  // F-04: every route is authenticated by default. A route becomes public
+  // F-10: every route is authenticated by default. A route becomes public
   // only through the explicit `config: { public: true }` marker below --
   // never by omission, and never by living outside some protected structure.
   // Registered on the root instance before any route, so Fastify's
