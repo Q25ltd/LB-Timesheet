@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
 import { allowedOrigins } from "./lib/env.schema.js";
+import { registerErrorHandling } from "./lib/errors.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -25,6 +26,11 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
 
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
+
+  // Every error path — thrown, validation, unknown route, crash — leaves
+  // through the one envelope. Without this, Fastify's defaults return their
+  // own shape and a 500 echoes the exception message to the client.
+  registerErrorHandling(app);
 
   app.get("/health", async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
