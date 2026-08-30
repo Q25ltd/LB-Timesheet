@@ -16,35 +16,43 @@ the company's office.
 | `CLAUDE.md` | Agent instructions and mandatory rules — read first |
 | `PRODUCT.md` | Product scope and the in/out boundary |
 | `STATUS.md` | What is actually built |
-| `DECISIONS.md` | Settled decisions (D1–D12) and open questions |
+| `AUTH.md` | Frozen auth/tenant contract — read before touching anything tenant-scoped |
+| `DECISIONS.md` | Settled decisions and open questions |
+| `audits/` | Adversarial review reports — what was found, what got fixed |
 | `DEVLOG.md` | Session history |
 
 ## Local development
 
-**Node 22.12+ is required** — Prisma 7 breaks on Node 20. With nvm: `nvm use`
-(the repo has a `.nvmrc`).
-
-Postgres runs in Docker on port **5544** (the TMS and something else already hold 5432 and 5433):
+Requires **Node 22.13+** (`.nvmrc` pins it; `nvm use`) and Docker.
 
 ```bash
-docker compose up -d
+nvm use
+docker compose up -d          # Postgres 16 on port 5544
+cp api/.env.example api/.env  # then follow the comments in it — the JWT
+                              # placeholder is deliberately rejected
+npm install                   # root deps: eslint, knip
+npm install --prefix api      # api deps + prisma generate
+npm run check                 # the authoritative gate — see below
+npm run dev                   # http://localhost:3000/health
 ```
 
-Then:
+**The schema reaches databases through migrations only** (`api/prisma/migrations`),
+never `db push`. You normally never apply them by hand: `npm run check`'s db
+stage builds a throwaway `lb_timesheet_check` database with `prisma migrate
+deploy` on every run.
 
-```bash
-cd api
-cp .env.example .env
-npm install
-npm run db:push
-npm run dev
-```
+## The authoritative gate
 
-`npm run studio` opens a browser table editor for the database — during early
-development that is the driver/company admin screen.
+`npm run check` = generate → typecheck → eslint → check-rules → prisma validate
+→ knip → unit tests → **db stage** (clean database + real migrations + the
+PostgreSQL integrity and Company A/B repository suites). CI runs exactly this
+one command — there is no separate CI checklist to drift.
 
-Note: do not paste `#` comments onto the end of these commands. Interactive zsh
-does not treat `#` as a comment by default and will pass it as an argument.
+`npm run studio` (in `api/`) opens a table editor — during early development
+that is the admin screen.
+
+Note: don't paste `#` comments onto the ends of commands; interactive zsh
+passes them through as arguments.
 
 ## Layout
 

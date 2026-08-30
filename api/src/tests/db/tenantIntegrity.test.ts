@@ -238,10 +238,46 @@ test("a ShiftSubmitJob under the correct company is accepted", async () => {
 });
 
 test("PostgreSQL REJECTS a ShiftSubmitJob whose companyId differs from its shift's", async () => {
+  // A FRESH shift with no outbox row: shiftInA already has one, so reusing it
+  // would trip the F-09 @@unique([shiftId]) first (P2002) and mask the FK
+  // check this test exists to prove. Closed status, so the one-open-shift
+  // index stays out of the way too.
+  const fresh = await prisma.shift.create({
+    data: {
+      membershipId: membershipA,
+      companyId: companyA,
+      userId: driver,
+      driverName: TAG,
+      shiftDate: new Date("2026-08-31T00:00:00.000Z"),
+      startedAt: new Date("2026-08-31T05:43:00.000Z"),
+      status: "voided",
+    },
+  });
   await assert.rejects(
-    prisma.shiftSubmitJob.create({ data: { companyId: companyB, shiftId: shiftInA } }),
+    prisma.shiftSubmitJob.create({ data: { companyId: companyB, shiftId: fresh.id } }),
     FOREIGN_KEY_VIOLATION,
   );
+});
+
+// ── Outbox idempotency (F-09) ────────────────────────────────────────────────
+
+test("PostgreSQL REJECTS a second outbox row for the same shift — submits are idempotent", async () => {
+  // The 'a ShiftSubmitJob under the correct company is accepted' test above
+  // already created the one allowed row for shiftInA.
+  await assert.rejects(
+    prisma.shiftSubmitJob.create({ data: { companyId: companyA, shiftId: shiftInA } }),
+    UNIQUE_VIOLATION,
+  );
+});
+
+test("a failed delivery is retried by UPDATING the existing row, not inserting", async () => {
+  const job = await prisma.shiftSubmitJob.findUniqueOrThrow({ where: { shiftId: shiftInA } });
+  const retried = await prisma.shiftSubmitJob.update({
+    where: { id: job.id },
+    data: { status: "failed", attempts: { increment: 1 }, lastError: "SMTP timeout" },
+  });
+  assert.equal(retried.status, "failed");
+  assert.equal(retried.attempts, 1);
 });
 
 // ── Tenant-safe lookup primitive ─────────────────────────────────────────────

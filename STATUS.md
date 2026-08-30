@@ -10,14 +10,17 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 
 ## Overall
 
-🔶 **Skeleton running.** Repo initialised, schema pushed to a local database,
-API boots and serves `/health`. Verified on the Mac 2026-08-25.
+🔶 **Hardened foundation; still nothing a user can use.** No auth routes, no
+shift flow, no PDF, no email sending, no web app, no mobile app.
 
-No auth, no shift flow, no PDF, no email, no web app, no mobile app yet — the
-product does nothing a user could use.
+What IS real: migration-managed schema with membership-bound shifts and a
+one-open-shift invariant; a tenant-safe repository boundary with Company A/B
+proofs; global error handling that cannot leak internals; fail-closed env
+validation (CORS, JWT, email); a single authoritative gate (`npm run check`)
+that CI runs verbatim, ending in a clean-database migrate-deploy + integrity
+suite. Audit F-01…F-09 closed or consciously deferred; see audits/.
 
-Requires **Node 22.12+** (Prisma 7 breaks on Node 20); `.nvmrc` pins it.
-Local Postgres runs on **port 5544**.
+Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
 ---
 
@@ -102,6 +105,10 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to `npm run check` — not yet re-verified green |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
+| Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests |
+| Outbox idempotency (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 |
+| Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
+| Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
 | Auth implementation (login, select, switch, refresh, middleware) | 🔲 |
 | Session model + refresh rotation | 🔲 |
 | Multi-company driver memberships | 🔲 |

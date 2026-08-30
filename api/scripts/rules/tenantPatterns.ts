@@ -15,7 +15,7 @@
  */
 
 /** `body`, `query` or `params`, optionally reached through any receiver name. */
-const INPUT_PROPERTY = String.raw`(?:[A-Za-z_$][\w$]*\s*\.\s*)?(?:body|query|params)`;
+const INPUT_PROPERTY = String.raw`(?:[A-Za-z_$][\w$]*\s*\??\.\s*)?(?:body|query|params)`;
 
 /**
  * Member access: `req.body.companyId`, `r.query.companyId`, `body.companyId`,
@@ -26,7 +26,7 @@ const INPUT_PROPERTY = String.raw`(?:[A-Za-z_$][\w$]*\s*\.\s*)?(?:body|query|par
  * the signal regardless of what it hangs off.
  */
 export const MEMBER_ACCESS = new RegExp(
-  String.raw`\b${INPUT_PROPERTY}\s*(?:\.\s*companyId\b|\[\s*["'\`]companyId["'\`]\s*\])`,
+  String.raw`\b${INPUT_PROPERTY}\s*(?:\??\.\s*companyId\b|\[\s*["'\`]companyId["'\`]\s*\])`,
 );
 
 /** Right-hand side of a destructuring assignment that reads request input. */
@@ -134,7 +134,13 @@ function stripBlockAndLineComments(source: string): string {
  * Parsing is the one legitimate destination — `Schema.parse(req.body)` is
  * exactly how a route is supposed to turn input into a DTO.
  */
-const RAW_REQUEST_ARGUMENT = /^(?:await\s+)?(?:[A-Za-z_$][\w$]*\s*\.\s*)?(?:body|query|params)$|^(?:req|request|_req|_request)$/;
+// Deliberately requires a receiver (`req.body`, `r.query`) or a bare request
+// object — a bare identifier like `body` is NOT matched, because legitimate
+// code passes locals named body/params around constantly (reply.send(body),
+// mailer.send(to, subject, body)) and a rule that fires on those gets
+// disabled. Cost: `const b = req.body; svc.f(b)` escapes — the repository
+// boundary and the A/B tests are what actually hold there.
+const RAW_REQUEST_ARGUMENT = /^(?:await\s+)?[A-Za-z_$][\w$]*\s*\??\.\s*(?:body|query|params)$|^(?:req|request|_req|_request)$/;
 const PARSE_CALLEES = /\.(?:safeParseAsync|parseAsync|safeParse|parse)$/;
 
 /** Returns the callee name when a line hands raw request input to a call. */

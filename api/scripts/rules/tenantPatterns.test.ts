@@ -24,6 +24,8 @@ const MEMBER_ACCESS_CAUGHT = [
   "app.get('/x', async (ctx) => ctx.query.companyId);",  // arbitrary receiver
   "const body = req.body; const companyId = body.companyId;",  // aliased, second read
   "return prisma.shift.findMany({ where: { companyId: req.body.companyId } });",
+  "const c = req.body?.companyId;",             // optional chaining
+  "const c = req?.body?.companyId;",
 ];
 
 test("MEMBER_ACCESS catches every direct and bracket read of companyId", () => {
@@ -147,7 +149,11 @@ test("flags a raw request object handed to a service", () => {
   assert.equal(passesRawRequestToCall("return svc.list(req.query);"), "svc.list");
   assert.equal(passesRawRequestToCall("return svc.get(request.params);"), "svc.get");
   assert.equal(passesRawRequestToCall("return handle(req);"), "handle");
-  assert.equal(passesRawRequestToCall("return svc.create(auth, body);"), "svc.create");
+  // A bare local named `body` is deliberately NOT flagged — see
+  // RAW_REQUEST_ARGUMENT. reply.send(body) must stay legal.
+  assert.equal(passesRawRequestToCall("return svc.create(auth, body);"), null);
+  assert.equal(passesRawRequestToCall("reply.send(body);"), null);
+  assert.equal(passesRawRequestToCall("mailer.send(to, subject, body);"), null);
 });
 
 test("parsing is the one legitimate destination for raw input", () => {

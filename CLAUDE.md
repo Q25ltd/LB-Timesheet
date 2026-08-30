@@ -160,8 +160,22 @@ deleted on sight.
 ### Never comment out code
 Delete it. Git history is the archive.
 
-### The rules above are enforced, not just written
-`npm run check:rules` fails the build on: Node older than 22.12 · `any` ·
+### Guardrails vs guarantees — do not confuse them
+Tenant safety rests on three layers, strongest first:
+
+1. **The database** — composite FKs bind every Shift to the membership that
+   authorised it and every child to its parent's company; a partial unique
+   index enforces one open shift per user. Proven by `src/tests/db/`.
+2. **The repository boundary** — tenant models are reached only through
+   `src/repositories/` with a nominal `TenantContext` (constructed solely by
+   `TenantContext.trust()`), so an ID-only query is not expressible there.
+   Proven by the Company A/B tests in `repositoryTenantBoundary.test.ts`.
+3. **check-rules** — text-based guardrails that raise the cost of mistakes.
+   They are NOT the security guarantee: sufficiently indirect code evades
+   them. Their own wiring is fixture-tested (`scripts/rules/engine.test.ts`),
+   so an unwired rule turns the suite red.
+
+`npm run check:rules` fails the build on: Node older than 22.13 · `any` ·
 `console.*` in src · inline error sends · `jwt.verify` outside the auth helpers ·
 an unbounded `z.string()` · an empty `.catch(() => {})` · `String @default("")` in
 the schema · a tenant model with no `companyId` · a route file never registered in
@@ -184,9 +198,10 @@ on the linter.
 Escape hatch: `// rules-ignore: <id>` on the line, **with a reason**. Reaching for
 it often means the rule is wrong — change the rule, don't paper over it.
 
-Before saying "done": `npm run check` from the repo root (typecheck → eslint →
-check-rules → prisma validate → knip → unit tests), **and** `npm run test:db`,
-which needs a live database and is deliberately not part of `check`.
+Before saying "done": `npm run check` from the repo root — generate, typecheck,
+eslint, check-rules, prisma validate, knip, unit tests, then the db stage, which
+builds a clean database from the real migrations and runs the integrity and
+Company A/B suites. One command; CI runs the same one.
 
 Never `npm audit fix --force` — see DEVLOG 2026-08-25.
 

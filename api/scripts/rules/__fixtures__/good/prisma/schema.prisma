@@ -1,0 +1,8 @@
+model Company {
+  id   String  @id
+  name String?
+}
+model Widget {
+  id        String @id
+  companyId String
+}

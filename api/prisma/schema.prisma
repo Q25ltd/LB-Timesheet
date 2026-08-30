@@ -22,6 +22,16 @@ datasource db {
 ///
 /// NOTE: this is the SHIFT lifecycle, not the delivery pipeline. Whether the
 /// PDF was emailed lives on ShiftSubmitJob.status and nowhere else.
+/// Delivery lifecycle of the outbox row. An enum for the same reason
+/// ShiftStatus is: the worker's claim query and retry logic key off these
+/// values, and a typo must not strand a submission.
+enum SubmitJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
 enum ShiftStatus {
   draft     /// created; checks not yet complete
   active    /// day underway
@@ -208,8 +218,7 @@ model ShiftSubmitJob {
   id            String    @id @default(cuid())
   companyId     String
   shiftId       String
-  /// pending | processing | completed | failed
-  status        String    @default("pending")
+  status        SubmitJobStatus @default(pending)
   attempts      Int       @default(0)
   lastError     String?
   nextAttemptAt DateTime  @default(now())
@@ -219,6 +228,11 @@ model ShiftSubmitJob {
   /// Composite key — see ShiftSegment.
   shift         Shift     @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade)
 
+  /// ONE outbox row per shift — the idempotency guarantee (F-09). An offline
+  /// client retrying its submission cannot create a second row, so the same
+  /// PDF cannot be emailed twice. Retries of a FAILED delivery update this
+  /// row (attempts/nextAttemptAt), never insert another.
+  @@unique([shiftId])
   @@index([status, nextAttemptAt])
   @@index([companyId, shiftId])
 }

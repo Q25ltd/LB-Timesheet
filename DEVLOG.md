@@ -71,6 +71,43 @@ implementation**, not after.
 
 ---
 
+## 2026-08-30 — F-08/F-09/F-07/F-13: checker proven, outbox constrained, docs truthful
+
+**F-08.** check-rules split into `scripts/rules/engine.ts` (pure, parameterised
+root) and a thin CLI. New fixture trees under `scripts/rules/__fixtures__/`:
+`bad/` makes every one of the 16 rules fire at exact asserted lines; `good/` is
+realistic legitimate code (including `reply.send(body)`) asserted to produce
+ZERO violations. Deleting or un-wiring any rule now turns `engine.test.ts` red —
+the regression three reviews proved was undetectable. Two predicate fixes the
+fixtures forced: `req.body?.companyId` (optional chaining) is now caught, and
+the bare `body`/`params` argument match was dropped from the route-boundary rule
+because it flagged `reply.send(body)` — a guard that fires on correct code gets
+disabled. Fixtures are exempted from eslint/tsc/knip (deliberately broken code).
+
+**F-09.** `ShiftSubmitJob.status` → `SubmitJobStatus` enum; `@@unique([shiftId])`
+= ONE outbox row per shift, making offline submit retries idempotent at the
+database — a duplicate insert is a P2002, a failed delivery is retried by
+UPDATING the row. Migration 2 written by hand (this environment cannot run
+`migrate diff`): enum create + column cast (`USING status::"SubmitJobStatus"` —
+an out-of-vocabulary value fails the cast loudly, which is correct) + unique
+index. Proven the same way as migration 1: `npm run check`'s db stage deploys
+both onto a clean database. +2 integrity tests.
+
+**F-07.** Production (and anything not explicitly dev/test) now refuses to boot
+with an empty `SENDGRID_API_KEY` or malformed `MAIL_FROM` — the product IS an
+email; accepting submissions it can never deliver is worse than not starting.
+Also resolved the transform inconsistency the audit flagged: an unset NODE_ENV
+now resolves to "production" at runtime, matching the strict posture validation
+already applied. +4 env tests.
+
+**F-13.** Docs rewritten from observed state: README's setup now matches
+reality (root+api install, no `db push`, the real gate); CLAUDE.md's enforcement
+section demoted to the honest three-layer story (database → repository →
+guardrails) per D16; AUTH.md's role example lowercased to the schema vocabulary;
+`.env.example`'s stale port comment fixed.
+
+---
+
 ## 2026-08-30 — D15 implemented; first real migration created and PROVEN
 
 **Schema (F-02 closed).** Shift now carries `membershipId` + denormalised

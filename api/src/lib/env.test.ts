@@ -14,7 +14,13 @@ const valid = {
   JWT_SECRET:   "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c244f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24",
 };
 
-const prod = { ...valid, NODE_ENV: "production", WEB_ORIGIN: "https://timesheets.logisticbay.com" };
+const prod = {
+  ...valid,
+  NODE_ENV: "production",
+  WEB_ORIGIN: "https://timesheets.logisticbay.com",
+  SENDGRID_API_KEY: "SG.fake-but-present-for-tests",
+  MAIL_FROM: "timesheets@logisticbay.com",
+};
 
 // ── Base environment ─────────────────────────────────────────────────────────
 
@@ -24,6 +30,31 @@ test("accepts a minimal valid environment and applies defaults", () => {
   assert.equal(parsed.NODE_ENV, "development");
   assert.equal(parsed.SENDGRID_API_KEY, "");
   assert.equal(parsed.MAIL_FROM, "timesheets@logisticbay.com");
+});
+
+// ── Email must be configured outside dev/test (F-07) ─────────────────────────
+
+test("production without a SendGrid key fails closed — the product IS an email", () => {
+  const result = EnvSchema.safeParse({ ...prod, SENDGRID_API_KEY: "" });
+  assert.equal(result.success, false);
+  assert.match(describeEnvFailure(result.error), /SENDGRID_API_KEY is required/);
+});
+
+test("production rejects a malformed MAIL_FROM", () => {
+  const result = EnvSchema.safeParse({ ...prod, MAIL_FROM: "not-an-address" });
+  assert.equal(result.success, false);
+  assert.match(describeEnvFailure(result.error), /MAIL_FROM must be a plain email address/);
+});
+
+test("development and test run without email config on purpose", () => {
+  assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "development" }).success, true);
+  assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "test" }).success, true);
+});
+
+test("an unset NODE_ENV resolves to production at runtime — posture and value agree", () => {
+  const { NODE_ENV: _omitted, ...noEnv } = prod;
+  const parsed = EnvSchema.parse(noEnv);
+  assert.equal(parsed.NODE_ENV, "production");
 });
 
 // ── JWT secret quality (F-06) ────────────────────────────────────────────────

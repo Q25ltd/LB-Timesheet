@@ -1,0 +1,4 @@
+model Orphan {
+  id   String @id
+  name String @default("")
+}

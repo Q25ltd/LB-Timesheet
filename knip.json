@@ -2,8 +2,17 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "workspaces": {
     "api": {
-      "entry": ["scripts/**/*.ts", "src/**/*.test.ts"],
-      "project": ["src/**/*.ts", "!src/generated/**", "scripts/**/*.ts"],
+      "entry": [
+        "scripts/*.ts",
+        "scripts/rules/*.ts",
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "!src/generated/**",
+        "scripts/*.ts",
+        "scripts/rules/*.ts"
+      ],
       "ignoreDependencies": [
         "@prisma/client",
         "@sendgrid/mail",

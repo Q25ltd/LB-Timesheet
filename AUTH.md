@@ -38,8 +38,11 @@ resolves a trusted `AuthContext`, every query using that context, and
 
 ```
 Nerijus                        Driver John
- ├── Company A → OWNER          └── Company A → DRIVER
- └── Company B → DRIVER
+ ├── Company A → admin          └── Company A → driver
+ └── Company B → driver
+
+(Role values are the schema's lowercase `driver | admin` — canonical in
+prisma/schema.prisma, per CLAUDE.md "one concept, one name".)
 ```
 
 John never sees a company selector. Nerijus does.

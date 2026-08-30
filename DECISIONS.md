@@ -235,6 +235,16 @@ lives in `api/prisma/invariants.sql` and must be appended to the first migration
 by hand. **Until that migration exists this invariant is design intent, not
 enforcement.**
 
+### D16 — Static rules are guardrails; the database and repository are the guarantee (2026-08-30)
+Three adversarial reviews independently showed regex rules cannot prove tenant
+isolation (aliasing, casts and composition all evade text matching) and that
+over-broad rules get silenced and die. Settled layering: the **database**
+(composite FKs, partial indexes — F-02/F-09) and the **repository boundary**
+(`TenantContext` + `shiftRepository` — F-01) carry the guarantee, proven by the
+db and Company A/B suites; `check-rules` raises the cost of mistakes, and its
+wiring is fixture-tested (F-08) so a rule cannot silently unwire. Documentation
+must never again describe the static rules as the tenant security mechanism.
+
 ---
 
 ## ❓ Open — ask the user, do not guess

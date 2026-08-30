@@ -78,8 +78,7 @@ const JWT_MIN_LENGTH = 32;            // dev/test floor (unchanged)
 const JWT_MIN_LENGTH_PRODUCTION = 64; // e.g. `openssl rand -hex 32` = 64 chars = 32 bytes
 const JWT_MIN_DISTINCT_CHARS = 10;    // rejects "xxxx…", "abab…", keyboard mashes
 
-/** Why this secret is unusable, or null when it is acceptable. Not exported:
- *  the tests exercise it through EnvSchema, which is the only caller. */
+/** Why this secret is unusable, or null when it is acceptable. */
 function jwtSecretProblem(rawSecret: string, isProductionLike: boolean): string | null {
   const secret = rawSecret.trim();
   const minLength = isProductionLike ? JWT_MIN_LENGTH_PRODUCTION : JWT_MIN_LENGTH;
@@ -123,6 +122,27 @@ export const EnvSchema = BaseEnv
       ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: secretProblem });
     }
 
+    // The entire product is "PDF arrives in an inbox" (PRODUCT.md). A
+    // production process with email unconfigured would accept submissions it
+    // can never deliver — so it must not start. Dev/test run without a key on
+    // purpose (submissions log instead of send).
+    if (!devLike) {
+      if (value.SENDGRID_API_KEY.trim() === "") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["SENDGRID_API_KEY"],
+          message: "SENDGRID_API_KEY is required unless NODE_ENV is explicitly development or test",
+        });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.MAIL_FROM)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["MAIL_FROM"],
+          message: `MAIL_FROM must be a plain email address, got "${value.MAIL_FROM}"`,
+        });
+      }
+    }
+
     const configured = splitOrigins(value.WEB_ORIGIN);
 
     if (!devLike && configured.length === 0) {
@@ -149,7 +169,10 @@ export const EnvSchema = BaseEnv
       }
     }
   })
-  .transform(value => ({ ...value, NODE_ENV: value.NODE_ENV ?? "development" }));
+  // Validation above treats an unset NODE_ENV as production-like; the runtime
+  // value must agree, or the logger and every future env.NODE_ENV branch would
+  // run in dev mode under production rules. Unset resolves to "production".
+  .transform(value => ({ ...value, NODE_ENV: value.NODE_ENV ?? "production" }));
 
 export type Env = z.infer<typeof EnvSchema>;
 

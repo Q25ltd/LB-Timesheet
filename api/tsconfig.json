@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
@@ -18,6 +20,15 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "prisma.config.ts"],
-  "exclude": ["node_modules", "dist", "src/generated"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "prisma.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/generated",
+    "scripts/rules/__fixtures__"
+  ]
 }
