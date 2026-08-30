@@ -29,6 +29,7 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
  */
 const FOREIGN_KEY_VIOLATION = { name: "PrismaClientKnownRequestError", code: "P2003" };
 const UNIQUE_VIOLATION      = { name: "PrismaClientKnownRequestError", code: "P2002" };
+const RAW_QUERY_FAILURE     = { name: "PrismaClientKnownRequestError", code: "P2010" };
 
 const TAG = `fk-test-${Date.now()}`;
 let companyA = "";
@@ -85,6 +86,25 @@ before(async () => {
 after(async () => {
   await cleanup();
   await prisma.$disconnect();
+});
+
+// ── Membership roles are a closed authorization vocabulary ──────────────────
+
+test("a membership defaults to driver and accepts the explicit admin role", async () => {
+  const defaulted = await prisma.companyMembership.findUniqueOrThrow({ where: { id: membershipA } });
+  assert.equal(defaulted.role, "driver");
+
+  const admin = await prisma.companyMembership.create({
+    data: { companyId: companyA, userId: outsider, role: "admin" },
+  });
+  assert.equal(admin.role, "admin");
+});
+
+test("PostgreSQL REJECTS a membership role outside driver | admin", async () => {
+  await assert.rejects(
+    prisma.$executeRaw`UPDATE "CompanyMembership" SET "role" = 'owner' WHERE "id" = ${membershipA}`,
+    RAW_QUERY_FAILURE,
+  );
 });
 
 // ── Shift is bound to the membership that authorised it ─────────────────────

@@ -32,6 +32,13 @@ enum SubmitJobStatus {
   failed
 }
 
+/// Authorization role carried by a CompanyMembership. Closed at the database
+/// boundary so middleware never has to interpret an unknown role string.
+enum MembershipRole {
+  driver
+  admin
+}
+
 enum ShiftStatus {
   draft     /// created; checks not yet complete
   active    /// day underway
@@ -81,8 +88,7 @@ model CompanyMembership {
   id         String   @id @default(cuid())
   companyId  String
   userId     String
-  /// driver | admin
-  role       String   @default("driver")
+  role       MembershipRole @default(driver)
   active     Boolean  @default(true)
   /// Company's own payroll/employee reference for this driver, if they use one.
   payrollRef String?
