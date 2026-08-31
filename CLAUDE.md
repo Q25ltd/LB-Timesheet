@@ -201,7 +201,7 @@ Plus four rules protecting the tenant boundary (all detailed in AUTH.md):
 | Rule | Fails on |
 |---|---|
 | `no-client-tenant` | a **route or service** reading `companyId` from request input — member access, bracket access, or destructuring (including nested and multi-line) |
-| `no-company-id-in-dto` | a Zod schema declaring a `companyId` field |
+| `no-company-id-in-dto` | a Zod schema declaring a `companyId` field, outside the token-verification modules where the verified claims schema legitimately declares one |
 | `no-raw-request-past-route` | a route handing `req` / `req.body` / `req.query` / `req.params` to anything other than a schema `parse` |
 | `no-request-in-services` | a service touching a request object at all |
 

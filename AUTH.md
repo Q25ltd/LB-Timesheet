@@ -182,7 +182,7 @@ path is **never** authority.
 | Rule | Scope | Fails on |
 |---|---|---|
 | `no-client-tenant` | routes **and** services | reading `companyId` from `body`/`query`/`params` — member access (`req.body.companyId`), bracket access (`req.body["companyId"]`), any receiver name, and destructuring including **nested** and **multi-line** |
-| `no-company-id-in-dto` | all source | a Zod schema declaring a `companyId` field |
+| `no-company-id-in-dto` | all source except the token-verification modules | a Zod schema declaring a `companyId` field. The verified access-token claims schema legitimately declares one, so the rule skips exactly the modules `jwt-centralised` confines verification to — not a directory, and not a schema name. See STATUS.md for its residual limitation. |
 | `no-raw-request-past-route` | routes | handing `req`, `req.body`, `req.query` or `req.params` to anything except a schema `parse`/`safeParse` |
 | `no-request-in-services` | services | touching a request object at all |
 

@@ -14,17 +14,20 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 shift flow, no PDF, no email sending, no web app, no mobile app.
 
 What IS real: migration-managed schema with membership-bound shifts and a
-one-open-shift invariant; the Session persistence foundation (the table and its
-constraints only — see below); a tenant-safe repository boundary with Company
-A/B proofs; global error handling that cannot leak internals; fail-closed env
-validation (CORS, JWT, email); a single authoritative gate (`npm run check`)
-that CI runs verbatim, ending in a clean-database migrate-deploy + integrity
-suite. Findings F-01…F-11 and F-13 closed (F-12 reserved); see FINDINGS.md.
+one-open-shift invariant; Session persistence; protected-request authentication
+(P1.2a — see below); a tenant-safe repository boundary with Company A/B proofs;
+global error handling that cannot leak internals; fail-closed env validation
+(CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
+verbatim, ending in a clean-database migrate-deploy + integrity suite. Findings
+F-01…F-11 and F-13 closed (F-12 reserved); see FINDINGS.md.
 
-**A Session table is not authentication.** Nothing reads those columns yet: no
-JWT verification, no `requireAuth`, no login, refresh, logout, company switch
-or AuthContext. `requireAuth()` is still the stub that rejects every protected
-request.
+**Authentication verifies identity; nothing issues one.** `requireAuth` is no
+longer a stub — a request carrying a valid token, a live Session and a matching
+CompanyMembership now reaches a route with a trusted AuthContext. But **no code
+mints a token**: there is no login, no refresh rotation, no logout, no company
+selection or switching, and no route that reads `request.auth`. No driver can
+obtain a token through this product today. Authorization on `membershipStatus`
+and the AuthContext → TenantContext bridge are also not built.
 
 Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
@@ -103,12 +106,12 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 89 unit tests, test:db integrity gate |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 105 unit tests, test:db integrity gate |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
-| Database tenant-integrity proof | ✅ 43/43 against a clean database built by `migrate deploy` (2026-08-31). Includes membership-binding (D15) and one-open-shift, on create AND update. Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
+| Database tenant-integrity proof | ✅ 45/45 against a clean database built by `migrate deploy` (2026-08-31). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
 | Migrations | ✅ 4 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
-| CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to run `npm run check` verbatim. No workflow run has been independently verified for the current baseline (`86cd4e2`); its remote pass/fail result is unknown here. |
+| CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to run `npm run check` verbatim. No workflow run has been independently verified from here for the accepted P1.2a implementation commit (`5641691`); its remote pass/fail result is unknown here. |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
 | Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests |
@@ -116,9 +119,12 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
 | Default-deny route authentication (F-10) | ✅ closed — a root `onRequest` hook in `app.ts` rejects every route unless explicitly marked `public`. A secondary static guardrail (`route-declares-auth`) enforces explicit route posture in `check-rules`; the root runtime hook remains the security boundary. See "Known limitations" below for the guardrail's known parser gap. |
-| Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (part of the 43/43 in "Database tenant-integrity proof" above). |
-| Auth implementation (login, select, switch, refresh, middleware) | 🔲 |
-| Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. **Persistence only — nothing reads these columns.** |
+| Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (part of the 45/45 in "Database tenant-integrity proof" above). |
+| Protected-request authentication (P1.2a) | ✅ — `requireAuth` verifies a Bearer JWT (HS256 pinned; issuer `logisticbay-timesheets`; audience `timesheets-api`; `iat`/`exp`/`iss`/`aud` required by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by the claims schema), enforces the frozen declared lifetime `0 < exp - iat <= 900s`, then requires a persisted Session (present, not revoked, not past its absolute expiry, `userId === sub`) and a persisted CompanyMembership (present, `userId === sub`, `companyId === token.companyId`). The token's `companyId` is cross-checked against the row and never authority on its own — the AuthContext company comes from the persisted membership, and `role` is read fresh from that row on every request. Produces exactly `{ userId, companyId, membershipId, sessionId, role, membershipStatus }`. Every failure is the identical `401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, so the boundary is not an oracle for which check failed. Database access is the narrow `AuthStore` (two primary-key reads, records rebuilt field by field) — `requireAuth` never receives a PrismaClient or `AppDatabase`. Proven by 16 pipeline tests (`src/lib/auth.test.ts`, each negative paired with a positive control) and 2 tests against real persisted rows (`src/tests/db/authProtectedRequest.test.ts`). |
+| Auth routes — login, company select, company switch, refresh, logout, token minting | 🔲 — nothing in this product issues a token; the verifier is configured for `verify` only |
+| Inactive-membership authorization (403 rules on `membershipStatus`) | 🔲 — an inactive membership authenticates and is reported as `inactive`; the rules that act on that (AUTH.md, "Deactivated membership") are not built |
+| AuthContext → TenantContext bridge | 🔲 — no route consumes `request.auth`, and nothing converts it into the repository boundary's `TenantContext` |
+| Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. Since P1.2a the pipeline reads existence, `revokedAt`, `expiresAt` and `userId` on every protected request; the refresh-token columns and the grace deadline remain unread — no rotation logic exists. |
 | Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist; the logic does not |
 | Multi-company driver memberships | 🔲 |
 | Shift submission pipeline | 🔲 |
@@ -130,7 +136,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 ## Known limitations / cleanup backlog
 
-Tooling gaps that are accepted for now, not blocking, and not forgotten.
+Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 
 - **`route-declares-auth` static check has a parser gap (F-10, 2026-08-30).**
   `api/scripts/rules/routePatterns.ts`'s paren-depth matcher tracks nesting
@@ -147,13 +153,41 @@ Tooling gaps that are accepted for now, not blocking, and not forgotten.
   secondary guardrail. Cleanup: teach the paren matcher to track quote state
   the way `stripComments` already does.
 
+- **`no-company-id-in-dto` exempts the token-verification modules (P1.2a,
+  2026-08-31).** The rule could not tell an untrusted client DTO declaring
+  `companyId` from the verified access-token claims schema, which legitimately
+  declares one. It now skips exactly the modules where `jwt-centralised`
+  already confines token verification — today that is `src/lib/auth.ts` alone
+  (the pattern also covers a `src/lib/tokens.ts`, which does not exist yet), an
+  enforced boundary rather than a directory or a schema name. Client DTOs are
+  still reported everywhere else, including shared modules a route imports;
+  both sides are proven by good/bad fixtures in `scripts/rules/engine.test.ts`.
+  Scoping the rule to `routes/` + `services/` was rejected because nothing
+  confines a request DTO to those directories. **Residual limitation:** a
+  request DTO deliberately placed inside a token-verification module would
+  escape this specific rule. It remains a static pattern guardrail, not a
+  security proof (D16); the runtime boundary is `requireAuth` itself.
+
+- **Authentication runs before rate limiting (deliberate, P1.2a).** The
+  default-deny `onRequest` hook is registered after `cors` and before
+  `rateLimit`, so a rejected request is denied without spending a rate-limit
+  slot. The trade-off is that signature verification and the two identity
+  reads happen before any rate limit applies. Accepted; revisit if abuse of
+  unauthenticated verification ever becomes a concern.
+
+- **`request.auth` is optional at the Fastify type level (P1.2a).** Declared
+  `auth?: AuthContext` because a public route never runs `requireAuth`, so a
+  non-optional declaration would be false on exactly the routes where being
+  wrong matters most. Every future protected route must therefore narrow it.
+  Revisit when the first route consumes it.
+
 ---
 
 ## Infrastructure
 
 | Area | State |
 |---|---|
-| Repo initialised (git) | ✅ `main` — active repository; current baseline `86cd4e2` |
+| Repo initialised (git) | ✅ `main` — active repository; Git and the live remote own the current baseline (AGENT_WORKFLOW.md §2) |
 | API skeleton boots (`/health`) | ✅ verified on the Mac |
 | First Prisma schema | ✅ migration-managed (4 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
 | Local Postgres (docker-compose, port 5544) | ✅ running |

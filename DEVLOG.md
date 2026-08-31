@@ -4,6 +4,86 @@
 
 ---
 
+## 2026-08-31 — P1.2a: protected-request authentication
+
+`requireAuth` is no longer a stub. Shipped as
+`564169191dc39e7c09e556cf1bc6158f18d0ac32`. AUTH.md's "Every protected request"
+pipeline, and nothing beyond it — this boundary answers *is there a valid
+identity*, never *may this identity do this*.
+
+**The pipeline.** A Bearer token is verified with HS256 pinned, issuer
+`logisticbay-timesheets` and audience `timesheets-api` — iss/aud make a
+LogisticBay TMS token structurally unusable here even if a secret ever leaked
+between the products (D1). All eight claims are required: `iat`/`exp`/`iss`/
+`aud` by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by a bounded
+Zod schema, so each claim is decided in exactly one place. `iat`/`exp` are
+parsed as NumericDate integers. Then the persisted Session must exist, not be
+revoked, not be past its absolute expiry, and satisfy `session.userId ===
+token.sub`; then the persisted CompanyMembership must exist and satisfy
+`membership.userId === token.sub` and `membership.companyId ===
+token.companyId`.
+
+**The token's `companyId` is never standalone authority.** It is a claim to
+validate against the row; the AuthContext's company comes from the persisted
+membership, and `role` is read fresh from that row on every request, so a
+changed or revoked role takes effect immediately instead of outliving its
+revocation. `membershipStatus` derives from `CompanyMembership.active` via an
+explicit `=== true`, so anything that is not exactly true resolves to the more
+restricted `inactive`.
+
+**Exactly six fields** — `{ userId, companyId, membershipId, sessionId, role,
+membershipStatus }` — and every failure path returns the identical
+`401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, constructed
+inside the boundary so a verifier error can neither reach the global handler as
+a 500 nor become an oracle for which check failed (F-05). An inactive membership
+**authenticates** and is reported as inactive; the 403 rules that act on that
+are not this boundary.
+
+**A narrow `AuthStore`, not a database handle.** Two reads by primary key
+returning records rebuilt field by field. `requireAuth` never receives a
+PrismaClient or `AppDatabase`, so it cannot reach a tenant model, run a raw
+query, or write anything — the restriction is structural, not remembered. This
+is an adapter for one caller; the tenant-safe repository boundary is a different
+mechanism for a different problem and is untouched.
+
+**The hardening sequence, recorded because the order matters.** Adversarial
+review of the unfinished work found that a token *omitting* registered claims
+was accepted: `allowedIss`/`allowedAud` validate a value when present but do not
+themselves require presence, and expiry is only checked when `exp` exists — so a
+token with no `exp`/`iss`/`aud` verified, i.e. an unexpiring, cross-product
+token. `requiredClaims` was added. A second probe then showed that ordinary
+expiration validation still did not enforce AUTH.md's frozen 15-minute TTL: no
+verifier option relates `exp` to `iat`, and `maxAge` measures age against the
+server clock, which would accept a 24-hour token for its first 15 minutes. The
+explicit invariant `0 < exp - iat <= 900` was implemented and adversarially
+verified. Both were found and fixed **before** the boundary was accepted; they
+are development history, not open defects, and neither received a finding ID.
+
+**One authorized static-rule correction.** `no-company-id-in-dto` fired on the
+verified-token claims schema. It now skips exactly the modules where
+`jwt-centralised` already confines token verification — the same boundary named
+once and shared by both rules, so the two cannot drift apart. Scoping it to
+`routes/` + `services/` was rejected: nothing structurally confines a request
+DTO to those directories, so that would have traded a false positive for a
+false-negative path. Good/bad fixtures prove both sides. No `rules-ignore`, no
+blanket `src/lib` exemption. It remains a static guardrail, not a security proof
+(D16), and its residual limitation is recorded in STATUS.md.
+
+**Verified.** Authoritative `npm run check` exit 0: 105/105 unit tests, 45/45
+DB/integration tests, four migrations deployed to a fresh database, `db-check:
+OK`. Within those: 16/16 P1.2a pipeline tests (every negative case paired with a
+positive control, so a test cannot pass because the setup was broken), 2/2
+against real persisted rows, 5/5 default-deny (F-10), 32/32 rule engine/pattern
+tests. `git diff --check` clean, tree clean at commit.
+
+**Explicitly NOT built.** Token minting, login, refresh-token lookup and
+rotation, logout, company selection, company switching, inactive-membership
+authorization, the AuthContext → TenantContext bridge, any route that reads
+`request.auth`, and all mobile/offline authentication. Nothing in this product
+issues a token today.
+
+---
+
 ## 2026-08-31 — P1.1: Session persistence foundation (no authentication)
 
 The first Phase 1 boundary, deliberately scoped to persistence alone. Shipped
