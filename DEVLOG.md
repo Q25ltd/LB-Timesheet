@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-08-31 — Independent backend foundation audit
+
+A fresh independent architecture/security audit ran read-only against
+`0591241c539b0469fa0223787a80d16eaa8e4882`. Nothing was built or fixed; the
+repository stayed clean and frozen throughout. This entry records the outcome —
+the findings themselves live in FINDINGS.md, and current state lives in
+STATUS.md.
+
+**Result: 0 Critical, 0 High, 5 Medium, 4 Low, 4 Observation.** The authoritative
+gate was green at the audited commit: 105 unit tests, 45 DB/integration tests,
+four migrations onto a fresh database.
+
+**Not demonstrated** — no unauthenticated authentication bypass; no
+cross-company escape through Shift, ShiftSegment or ShiftSubmitJob; no
+same-company driver-to-driver escape through `shiftRepository`. P1.2a was not
+invalidated and remains ✅.
+
+**What the audit established is what comes next.** The gap it found is not in
+authentication but immediately above it: nothing converts authenticated
+`request.auth` into a repository `TenantContext`, and no policy consumes
+`membershipStatus`, so a future route could mistake authentication for
+authorization. That is F-14, and it is the next boundary — **P1.2b, Authorized
+Tenant Context**. The first protected business route is blocked on it, and
+separately on **O8**, which must be decided before `shiftDate` can be persisted
+correctly. Public deployment is blocked on at least F-15 (authentication runs
+ahead of the limiter, and proxy trust is unreviewed) and F-17 (production
+`npm start` invokes `tsx`, a devDependency). Development itself is not blocked:
+P1.2b and login groundwork may both proceed.
+
+**Governance.** Eight canonical IDs were assigned in one pass — **F-14…F-21** —
+after re-verifying every `F-XX` in the working tree and across `git log --all`.
+`F-12` remains reserved and was deliberately not used; reserved is not the same
+as next-available. Three audit items were recorded **without** an ID, in
+FINDINGS.md's "Known sub-issues" section and STATUS.md's cleanup backlog, because
+they are accepted non-blocking limitations rather than trackable work:
+destructive `db-check` naming, `AuthStore` Session over-fetch, and the
+confirmation that static rules remain guardrails (D16 working as designed, not a
+defect). The npm advisory chain through Prisma was already recorded on
+2026-08-25 and was not duplicated. O8 belongs to DECISIONS.md and was
+cross-referenced, not restated. The audit's report-local `AUDIT-2026-*`
+identifiers are not canonical and appear nowhere in this repository.
+
+**One wording correction with teeth.** F-09's one-row-per-shift constraint had
+been described — in STATUS, the schema and a test — as "submission idempotency".
+It is enqueue uniqueness only. Transaction atomicity, worker-claim idempotency
+and exactly-once email delivery are separate guarantees, none of them proven
+(F-16). The STATUS wording is fixed here; the schema and test comments are code
+scope and are listed for a later authorized pass.
+
+**Owner decisions still open**, recorded as open rather than resolved: O8's
+filing-date/timezone rule, the `iat` clock-skew allowance, the rate-limit and
+`trustProxy` values, invitation expiry and format, the `notes` audience (F-20 —
+removal remains valid), and the refresh-token lookup design (F-21).
+
+---
+
 ## 2026-08-31 — P1.2a: protected-request authentication
 
 `requireAuth` is no longer a stub. Shipped as

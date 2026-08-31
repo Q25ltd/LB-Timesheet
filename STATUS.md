@@ -19,7 +19,14 @@ one-open-shift invariant; Session persistence; protected-request authentication
 global error handling that cannot leak internals; fail-closed env validation
 (CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
 verbatim, ending in a clean-database migrate-deploy + integrity suite. Findings
-F-01…F-11 and F-13 closed (F-12 reserved); see FINDINGS.md.
+F-01…F-11 and F-13 closed; F-14…F-21 opened or deferred by the 2026-08-31
+backend foundation audit (F-12 reserved); see FINDINGS.md.
+
+**Independently audited 2026-08-31** against `0591241`: **0 Critical, 0 High**,
+5 Medium, 4 Low, 4 Observation. No authentication bypass, no cross-company
+escape and no same-company driver-to-driver escape was demonstrated. The audit
+did not invalidate P1.2a. What it did establish is what must come next — see
+"Blocked until" below.
 
 **Authentication verifies identity; nothing issues one.** `requireAuth` is no
 longer a stub — a request carrying a valid token, a live Session and a matching
@@ -28,6 +35,12 @@ mints a token**: there is no login, no refresh rotation, no logout, no company
 selection or switching, and no route that reads `request.auth`. No driver can
 obtain a token through this product today. Authorization on `membershipStatus`
 and the AuthContext → TenantContext bridge are also not built.
+
+**Blocked until.** The *first protected business route* is blocked by **P1.2b**
+(F-14) and by the still-open **O8** filing-date/timezone decision. *Public
+deployment* is blocked by at least the rate-limit/proxy architecture (F-15) and
+the production `tsx` runtime (F-17). **Development itself is not blocked** —
+P1.2b and login/token-minting groundwork may proceed.
 
 Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
@@ -112,27 +125,28 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Database tenant-integrity proof | ✅ 45/45 against a clean database built by `migrate deploy` (2026-08-31). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
 | Migrations | ✅ 4 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
 | CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to run `npm run check` verbatim. No workflow run has been independently verified from here for the accepted P1.2a implementation commit (`5641691`); its remote pass/fail result is unknown here. |
-| Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
+| Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. **Public deployment is additionally blocked by F-15** (auth-before-rate-limit + unreviewed proxy trust) **and F-17** (production `npm start` runs `tsx`, a devDependency). |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
 | Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests |
-| Outbox idempotency (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 |
+| Outbox enqueue uniqueness (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 — this is **storage/enqueue uniqueness only**. Transaction atomicity of transition-plus-enqueue, worker-claim idempotency and exactly-once external email delivery are **not** proven; see **F-16**. Do not describe this row as "submission idempotency". |
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
 | Default-deny route authentication (F-10) | ✅ closed — a root `onRequest` hook in `app.ts` rejects every route unless explicitly marked `public`. A secondary static guardrail (`route-declares-auth`) enforces explicit route posture in `check-rules`; the root runtime hook remains the security boundary. See "Known limitations" below for the guardrail's known parser gap. |
 | Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (part of the 45/45 in "Database tenant-integrity proof" above). |
 | Protected-request authentication (P1.2a) | ✅ — `requireAuth` verifies a Bearer JWT (HS256 pinned; issuer `logisticbay-timesheets`; audience `timesheets-api`; `iat`/`exp`/`iss`/`aud` required by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by the claims schema), enforces the frozen declared lifetime `0 < exp - iat <= 900s`, then requires a persisted Session (present, not revoked, not past its absolute expiry, `userId === sub`) and a persisted CompanyMembership (present, `userId === sub`, `companyId === token.companyId`). The token's `companyId` is cross-checked against the row and never authority on its own — the AuthContext company comes from the persisted membership, and `role` is read fresh from that row on every request. Produces exactly `{ userId, companyId, membershipId, sessionId, role, membershipStatus }`. Every failure is the identical `401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, so the boundary is not an oracle for which check failed. Database access is the narrow `AuthStore` (two primary-key reads, records rebuilt field by field) — `requireAuth` never receives a PrismaClient or `AppDatabase`. Proven by 16 pipeline tests (`src/lib/auth.test.ts`, each negative paired with a positive control) and 2 tests against real persisted rows (`src/tests/db/authProtectedRequest.test.ts`). |
-| Auth routes — login, company select, company switch, refresh, logout, token minting | 🔲 — nothing in this product issues a token; the verifier is configured for `verify` only |
-| Inactive-membership authorization (403 rules on `membershipStatus`) | 🔲 — an inactive membership authenticates and is reported as `inactive`; the rules that act on that (AUTH.md, "Deactivated membership") are not built |
-| AuthContext → TenantContext bridge | 🔲 — no route consumes `request.auth`, and nothing converts it into the repository boundary's `TenantContext` |
+| Auth routes — login, company select, company switch, refresh, logout, token minting | 🔲 — nothing in this product issues a token; the verifier is configured for `verify` only. **F-19** (a far-future `iat` is currently accepted) must be resolved before this work is accepted complete |
+| **P1.2b — Authorized Tenant Context** (next boundary) | 🔲 **not started** — intended invariant: *a protected business operation can obtain a `TenantContext` only from authenticated `request.auth`; inactive memberships are denied by default; any allowed inactive-member operation requires an explicit narrow authorization path.* Not partial: `AuthContext` and `TenantContext` each exist, but the boundary between them does not — `TenantContext.trust()` has no production caller and nothing consumes `membershipStatus`. F-14. **Blocks the first protected business route.** |
+| Inactive-membership authorization (403 rules on `membershipStatus`) | 🔲 — an inactive membership authenticates and is reported as `inactive`; the rules that act on that (AUTH.md, "Deactivated membership") are part of P1.2b / F-14 |
+| First protected business route | 🔲 — blocked by P1.2b (F-14) **and** by O8, which must be decided before `shiftDate` can be persisted correctly (a local 00:30 BST start can fall on the previous UTC date). Owner decision required; see DECISIONS.md O8 |
 | Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. Since P1.2a the pipeline reads existence, `revokedAt`, `expiresAt` and `userId` on every protected request; the refresh-token columns and the grace deadline remain unread — no rotation logic exists. |
-| Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist; the logic does not |
+| Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist; the logic does not. **F-21** (cross-column refresh-hash ambiguity) must be decided before this is implemented |
 | Multi-company driver memberships | 🔲 |
-| Shift submission pipeline | 🔲 |
+| Shift submission pipeline | 🔲 — F-16 (atomicity / worker claim / exactly-once delivery) must be resolved as part of this boundary |
 | PDF generation | 🔲 |
 | Email delivery + retry outbox | 🔲 |
 | Retention / deletion job | 🔲 — records are kept (D9); period + cancellation rule still open (O1) |
 | Subscription enforcement | 🔲 |
-| Driver activation-code onboarding | 🔲 |
+| Driver activation-code onboarding | 🔲 — F-18 (`Company.joinCode` is a permanent plaintext credential) must be resolved as part of this boundary |
 
 ## Known limitations / cleanup backlog
 
@@ -180,6 +194,44 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   non-optional declaration would be false on exactly the routes where being
   wrong matters most. Every future protected route must therefore narrow it.
   Revisit when the first route consumes it.
+
+- **`db-check` can force-drop a fixed database name (audit 2026-08-31, Low).**
+  `api/scripts/db-check.ts:56` runs `DROP DATABASE IF EXISTS
+  "lb_timesheet_check" WITH (FORCE)` against whatever server `DATABASE_URL`
+  points at. The naming convention is not a structural safety barrier — unlike
+  `db-smoke`, which refuses to run outside `development`/`test` and outside the
+  two local database names. Non-blocking backlog; direction is to mirror those
+  guards or require an explicit destructive-test sentinel. No canonical finding
+  ID; tracked in FINDINGS.md's "Known sub-issues" section.
+
+- **`AuthStore` over-fetches the Session row (audit 2026-08-31, Low).**
+  `api/src/lib/authStore.ts:62` reads the whole row — refresh-token hashes
+  included — then rebuilds a four-field record in memory. Defence in depth
+  rather than a demonstrated leak: nothing above the adapter sees Prisma.
+  Non-blocking backlog; direction is an explicit Prisma `select`, when that
+  boundary is next touched under owner authorization.
+
+- **Stale comments and config outside documentation scope (audit 2026-08-31).**
+  Five reconciliation items found by the audit that live in **code, tests or
+  config**, and so could not be corrected by a documentation-only task. Not
+  defects in behaviour; each is a comment or a range that no longer matches
+  reality. Awaiting an authorized code-scope pass:
+  1. `api/prisma/schema.prisma:94` — the Session model comment still says
+     "Persistence only. Nothing in this repo reads these columns yet", and
+     lists `requireAuth` and JWT verification as unbuilt. P1.2a made this false.
+  2. `api/src/tests/db/repositoryTenantBoundary.test.ts:199` — comment still
+     says driver-facing methods are "scoped by `companyId` alone, so driver A2
+     can currently reach driver A's data". F-11 fixed that; the test now proves
+     the opposite of what its comment describes.
+  3. `api/prisma/schema.prisma:303` and
+     `api/src/tests/db/tenantIntegrity.test.ts:284` — both describe one-row-per-
+     shift uniqueness as the "idempotency guarantee" / "submits are idempotent".
+     That is enqueue uniqueness only (F-16). The STATUS row above has been
+     corrected; the code comments have not.
+  4. `api/scripts/first-migration.sh:99` — names `lb_timesheet_migrate_test`,
+     while `test:db` uses `lb_timesheet_check`.
+  5. `api/package.json:50` and `package.json:24` — `engines.node` is
+     `>=22.12.0`, while `.nvmrc`, CI and `check-rules` all require 22.13.
 
 ---
 
