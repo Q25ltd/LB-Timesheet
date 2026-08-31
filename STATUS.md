@@ -55,6 +55,16 @@ compile-time only), **F-23** (the trust-site rule's exemption is broader than
 documented) and **F-24** (the two user-binding checks have no test). None
 blocks P1.2b, the first protected business route, or deployment.
 
+**F-22 is now PARTIAL, not closed.** Its runtime-mutation half was fixed in
+`c742b03` — `TenantContext` freezes itself in the constructor, so an authority
+field can no longer be reassigned, redefined, extended or deleted, and a write
+throws instead of silently doing nothing. Its forgery half stands and is not
+fixable in TypeScript: `as unknown as TenantContext` still manufactures one. The
+source no longer contradicts that — the class comment says *sanctioned* rather
+than *only* and points at D16 — but whether the forgery half stays outstanding
+or is recorded as `ACCEPTED` under D16 is an open owner disposition. F-23 and
+F-24 are untouched.
+
 **Blocked until.** The *first protected business route* is blocked by the
 still-open **O8** filing-date/timezone decision — and, since `2c85f4f`, by that
 alone; P1.2b (F-14) no longer blocks it. *Public deployment* is blocked by at
@@ -139,7 +149,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 110 unit tests, test:db integrity gate |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 114 unit tests, test:db integrity gate |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
 | Database tenant-integrity proof | ✅ 45/45 against a clean database built by `migrate deploy` (2026-08-31). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
@@ -147,7 +157,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | CI (GitHub Actions) | ✅ runs on github.com/Q25ltd/LB-Timesheet, executing `npm run check` verbatim (run #1 failed against the original workflow, which was then rewritten). Remote results were independently queried from the GitHub Actions API on 2026-08-31 and are `completed/success` for every commit checked: `5641691` (P1.2a), `0591241`, `2c85f4f` (P1.2b), `60effc9` and `d1f0c1b`. This states what those five runs returned — it is not a claim about any other commit. |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. **Public deployment is additionally blocked by F-15** (auth-before-rate-limit + unreviewed proxy trust) **and F-17** (production `npm start` runs `tsx`, a devDependency). |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
-| Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests |
+| Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests. Since `c742b03` a `TenantContext` is frozen on construction, so tenant authority cannot be repointed, extended or trimmed by anything holding it — 4 tests in `api/src/lib/tenantContext.test.ts`, written RED. Forging one with a double cast remains possible and is documented in the class itself; see **F-22** and D16. |
 | Outbox enqueue uniqueness (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 — this is **storage/enqueue uniqueness only**. Transaction atomicity of transition-plus-enqueue, worker-claim idempotency and exactly-once external email delivery are **not** proven; see **F-16**. Do not describe this row as "submission idempotency". |
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
@@ -249,7 +259,7 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   have to land in, rather than in individual routes.
 
 - **Stale comments and config outside documentation scope (audit 2026-08-31).**
-  Five reconciliation items found by the audit that live in **code, tests or
+  Six reconciliation items found by the audit that live in **code, tests or
   config**, and so could not be corrected by a documentation-only task. Not
   defects in behaviour; each is a comment or a range that no longer matches
   reality. Awaiting an authorized code-scope pass:
@@ -275,11 +285,6 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
      in `api/src/lib/authorization.ts`. The comment was left untouched because
      the reconciliation task that found it was documentation-only. Behaviour is
      unaffected.
-  7. `api/src/lib/tenantContext.ts:6-8` — the class comment says "The single way
-     to obtain one is `TenantContext.trust()`". A deliberate `as unknown as
-     TenantContext` defeats that, and the instance is not frozen, so `readonly`
-     is compile-time only. Tracked as **F-22**; the comment is listed here too
-     because it is the artifact a future agent reads at the moment it matters.
 
 ---
 

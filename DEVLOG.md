@@ -4,6 +4,60 @@
 
 ---
 
+## 2026-08-31 — F-22 (a): tenant authority context frozen
+
+Implementation `c742b03155cb8b3d5b84e364b012848f1dd54dd9`, code and test only.
+RED was written and run before any production change, per AGENT_WORKFLOW §8.
+
+**F-22 is NOT closed.** Two defects were recorded under that ID and one is
+fixed. The register now carries it as PARTIAL.
+
+**The gap (a).** `readonly` is erased at runtime, so a `TenantContext` was an
+ordinary mutable object. Anything holding one — a service, a repository helper,
+a logging decorator — could repoint the company it was scoped to, and every
+subsequent query would follow it. The audit demonstrated this directly: probe
+P9 changed a live context's company from A to B and was the one probe of
+nineteen that failed.
+
+**Built.** `Object.freeze(this)` as the last statement of the constructor,
+after every field is assigned. An authority field can no longer be reassigned,
+redefined, extended or deleted. ESM is always strict mode, so a later write
+throws rather than silently doing nothing — the exception is masked to a 500 by
+the global handler, which is loud and closed rather than quietly wrong. Four
+tests in `api/src/lib/tenantContext.test.ts`: three failed honestly before the
+fix (`Reflect.set` returned `true` and the company actually changed), and the
+fourth is a control that passes on both sides, proving the freeze breaks
+nothing — `instanceof` still holds, `describe()` still works, and freezing one
+instance does not affect the next. The mutations are written with `Reflect` and
+`Object.assign` rather than casts, because CLAUDE.md forbids unvalidated `as`.
+
+**The comment.** `tenantContext.ts` claimed "The single way to obtain one is
+`TenantContext.trust()`". That false sentence was itself why F-22 was raised —
+three documents leaned on it. It now says SANCTIONED, states plainly that a
+double cast defeats the nominal brand, names the one production call site
+(`authorizeTenant`), points at F-23's known-wide rule exemption, and re-anchors
+the guarantee to D16: the repository boundary and the database composite keys,
+not this class.
+
+**Deliberately not built (b).** `as unknown as TenantContext` still manufactures
+a structurally-valid authority object, compiles clean under `strict`, and is
+flagged by no rule. No TypeScript construct can prevent it. The source no longer
+contradicts that; whether it stays outstanding work or is recorded as ACCEPTED
+under D16 as a limit of type-level guardrails is an **open owner disposition**,
+deliberately not decided by the audit, the fix, or this entry. The test file
+documents the mutation/forgery distinction in prose rather than asserting it —
+a test that asserts a weakness breaks the day someone closes it.
+
+**Verified.** Targeted 4/4 after RED 1/4. Regression: P1.2b authorization 5/5,
+P1.2a pipeline 16/16, app/F-10 12/12. Authoritative `npm run check` exit 0:
+114/114 unit (110 + 4), 45/45 DB, four migrations onto a clean database. The
+exact audit probe that discovered F-22 was rebuilt outside the repository, run
+against the fixed module, passed, and deleted. GitHub Actions `completed/success`
+for `c742b03`. F-23 and F-24 untouched; F-14 stays CLOSED and P1.2b stays ✅;
+the first protected business route is still blocked by O8 alone.
+
+---
+
 ## 2026-08-31 — Independent P1.2b security audit (F-22, F-23, F-24 opened)
 
 Read-only audit of `60effc9a8344764fd16256fa290b78c16a876aae` by an agent that
