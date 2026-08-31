@@ -80,6 +80,72 @@ model User {
   updatedAt    DateTime  @updatedAt
 
   memberships  CompanyMembership[]
+  sessions     Session[]
+}
+
+/// One authenticated device/login for a User (AUTH.md). Deliberately has NO
+/// companyId: a session SURVIVES company switching, so tenant scope lives in
+/// the access token and the membership row, never here. Giving this model a
+/// company would create a second authority for "which company is this request
+/// for" that the access token could contradict. check-rules already allowlists
+/// Session in GLOBAL_MODELS for exactly this reason — do not "fix" it by
+/// adding companyId.
+///
+/// Persistence only. Nothing in this repo reads these columns yet: JWT
+/// verification, requireAuth, login, refresh rotation and AuthContext are all
+/// unbuilt (see STATUS.md).
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+
+  /// THE authoritative lifetime of this authenticated device: ABSOLUTE, 90
+  /// days from login. Rotation does not extend it and there is no sliding
+  /// window or separate cap — one lifetime, one column.
+  expiresAt DateTime
+
+  /// Explicit termination — logout, refresh-token reuse outside the grace
+  /// window, or an admin revoke. Null means never revoked. Distinct from
+  /// expiresAt by kind: one is a decision, the other is the passage of time.
+  /// The row is KEPT on revoke so a revoked session stays distinguishable
+  /// from one that never existed.
+  revokedAt DateTime?
+
+  /// SHA-256 of the current refresh token — never the token itself. A
+  /// deterministic digest, not bcrypt, because refresh must look the session
+  /// up BY this value and a per-row salt makes that impossible. Safe here and
+  /// not for passwords: the token is 32 random bytes (AUTH.md), so there is no
+  /// low-entropy guess space to slow an attacker down in.
+  refreshTokenHash String @unique
+
+  /// SHA-256 of the token this one replaced, kept usable for the 60-second
+  /// grace window so a driver who loses signal mid-rotation is not logged out.
+  /// Null until the first rotation. Nullable rather than defaulting to "" is
+  /// load-bearing here, not just hygiene: Postgres treats NULLs as distinct
+  /// under a unique index, so every never-rotated session coexists, where ""
+  /// would collide across all of them.
+  previousRefreshTokenHash String? @unique
+
+  /// The moment the previous hash stops being accepted. Stored as a DEADLINE
+  /// rather than derived from a rotation timestamp plus a constant, so
+  /// changing the grace period can never retroactively revive a token that
+  /// was already dead. NOT a session lifetime — expiresAt is the only one.
+  previousRefreshTokenGraceUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "Log out every device for this user", and any future session list.
+  /// Postgres does not index foreign keys automatically.
+  @@index([userId])
+
+  // Two invariants Prisma's schema language cannot express live in migration 4
+  // as explicit CHECK constraints:
+  //   Session_previous_token_paired   — previous hash and grace deadline are
+  //     one fact; neither half is readable alone.
+  //   Session_previous_token_distinct — a rotation that wrote the same token
+  //     into both slots would make the grace window meaningless.
 }
 
 /// Joins a driver to a company. Active/inactive lives HERE, not on User —
