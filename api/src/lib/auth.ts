@@ -58,7 +58,7 @@ type MembershipStatus = "active" | "inactive";
  * comes from the membership row on every request, so a revoked or changed
  * role takes effect immediately instead of outliving its revocation.
  */
-interface AuthContext {
+export interface AuthContext {
   readonly userId: string;
   readonly companyId: string;
   readonly membershipId: string;
