@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-08-31 — O8 decided and frozen as D18 (documentation only, no code)
+
+Owner decision recorded. **No code, schema, migration, test or static rule was
+touched** — this session froze semantics, not implementation, and deliberately
+did not start the Start Shift route.
+
+**Decided.** One timesheet = one shift. A timesheet begins at Start Shift and
+stays the same timesheet until Finish Shift; crossing midnight does not split it,
+duplicate it, re-date it or end it. `Shift.shiftDate` is the **local calendar
+date on which the shift started**, computed once at creation from the start
+instant in the applicable **company** IANA timezone, and immutable thereafter —
+a Monday 18:00 → Tuesday 05:00 shift is a Monday timesheet. Instants
+(`startedAt`, `endedAt`) stay real UTC; the company timezone only chooses the
+local business date, and duration is never derived from wall-clock strings. The
+device's timezone is never the authority. Trampers follow the same rule; a Night
+Out is a fact recorded against a shift, not a shift boundary, and for V1 carries
+no allowance, rate or payment behaviour.
+
+**Where it landed.** `DECISIONS.md` as **D18** in Settled, with **O8** marked
+CLOSED and pointing at it — the same convention O9 → D12 used. `STATUS.md`'s two
+"blocked by O8" claims were reconciled: no open decision blocks the first
+protected business route any more.
+
+**What the decision exposed, and did NOT fix.** D18 needs a company-level IANA
+timezone at shift creation, and `Company` has no timezone field, so the schema
+cannot yet derive the local date correctly (a local 00:30 BST start falls on the
+previous UTC date). The `shiftDate` comment in `api/prisma/schema.prisma` still
+reads "(O8, provisional)". `shiftDate` immutability is intent, not a constraint.
+`Shift` has no Night Out field. All four are recorded in STATUS.md as the
+implementation gap and were deliberately left alone here — schema and code were
+out of scope.
+
+**Not touched.** F-22, F-23 and F-24 dispositions; no FINDINGS ID was assigned to
+O8, which is a decision, not a finding. `audits/phase-0-audit.md` §4.6 describes
+O8 as open; it is a historical audit record and was not rewritten.
+
+**Verified.** `npm run check` exit 0. `git diff --check` clean. Changed paths:
+`DECISIONS.md`, `STATUS.md`, `DEVLOG.md` — documentation only.
+
+---
+
 ## 2026-08-31 — F-22 (a): tenant authority context frozen
 
 Implementation `c742b03155cb8b3d5b84e364b012848f1dd54dd9`, code and test only.

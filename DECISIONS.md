@@ -270,6 +270,57 @@ Applies to the **ordinary authorization boundary** (`authorizeTenant`). It does
 deactivated membership: whether those exist, and what API they take, is still
 open.
 
+### D18 — One timesheet per shift; `shiftDate` is the local start date (2026-08-31)
+Owner-decided; closes **O8**.
+
+**One timesheet = one shift.** A timesheet begins when the driver starts a shift
+and stays that same timesheet until he finishes it. Crossing midnight does not
+split the timesheet, does not create a second one, does not change its date, and
+does not finish the shift.
+
+- Day driver: Monday 06:00 → Monday 17:00 — one **Monday** shift.
+- Night driver: Monday 18:00 → Tuesday 05:00 — one **Monday** shift.
+- Night driver: Sunday 23:00 → Monday 09:00 — one **Sunday** shift.
+
+**`Shift.shiftDate` means the local calendar date on which that shift started.**
+It is computed once, at shift creation, from the start instant expressed in the
+applicable **company** IANA timezone, and is immutable for the life of that
+shift. `Europe/London`, local start `2026-08-31 18:00` → `shiftDate =
+2026-08-31`, even though the driver finishes on `2026-09-01`.
+
+**Instants stay UTC.** `startedAt`, and later the end instant (`endedAt` in the
+schema), are real UTC instants. The company timezone decides only which local
+business date a shift is filed under; it never becomes the storage form of an
+instant. Elapsed shift duration is derived from instants — never by subtracting
+local wall-clock representations, which double-count or lose the DST hour.
+
+**The device is not the authority.** The phone's timezone never decides the
+filing date. The company's does.
+
+**Trampers and Night Out.** Trampers follow exactly the same
+one-timesheet-per-shift rule, and a night out is not a shift boundary: the driver
+still starts a shift, works, finishes it and submits it, and starting again the
+following day is a second timesheet. Night Out is a **fact recorded against a
+shift**, and for V1 that is all it is — record whether one occurred. It must not
+alter `shiftDate`, must not hold a finished shift open, and must not introduce a
+multi-day or "tramping" timesheet abstraction. No allowance, rate or payment
+behaviour is decided here; monetary treatment belongs to the driver's private pay
+features, designed separately and subject to CLAUDE.md's privacy boundary.
+
+*Why:* the paper this product replaces is one sheet per shift, filled in from
+book-on to book-off — a driver starting at 22:00 hands in one sheet, not two.
+Filing by start date is also the only rule knowable at the moment the record is
+created: a finish-date rule cannot be evaluated when the shift opens, and a
+midnight split would invent a record the driver never wrote. Anchoring to the
+company's timezone rather than the device's keeps one company's payroll week
+consistent no matter what a phone's clock says.
+
+*What this requires of the data model:* an authoritative **company-level IANA
+timezone** must be available at shift creation, because the local date cannot be
+derived without one and the device's timezone must not be substituted for it; and
+`shiftDate` must be written once at creation and never updated afterwards. What
+exists today, and what remains to be built for that, is STATUS.md's to state.
+
 ---
 
 ## ❓ Open — ask the user, do not guess
@@ -324,9 +375,10 @@ Needs confirming: one value per segment, or a list of events?
 Not frozen. Company-size tiers under consideration. Do not hard-code commercial
 assumptions.
 
-### O8 — Overnight shifts crossing midnight
-Which calendar date does a 22:00 → 06:00 shift file under? Likely dated by start
-time with full timestamps on the PDF — needs confirming, affects the data model.
+### O8 — Overnight shifts crossing midnight — ✅ CLOSED 2026-08-31
+Resolved: **one timesheet per shift**, filed under the local calendar date the
+shift **started**, computed in the company's IANA timezone and immutable
+thereafter. See D18.
 
 ### O9 — Multi-company drivers — ✅ CLOSED 2026-08-25
 Resolved: **supported**, and modelled from the first migration. See D12.
