@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-08-25
+> Last updated: 2026-08-30
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -18,7 +18,7 @@ one-open-shift invariant; a tenant-safe repository boundary with Company A/B
 proofs; global error handling that cannot leak internals; fail-closed env
 validation (CORS, JWT, email); a single authoritative gate (`npm run check`)
 that CI runs verbatim, ending in a clean-database migrate-deploy + integrity
-suite. Audit F-01…F-09 closed or consciously deferred; see audits/.
+suite. Findings F-01…F-11 and F-13 closed (F-12 reserved); see FINDINGS.md.
 
 Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
@@ -97,18 +97,20 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — tsc, eslint (type-aware), check-rules (15 checks), prisma validate, knip, 52 unit tests |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 87 unit tests, test:db integrity gate |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
-| Database tenant-integrity proof | ✅ 12/12 against a clean database built by `migrate deploy` (2026-08-30). Includes membership-binding (D15) and one-open-shift, on create AND update. Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed pending a green run |
-| First migration | ✅ `api/prisma/migrations/20260830132905_init` — includes invariants.sql; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
-| CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to `npm run check` — not yet re-verified green |
+| Database tenant-integrity proof | ✅ 33/33 against a clean database built by `migrate deploy` (2026-08-30). Includes membership-binding (D15) and one-open-shift, on create AND update. Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
+| Migrations | ✅ 3 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`; `migrate deploy` proven on a clean database; partial index verified in pg_indexes |
+| CI (GitHub Actions) | 🔶 runs on github.com/Q25ltd/LB-Timesheet; run #1 failed, workflow rewritten to run `npm run check` verbatim. A workflow run exists for the current baseline (`7e89e73`); its remote pass/fail result has not been independently verified as part of this reconciliation. |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
 | Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests |
 | Outbox idempotency (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 |
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
+| Default-deny route authentication (F-10) | ✅ closed — a root `onRequest` hook in `app.ts` rejects every route unless explicitly marked `public`. A secondary static guardrail (`route-declares-auth`) enforces explicit route posture in `check-rules`; the root runtime hook remains the security boundary. See "Known limitations" below for the guardrail's known parser gap. |
+| Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (part of the 33/33 in "Database tenant-integrity proof" above). |
 | Auth implementation (login, select, switch, refresh, middleware) | 🔲 |
 | Session model + refresh rotation | 🔲 |
 | Multi-company driver memberships | 🔲 |
@@ -144,11 +146,11 @@ Tooling gaps that are accepted for now, not blocking, and not forgotten.
 
 | Area | State |
 |---|---|
-| Repo initialised (git) | ✅ `main` — **no commits yet** |
+| Repo initialised (git) | ✅ `main` — active repository; reconciliation baseline `7e89e73` |
 | API skeleton boots (`/health`) | ✅ verified on the Mac |
-| First Prisma schema | ✅ pushed via `db:push` (no migration files yet) |
+| First Prisma schema | ✅ migration-managed (3 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
 | Local Postgres (docker-compose, port 5544) | ✅ running |
-| Dependencies installed | ✅ on the Mac, Node 22.12.0 |
+| Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2 |
 | `timesheets.logisticbay.com` DNS | 🔲 |
 | `timesheets-api.logisticbay.com` DNS | 🔲 |
 | Database provisioned | 🔲 |
