@@ -61,6 +61,23 @@ model Company {
   joinCode     String    @unique
   /// trial | active | past_due | cancelled
   status       String    @default("trial")
+
+  /// THE authority for which local calendar date a shift is filed under (D18).
+  /// An IANA identifier — `Europe/London`, `Europe/Vilnius`,
+  /// `America/New_York`, `Asia/Dubai`, `Australia/Sydney` — never a numeric
+  /// UTC offset, which cannot survive DST and cannot say which zone it is.
+  ///
+  /// Non-null because a company with no timezone would force shift creation to
+  /// fall back on something, and the only candidates are the phone's timezone
+  /// (which D18 forbids) or a hard-coded country. `Europe/London` is the V1
+  /// default because the first customers are UK hauliers — a default, not an
+  /// assumption: no logic may read it as "this product is British".
+  ///
+  /// Nothing writes this column yet; changing a company's timezone is a future
+  /// settings capability, and STATUS.md owns what exists. When it lands, a
+  /// change is NOT retrospective — shiftDate is already persisted per shift.
+  timezone     String    @default("Europe/London")
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -200,8 +217,13 @@ model Shift {
   /// Snapshot of the driver's name as it should print on the PDF.
   driverName   String
 
-  /// Local calendar date the shift is filed under — derived from startedAt, so
-  /// a 22:00 → 06:00 shift files under the day it STARTED (O8, provisional).
+  /// The local calendar date on which this shift STARTED — what the timesheet
+  /// is filed under (D18). Derived once, at creation, from startedAt expressed
+  /// in the company's IANA timezone (Company.timezone is the authority; the
+  /// phone's timezone never is), and immutable in business meaning thereafter:
+  /// crossing midnight does not split the shift, re-date it or finish it, and
+  /// a later change to the company's timezone does not recompute shifts
+  /// already filed. A 22:00 → 06:00 Monday night is one MONDAY timesheet.
   shiftDate   DateTime  @db.Date
   startedAt   DateTime
   endedAt     DateTime?

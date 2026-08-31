@@ -1,0 +1,32 @@
+-- Company timezone authority (D18).
+--
+-- `Shift.shiftDate` is the local calendar date on which a shift STARTED, and
+-- it is derived from the start instant expressed in the COMPANY's IANA
+-- timezone — never the phone's, and never a hard-coded country. That authority
+-- did not exist in the schema, so the derivation was not expressible: a local
+-- 2026-07-02 00:30 Europe/London start is 2026-07-01 in UTC, i.e. the wrong
+-- day's timesheet.
+--
+-- Identifier, not offset: an offset cannot say which zone it is and DST moves
+-- it twice a year. TEXT rather than an enum for the same reason there is no
+-- country enum — IANA renames and adds zones several times a year, and the
+-- runtime's own tz database is the authority (src/lib/timezone.ts).
+--
+-- NOT NULL with a default: any Company row that exists after this migration
+-- has a usable filing authority. PostgreSQL applies the default to existing
+-- rows as part of ADD COLUMN, so companies created before this migration are
+-- backfilled with the V1 default in the same statement — no separate UPDATE,
+-- no window in which a row is NULL. `Europe/London` is the V1 default because
+-- the first customers are UK hauliers; it is a default, not an assumption, and
+-- a future settings capability may set any valid identifier.
+--
+-- Changing a company's timezone later is NOT retrospective: shiftDate is
+-- persisted per shift at creation and is not recomputed.
+--
+-- Generated with `prisma migrate diff` (previous schema → current). Earlier
+-- migrations untouched; invariants.sql untouched. Proven the same way as
+-- migrations 1-4: `migrate deploy` onto a clean database inside
+-- `npm run test:db`, plus the integrity suite.
+
+-- AlterTable
+ALTER TABLE "Company" ADD COLUMN     "timezone" TEXT NOT NULL DEFAULT 'Europe/London';
