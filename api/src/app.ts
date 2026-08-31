@@ -1,17 +1,28 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
 import { allowedOrigins } from "./lib/env.schema.js";
 import { AppError, registerErrorHandling } from "./lib/errors.js";
-import { requireAuth } from "./lib/auth.js";
+import {
+  requireAuth,
+  ACCESS_TOKEN_ALGORITHM,
+  ACCESS_TOKEN_AUDIENCE,
+  ACCESS_TOKEN_ISSUER,
+} from "./lib/auth.js";
+import { authStore, type AuthQueryable } from "./lib/authStore.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
  * PrismaClient, so a test can build the app without a database — and so widening
  * it later is a deliberate act. PrismaClient satisfies this.
+ *
+ * The two identity reads arrive through AuthQueryable, which names them
+ * individually. They are handed to `authStore` here and never travel further:
+ * requireAuth receives the narrow AuthStore, not this type.
  */
-export interface AppDatabase {
+export interface AppDatabase extends AuthQueryable {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 }
 
@@ -25,6 +36,33 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // `credentials` stays false: authority travels in an Authorization header
   // (AUTH.md), not a cookie. Enabling it is an architectural change.
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
+
+  // AUTH.md's access token. Only `verify` is configured: this boundary
+  // verifies tokens, it does not mint them. `algorithms` is pinned so an
+  // `alg: none` or algorithm-confusion token cannot verify, and iss/aud make a
+  // LogisticBay TMS token structurally unusable here (D1). The secret is the
+  // one already validated by env.schema.ts -- there is no second source.
+  //
+  // `requiredClaims` is not optional hardening: allowedIss/allowedAud are
+  // VALUE validators that skip a claim which is absent, and expiry is only
+  // checked when `exp` exists. Without this, a token simply omitting exp/iss/
+  // aud verifies -- an unexpiring, cross-product-usable token. Presence of the
+  // registered claims is enforced here; the identity claims (sub, companyId,
+  // membershipId, sessionId) are enforced by the schema in lib/auth.ts, so
+  // each claim is decided in exactly one place.
+  await app.register(jwt, {
+    secret: env.JWT_SECRET,
+    verify: {
+      algorithms:     [ACCESS_TOKEN_ALGORITHM],
+      allowedIss:     ACCESS_TOKEN_ISSUER,
+      allowedAud:     ACCESS_TOKEN_AUDIENCE,
+      requiredClaims: ["iat", "exp", "iss", "aud"],
+    },
+  });
+
+  // Built once, from the two named delegates. This is the only object the
+  // authentication boundary can read through.
+  const identity = authStore(prisma);
 
   // F-10: every route is authenticated by default. A route becomes public
   // only through the explicit `config: { public: true }` marker below --
@@ -43,7 +81,7 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   app.addHook("onRequest", async (request) => {
     if (request.is404) return; // no route matched -- let 404 handling run
     if (request.routeOptions.config.public === true) return;
-    await requireAuth(request);
+    await requireAuth(request, identity);
   });
 
   await app.register(rateLimit, {

@@ -11,10 +11,14 @@ process.env.WEB_ORIGIN   = "https://allowed.example.com";
 
 const { buildApp } = await import("./app.js");
 
-/** Minimal stand-in — /health only calls $queryRaw. No database needed. */
+/** Minimal stand-in — no database needed. The identity lookups find nothing:
+ *  these tests carry no authenticated session, which is why every protected
+ *  route below is expected to be refused. */
 const db = {
   $queryRaw: (_query: TemplateStringsArray, ..._values: unknown[]): Promise<unknown> =>
     Promise.resolve([{ ok: 1 }]),
+  session:           { findUnique: (): Promise<null> => Promise.resolve(null) },
+  companyMembership: { findUnique: (): Promise<null> => Promise.resolve(null) },
 };
 
 /** /health's response shape — parsed rather than reached into, since
@@ -92,6 +96,8 @@ test("/health reports db up when the query succeeds", async () => {
 test("/health reports degraded when the query fails", async () => {
   const failing = {
     $queryRaw: (): Promise<unknown> => Promise.reject(new Error("no database")),
+    session:           { findUnique: (): Promise<null> => Promise.resolve(null) },
+    companyMembership: { findUnique: (): Promise<null> => Promise.resolve(null) },
   };
   const app = await buildApp(failing);
   const res = await app.inject({ method: "GET", url: "/health" });

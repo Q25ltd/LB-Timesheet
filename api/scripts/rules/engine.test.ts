@@ -31,7 +31,11 @@ const EXPECTED_BAD = [
   "no-client-tenant  src/routes/leaky.ts:13",
   "no-client-tenant  src/routes/leaky.ts:4",
   "no-client-tenant  src/services/svc.ts:2",
+  // Two locations on purpose: a route-local DTO, and one defined in a shared
+  // module a route would import. The second is what proves the rule was NOT
+  // narrowed to routes/ + services/ when its false positive was corrected.
   "no-company-id-in-dto  src/routes/leaky.ts:2",
+  "no-company-id-in-dto  src/lib/dto.ts:6",
   "no-console  src/routes/leaky.ts:5",
   "no-empty-catch  src/routes/leaky.ts:10",
   "no-prisma-in-routes  src/routes/leaky.ts:1",

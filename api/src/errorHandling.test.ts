@@ -14,6 +14,8 @@ const { AppError } = await import("./lib/errors.js");
 
 const db = {
   $queryRaw: (_q: TemplateStringsArray, ..._v: unknown[]): Promise<unknown> => Promise.resolve([{ ok: 1 }]),
+  session:           { findUnique: (): Promise<null> => Promise.resolve(null) },
+  companyMembership: { findUnique: (): Promise<null> => Promise.resolve(null) },
 };
 
 /** The envelope, and NOTHING else: no Fastify `message`/`statusCode` keys. */

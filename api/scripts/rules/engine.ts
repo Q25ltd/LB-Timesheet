@@ -87,11 +87,21 @@ scan(
 );
 
 // ── 4. JWT verification lives in one place ───────────────────────────────────
+/**
+ * The modules where token verification is structurally confined.
+ *
+ * Named once because TWO rules depend on this boundary: `jwt-centralised`
+ * below keeps verification inside these files, and `no-company-id-in-dto`
+ * uses the same boundary to decide where a companyId-bearing schema can
+ * legitimately exist. Two copies of this path could drift apart; one cannot.
+ */
+const TOKEN_VERIFICATION_MODULE = (file: string) => /lib[/\\](auth|tokens)\.ts$/.test(file);
+
 scan(
   "jwt-centralised",
   "Verify tokens only in the auth middleware / token helpers.",
   line => /\bjwt\.verify\s*\(|\bjsonwebtoken\b/.test(line),
-  file => !/lib[/\\](auth|tokens)\.ts$/.test(file),
+  file => !TOKEN_VERIFICATION_MODULE(file),
 );
 
 // ── 5. Every zod string is bounded ───────────────────────────────────────────
@@ -194,11 +204,26 @@ for (const file of files) {
 // A route may parse a body into a DTO and hand the DTO to a service. If the
 // schema accepts companyId, client tenant identity crosses the boundary through
 // an otherwise-compliant route. membershipId/userId stay legal (switch-company).
+//
+// Scanned EVERYWHERE except the token-verification modules above. The single
+// legitimate companyId in a Zod schema is the claims contract of a token that
+// has ALREADY been cryptographically verified (AUTH.md), and `jwt-centralised`
+// confines that work to those files — so the set of places such a schema can
+// honestly exist is exactly the set where verification is permitted. The
+// exemption is anchored to that enforced boundary, not to a directory or a
+// schema name.
+//
+// Narrowing to routes/ + services/ (the way `no-client-tenant` is scoped) was
+// REJECTED: nothing structurally confines a request DTO to those directories,
+// so a schema defined in a shared module and imported by a route would stop
+// being reported. That trades one false positive for a false-negative path.
+// A request DTO in src/lib/dto.ts, src/schemas/, a route, a service or a
+// repository is still caught — proven by the bad fixtures.
 scan(
   "no-company-id-in-dto",
   "A request schema must not accept companyId — it comes from AuthContext. See AUTH.md.",
   line => declaresCompanyIdInSchema(line),
-  file => !file.endsWith(".test.ts"),
+  file => !file.endsWith(".test.ts") && !TOKEN_VERIFICATION_MODULE(file),
 );
 
 // ── Raw request input never crosses into a service ───────────────────────────
