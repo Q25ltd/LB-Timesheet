@@ -1,4 +1,4 @@
-import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { errorCodes, type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
 /**
  * The ONE error envelope. Every client-visible error — helper-sent, thrown,
@@ -52,24 +52,35 @@ export const serverError  = (r: FastifyReply, e = "Something went wrong",     co
 const INTERNAL: ErrorBody = { error: "Something went wrong", code: "INTERNAL" };
 
 /**
- * The exact set of Fastify-authored error codes trusted to pass their own
+ * A private runtime identity for validation errors created by Fastify through
+ * the schema formatter registered below. A normal application Error cannot
+ * obtain this identity by copying `validation`, `code`, or `statusCode` fields.
+ */
+class TrustedValidationError extends Error {}
+
+/**
+ * The exact set of Fastify-authored error constructors trusted to pass their own
  * status and message straight to the client. Each of these is a fixed,
  * non-interpolated string describing the CLIENT's own malformed request
  * (fastify/lib/errors.js) -- never server state, never a provider detail.
  *
- * This is an exact membership test, not a prefix test. A future Fastify
- * error code -- even one that looks related -- is NOT trusted until someone
- * deliberately adds it here having checked its message is client-safe.
- * Anything not in this set is masked exactly like an unlabelled 500,
- * regardless of what statusCode it claims.
+ * `instanceof` is deliberate: Fastify's constructors carry non-enumerable
+ * runtime identity from @fastify/error. Copying their public fields onto an
+ * arbitrary Error does not make it an instance. A future Fastify error -- even
+ * one with a familiar-looking code -- is NOT trusted until its constructor is
+ * deliberately added here after its message is checked as client-safe.
  */
-const SAFE_FASTIFY_CODES: ReadonlySet<string> = new Set([
-  "FST_ERR_CTP_BODY_TOO_LARGE",
-  "FST_ERR_CTP_INVALID_MEDIA_TYPE",
-  "FST_ERR_CTP_INVALID_CONTENT_LENGTH",
-  "FST_ERR_CTP_EMPTY_JSON_BODY",
-  "FST_ERR_CTP_INVALID_JSON_BODY",
-]);
+const SAFE_FASTIFY_ERROR_TYPES = [
+  errorCodes.FST_ERR_CTP_BODY_TOO_LARGE,
+  errorCodes.FST_ERR_CTP_INVALID_MEDIA_TYPE,
+  errorCodes.FST_ERR_CTP_INVALID_CONTENT_LENGTH,
+  errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY,
+  errorCodes.FST_ERR_CTP_INVALID_JSON_BODY,
+];
+
+function isSafeFastifyError(error: FastifyError): boolean {
+  return SAFE_FASTIFY_ERROR_TYPES.some(ErrorType => error instanceof ErrorType);
+}
 
 /**
  * Global error + not-found handling. Lives HERE, next to the envelope, so the
@@ -91,6 +102,12 @@ const SAFE_FASTIFY_CODES: ReadonlySet<string> = new Set([
  *     the masking cannot depend on NODE_ENV being set correctly.
  */
 export function registerErrorHandling(app: FastifyInstance): void {
+  // Fastify's default validation error is a plain Error decorated with public
+  // fields, which is indistinguishable from an application Error that copied
+  // those fields. Create it through our private class so provenance, not shape,
+  // decides whether validation details are safe to return.
+  app.setSchemaErrorFormatter(() => new TrustedValidationError("Invalid request"));
+
   app.setNotFoundHandler((_request: FastifyRequest, reply: FastifyReply) => {
     return send(reply, 404, "Not found", "NOT_FOUND");
   });
@@ -100,12 +117,12 @@ export function registerErrorHandling(app: FastifyInstance): void {
       return send(reply, error.statusCode, error.message, error.code, error.details);
     }
 
-    if (error.validation !== undefined) {
+    if (error instanceof TrustedValidationError) {
       return send(reply, 400, "Invalid request", "VALIDATION", error.validation);
     }
 
     const status = typeof error.statusCode === "number" ? error.statusCode : 500;
-    if (status >= 400 && status < 500 && typeof error.code === "string" && SAFE_FASTIFY_CODES.has(error.code)) {
+    if (status >= 400 && status < 500 && isSafeFastifyError(error)) {
       return send(reply, status, error.message, error.code);
     }
 

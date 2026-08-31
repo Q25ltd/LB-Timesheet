@@ -141,6 +141,45 @@ test("an unknown error with a fabricated 4xx statusCode is masked, not trusted",
   await app.close();
 });
 
+test("a fabricated allowlisted Fastify code cannot impersonate a trusted parser error", async (t) => {
+  const marker = "ALLOWLIST-SPOOF-INTERNAL-9f73c2";
+  const app = await buildApp(db);
+  t.after(() => app.close());
+  app.get("/spoofed-fastify-code", { config: { public: true } }, () => {
+    const error = new Error(marker) as Error & { statusCode: number; code: string };
+    error.statusCode = 400;
+    error.code = "FST_ERR_CTP_INVALID_JSON_BODY";
+    throw error;
+  });
+
+  const res = await app.inject({ method: "GET", url: "/spoofed-fastify-code" });
+  assert.deepEqual(
+    { statusCode: res.statusCode, body: envelope(res.json()) },
+    { statusCode: 500, body: { error: "Something went wrong", code: "INTERNAL" } },
+  );
+  assert.ok(!res.body.includes(marker), "a fabricated allowlisted code must not expose the internal message");
+});
+
+test("fabricated validation metadata cannot impersonate trusted framework validation", async (t) => {
+  const marker = "VALIDATION-SPOOF-INTERNAL-a4d81e";
+  const app = await buildApp(db);
+  t.after(() => app.close());
+  app.get("/spoofed-validation", { config: { public: true } }, () => {
+    const error = new Error("fabricated validation error") as Error & {
+      validation: Array<{ instancePath: string; message: string }>;
+    };
+    error.validation = [{ instancePath: `/${marker}`, message: `internal detail: ${marker}` }];
+    throw error;
+  });
+
+  const res = await app.inject({ method: "GET", url: "/spoofed-validation" });
+  assert.deepEqual(
+    { statusCode: res.statusCode, body: envelope(res.json()) },
+    { statusCode: 500, body: { error: "Something went wrong", code: "INTERNAL" } },
+  );
+  assert.ok(!res.body.includes(marker), "fabricated validation metadata must not expose internal details");
+});
+
 test("a malformed JSON body surfaces Fastify's own safe content-type error, not a mask", async () => {
   // FST_ERR_CTP_INVALID_JSON_BODY is on the explicit allowlist: fixed,
   // Fastify-authored text describing the CLIENT's own malformed request,
