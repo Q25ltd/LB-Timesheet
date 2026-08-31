@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-08-25
+> Last updated: 2026-08-31
 
 ---
 
@@ -244,6 +244,31 @@ over-broad rules get silenced and die. Settled layering: the **database**
 db and Company A/B suites; `check-rules` raises the cost of mistakes, and its
 wiring is fixture-tested (F-08) so a rule cannot silently unwire. Documentation
 must never again describe the static rules as the tenant security mechanism.
+
+### D17 — Authorization failures are generic; authentication and authorization answer differently (2026-08-31)
+Frozen during P1.2b. Two questions, two answers, and neither explains itself:
+
+| | Status | `code` | `error` |
+|---|---|---|---|
+| Unauthenticated / invalid authentication | **401** | `UNAUTHENTICATED` | `Not authenticated` |
+| Authenticated but not authorized | **403** | `FORBIDDEN` | `Not allowed` |
+
+The 403 is **deliberately generic**. It must not reveal that a deactivated
+membership caused the denial, and it must not vary by role or by which check
+failed — no `MEMBERSHIP_INACTIVE`, no `ACCOUNT_INACTIVE`, no explanatory
+message, no `details`.
+
+*Why:* a denial that explains itself is an oracle for account state. AUTH.md
+already forces every authentication failure to return one identical body so the
+401 path cannot be probed for whether a session, membership or token was the
+problem; a talkative 403 would reopen exactly that hole one level up. The cost —
+a developer cannot tell from the response alone why a request was refused — is
+paid in server logs, not in the API surface.
+
+Applies to the **ordinary authorization boundary** (`authorizeTenant`). It does
+**not** decide anything about AUTH.md's future limited operations for a
+deactivated membership: whether those exist, and what API they take, is still
+open.
 
 ---
 

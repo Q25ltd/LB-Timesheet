@@ -4,6 +4,68 @@
 
 ---
 
+## 2026-08-31 — P1.2b: Authorized Tenant Context (F-14 closed)
+
+Implementation `2c85f4f89080cdd8c4bf74d3c72ba51223a641c8`. RED was written and
+reviewed before any production code existed; GREEN followed only after the owner
+accepted it.
+
+**The gap.** `requireAuth` answered "is there a valid identity". Nothing answered
+"may this identity do this". `AuthContext` and `TenantContext` both existed, but
+`TenantContext.trust()` had no production caller and `membershipStatus` was
+produced on every request and read by nobody — so a future route could have
+mistaken authentication for authorization.
+
+**Built.** `authorizeTenant(auth: AuthContext): TenantContext` in
+`api/src/lib/authorization.ts` — now the one production place authenticated
+identity becomes tenant authority, and the only production caller of
+`TenantContext.trust()`. It takes the trusted `AuthContext` and nothing else: no
+`companyId`, `membershipId`, `userId`, `role`, request, body, query or options
+parameter, so client-supplied identity has no channel to arrive through and no
+rejection code is needed. It performs no database read — `requireAuth` already
+validated the identity against persistence, and a second read would be a second
+source of truth.
+
+An active membership gets a `TenantContext` preserving **`companyId`, `userId`
+and `membershipId`**. All three matter: `shiftRepository` scopes
+`findById`/`update`/`delete` on `membershipId`, so reducing the context to
+company-plus-user would have widened each of them from "this driver's shift" to
+"anyone's shift in this company" (D15).
+
+Anything not exactly `"active"` is denied with the generic
+`403 { "error": "Not allowed", "code": "FORBIDDEN" }` — frozen this session as
+**D17**. The response never discloses that a deactivated membership caused it;
+role is not a bypass, and an inactive admin is refused identically. The
+comparison is `!== "active"` rather than `=== "inactive"`, so a future third
+membership state fails closed.
+
+**Deliberately not built.** No generic inactive bypass exists — no
+`allowInactive`, no bypass flag, no capability token, no permission enum, no
+policy engine. AUTH.md's limited operations for a deactivated membership (read,
+update and submit an already-open shift) are **not implemented**; their concrete
+API remains an open design question to be settled with the business feature that
+needs them. No business route, no login, no token minting, no refresh, no logout,
+no company switching. `requireAuth` is unchanged — an inactive membership still
+authenticates.
+
+**Touched.** `api/src/lib/authorization.ts` (new), its test (new), and one word
+in `api/src/lib/auth.ts`: `AuthContext` gained `export`, with no change to the
+six-field P1.2a contract. The static rules were not changed —
+`tenant-context-trust-sites` already permitted `lib/auth*`, and still bans
+`trust()` in routes, services and repositories.
+
+**Verified.** Focused P1.2b tests 5/5. Authoritative `npm run check` exit 0:
+110/110 unit tests, 45/45 DB/integration tests, four migrations onto a clean
+database. Pushed to `main` and confirmed live on GitHub by SHA.
+
+**Left open.** The first protected business route is no longer blocked by F-14;
+it is still blocked by **O8**. F-15 and F-17 still block public deployment. The
+stale `requireAuth` comment at `api/src/lib/auth.ts:115` was recorded in
+STATUS.md's cleanup backlog rather than edited — this was a documentation-only
+reconciliation.
+
+---
+
 ## 2026-08-31 — Independent backend foundation audit
 
 A fresh independent architecture/security audit ran read-only against
