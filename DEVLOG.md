@@ -4,6 +4,76 @@
 
 ---
 
+## 2026-08-31 — Independent P1.2b security audit (F-22, F-23, F-24 opened)
+
+Read-only audit of `60effc9a8344764fd16256fa290b78c16a876aae` by an agent that
+did not implement P1.2a or P1.2b, under AGENT_WORKFLOW §20. Nothing in the
+repository was modified during the audit itself; this entry and the F-22…F-24
+records were written afterwards, under separate explicit authorization.
+
+**Verdict: pass with non-blocking findings.** 0 Critical, 0 High, 0 Medium, 2
+Low, 4 Observation. The claimed invariant held: an authenticated active
+membership obtains authority derived solely from `AuthContext`, preserving
+`companyId`, `userId` and `membershipId`; an inactive one is refused a generic
+`403 FORBIDDEN`; no generic inactive bypass, no role bypass and no alternate
+production `TenantContext` construction path exists. F-14 stays CLOSED and
+P1.2b stays ✅.
+
+**Attacked, and held.** 19 probes run outside the repository against the real
+modules: cross-user membership forgery (user A's session presenting user B's
+`membershipId`), a session owned by a different user than `sub`, foreign
+`iss`/`aud` *values* rather than absences, `alg:none` and a foreign signature,
+hostile `companyId`/`membershipId`/`userId` in body **and** query **and** path
+params **and** headers, nine non-`active` membership states, property smuggling
+(`allowInactive`, `override.companyId`) onto the AuthContext, mid-token
+deactivation and revocation on a live app, an inactive admin, and a route
+wrongly marked `public: true` that still asks for authority (fails closed to a
+masked 500). Three probes closed gaps the suite left: the **end-to-end 403 HTTP
+response** (the repo test asserts only the thrown `AppError`, which is strictly
+weaker since `registerErrorHandling` decides what is forwarded), the
+fail-closed polarity against a genuine third status value, and deactivation
+latency.
+
+**Opened.** **F-22** — the `TenantContext` nominal brand is compile-time only:
+`as unknown as TenantContext` compiles clean under `--strict` and the instance
+is not frozen, so `tenantContext.ts:6-8`'s "the single way to obtain one" is
+untrue of deliberate code. **F-23** — `tenant-context-trust-sites`' exemption
+`lib[/\\]auth` is an unanchored path substring, so `src/services/lib/authX.ts`
+is exempt; proven by running the engine's own `runRules()` against a fixture
+tree, where the sneak file produced zero violations and the controls were
+correctly flagged. **F-24** — `session.userId === sub` and
+`membership.userId === sub` have no executable proof; behaviour is correct
+(both probed) but deleting `auth.ts:159` alone would open a complete
+cross-company escape with the whole gate still green.
+
+**Confirmed, not taken on faith.** F-19 was independently reproduced — a token
+with `iat = now + 7d` and `exp = iat + 900` is accepted — and then shown *not*
+to invalidate P1.2b: probes confirm it still loses authority the instant the
+membership is deactivated (403) or the session revoked (401), because both rows
+are re-read every request. Every OPEN/DEFERRED finding touching authentication,
+authorization or tenant authority was classified; **none can invalidate P1.2b**.
+The D15 question was traced to consumption rather than assumed: `membershipId`
+is enforced by `findById`/`update`/`delete`/`updateSegment`, and `listOwn`'s
+`companyId`+`userId` scoping is provably equivalent via `@@unique([companyId,
+userId])` plus the composite FK.
+
+**Corrected here.** `STATUS.md`'s P1.2b row claimed the trust-site rule "still
+bans `trust()` in routes, services and repositories" — F-23 shows it does not,
+and the sentence has been narrowed. `tenantContext.ts:6-8` is also false but is
+**code**, so it was left untouched and added to STATUS.md's awaiting-code-scope
+list as item 7.
+
+**Verified.** Authoritative `npm run check` exit 0 at `60effc9`: 110/110 unit,
+45/45 DB, 4 migrations onto a clean database — matching the counts claimed for
+`2c85f4f`. Targeted: P1.2b 5/5, P1.2a pipeline 16/16, app/F-10 12/12. All audit
+artifacts were deleted and the working tree was verified clean before reporting.
+
+**Still blocking.** The first protected business route: **O8** alone. Login and
+token minting: **F-19**. Public deployment: **F-15** and **F-17**. Unchanged by
+this audit.
+
+---
+
 ## 2026-08-31 — P1.2b: Authorized Tenant Context (F-14 closed)
 
 Implementation `2c85f4f89080cdd8c4bf74d3c72ba51223a641c8`. RED was written and

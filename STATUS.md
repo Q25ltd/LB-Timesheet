@@ -42,6 +42,19 @@ generic `403 FORBIDDEN` (D17). What is *not* built is AUTH.md's narrow
 exception — the limited operations a deactivated membership keeps on an
 already-open shift. See the P1.2b rows below.
 
+**P1.2b independently audited 2026-08-31** against `60effc9`, read-only, by an
+auditor that did not implement it: **0 Critical, 0 High, 0 Medium**, 2 Low, 4
+Observation. Verdict *pass with non-blocking findings* — the claimed invariant
+held under 19 adversarial probes, including cross-user membership forgery, a
+session belonging to another user, foreign `iss`/`aud` values, `alg:none`,
+hostile tenant identity in body/query/path/headers, nine non-`active`
+membership states, property smuggling, mid-token deactivation and a route
+wrongly marked public. The authoritative gate ran green at this SHA (110/110
+unit, 45/45 DB, 4 migrations). Opened **F-22** (the `TenantContext` brand is
+compile-time only), **F-23** (the trust-site rule's exemption is broader than
+documented) and **F-24** (the two user-binding checks have no test). None
+blocks P1.2b, the first protected business route, or deployment.
+
 **Blocked until.** The *first protected business route* is blocked by the
 still-open **O8** filing-date/timezone decision — and, since `2c85f4f`, by that
 alone; P1.2b (F-14) no longer blocks it. *Public deployment* is blocked by at
@@ -142,7 +155,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (part of the 45/45 in "Database tenant-integrity proof" above). |
 | Protected-request authentication (P1.2a) | ✅ — `requireAuth` verifies a Bearer JWT (HS256 pinned; issuer `logisticbay-timesheets`; audience `timesheets-api`; `iat`/`exp`/`iss`/`aud` required by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by the claims schema), enforces the frozen declared lifetime `0 < exp - iat <= 900s`, then requires a persisted Session (present, not revoked, not past its absolute expiry, `userId === sub`) and a persisted CompanyMembership (present, `userId === sub`, `companyId === token.companyId`). The token's `companyId` is cross-checked against the row and never authority on its own — the AuthContext company comes from the persisted membership, and `role` is read fresh from that row on every request. Produces exactly `{ userId, companyId, membershipId, sessionId, role, membershipStatus }`. Every failure is the identical `401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, so the boundary is not an oracle for which check failed. Database access is the narrow `AuthStore` (two primary-key reads, records rebuilt field by field) — `requireAuth` never receives a PrismaClient or `AppDatabase`. Proven by 16 pipeline tests (`src/lib/auth.test.ts`, each negative paired with a positive control) and 2 tests against real persisted rows (`src/tests/db/authProtectedRequest.test.ts`). |
 | Auth routes — login, company select, company switch, refresh, logout, token minting | 🔲 — nothing in this product issues a token; the verifier is configured for `verify` only. **F-19** (a far-future `iat` is currently accepted) must be resolved before this work is accepted complete |
-| **P1.2b — Authorized Tenant Context** | ✅ — F-14 closed in `2c85f4f`. `authorizeTenant(auth: AuthContext): TenantContext` (`api/src/lib/authorization.ts`) is the one production place authenticated identity becomes tenant authority, and the only production caller of `TenantContext.trust()`. It takes the trusted `AuthContext` and **nothing else** — no `companyId`, `membershipId`, `userId`, `role`, request, body, query or options parameter — so client-supplied identity has no channel to arrive through; and it performs **no database read**, because `requireAuth` already validated the identity against persistence. Active membership → a `TenantContext` carrying `companyId`, `userId` **and** `membershipId` (all three; `membershipId` is what `shiftRepository` scopes `findById`/`update`/`delete` on, per D15). Anything not exactly `"active"` → generic `403 FORBIDDEN` (D17); the comparison is `!== "active"`, so a future third membership state would fail closed. Proven by 5 tests in `api/src/lib/authorization.test.ts`, written RED and reviewed before implementation; `npm run check` exit 0 at `2c85f4f` (110/110 unit, 45/45 DB, 4 migrations). The static rules were **not** changed: `tenant-context-trust-sites` already permitted `lib/auth*` and still bans `trust()` in routes, services and repositories. |
+| **P1.2b — Authorized Tenant Context** | ✅ — F-14 closed in `2c85f4f`. `authorizeTenant(auth: AuthContext): TenantContext` (`api/src/lib/authorization.ts`) is the one production place authenticated identity becomes tenant authority, and the only production caller of `TenantContext.trust()`. It takes the trusted `AuthContext` and **nothing else** — no `companyId`, `membershipId`, `userId`, `role`, request, body, query or options parameter — so client-supplied identity has no channel to arrive through; and it performs **no database read**, because `requireAuth` already validated the identity against persistence. Active membership → a `TenantContext` carrying `companyId`, `userId` **and** `membershipId` (all three; `membershipId` is what `shiftRepository` scopes `findById`/`update`/`delete` on, per D15). Anything not exactly `"active"` → generic `403 FORBIDDEN` (D17); the comparison is `!== "active"`, so a future third membership state would fail closed. Proven by 5 tests in `api/src/lib/authorization.test.ts`, written RED and reviewed before implementation; `npm run check` exit 0 at `2c85f4f` (110/110 unit, 45/45 DB, 4 migrations). The static rules were **not** changed: `tenant-context-trust-sites` already permitted `lib/auth*`, so the bridge needed no rule change. That exemption is an unanchored path substring and its coverage is narrower than earlier wording here claimed — see **F-23**. Independently audited 2026-08-31 against `60effc9`: the P1.2b invariant held under every attack constructed against it (no inactive bypass, no role bypass, no alternate construction path, no client channel through body, query, path params or headers); the audit opened **F-22**, **F-23** and **F-24**, none of which invalidates this row. |
 | Inactive-membership authorization — **ordinary/default rule** | ✅ — the default-deny half of AUTH.md's "Deactivated membership" section is implemented: an inactive membership still authenticates and is reported as `inactive` (P1.2a, unchanged), and is then refused ordinary tenant authority with `403 { "error": "Not allowed", "code": "FORBIDDEN" }`. Generic on purpose — the response never discloses that a deactivated membership caused the denial (D17). Role is not a bypass: an inactive **admin** is denied identically. |
 | Inactive-membership authorization — **the narrow exception** | 🔲 — AUTH.md permits a deactivated membership to read, update and submit an **already-open** shift, and nothing else. **None of that exists.** There is no finalise capability, no discard capability, no `allowInactive`, no bypass flag, no capability token, no permission enum and no policy engine. Its concrete API is an open design question, not a settled one; the only frozen fact is that any such operation must be explicit and narrow. It will be designed with the business feature that needs it. |
 | First protected business route | 🔲 — **no longer blocked by P1.2b (F-14), closed `2c85f4f`.** Still blocked by O8, which must be decided before `shiftDate` can be persisted correctly (a local 00:30 BST start can fall on the previous UTC date). Owner decision required; see DECISIONS.md O8 |
@@ -219,6 +232,22 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   Non-blocking backlog; direction is an explicit Prisma `select`, when that
   boundary is next touched under owner authorization.
 
+- **Three of the four tenant rules currently scan zero production files (P1.2b
+  audit, 2026-08-31, Observation).** `src/routes/` and `src/services/` do not
+  exist yet, so `no-client-tenant`, `no-raw-request-past-route` and
+  `no-request-in-services` are today proven only against `__fixtures__`.
+  Correct and expected at this stage — recorded so that "4 tenant-boundary
+  rules ✅" is not read as "4 rules currently guarding production code". No
+  action; it resolves itself when the first route lands.
+
+- **Company-level state is never consulted on the authority path (P1.2b audit,
+  2026-08-31, Observation).** `Company.status` (`trial | active | past_due |
+  cancelled`) is read by nothing, and there is no global `User.active`, so an
+  active member of a cancelled company retains full tenant authority.
+  Known-not-built — "Subscription enforcement 🔲" below owns it. Recorded here
+  only because `authorizeTenant` is the single chokepoint such enforcement will
+  have to land in, rather than in individual routes.
+
 - **Stale comments and config outside documentation scope (audit 2026-08-31).**
   Five reconciliation items found by the audit that live in **code, tests or
   config**, and so could not be corrected by a documentation-only task. Not
@@ -246,6 +275,11 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
      in `api/src/lib/authorization.ts`. The comment was left untouched because
      the reconciliation task that found it was documentation-only. Behaviour is
      unaffected.
+  7. `api/src/lib/tenantContext.ts:6-8` — the class comment says "The single way
+     to obtain one is `TenantContext.trust()`". A deliberate `as unknown as
+     TenantContext` defeats that, and the instance is not frozen, so `readonly`
+     is compile-time only. Tracked as **F-22**; the comment is listed here too
+     because it is the artifact a future agent reads at the moment it matters.
 
 ---
 
