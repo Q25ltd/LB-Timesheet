@@ -1,7 +1,8 @@
 # LogisticBay Timesheets — Agent Instructions
 
-> Read this file first, every session, no exceptions.
-> Last updated: 2026-08-25
+> Read this file first, every session, no exceptions. Then AGENT_WORKFLOW.md.
+> This file owns the product and the code rules; AGENT_WORKFLOW.md owns the process.
+> Last updated: 2026-08-31
 
 ---
 
@@ -72,6 +73,7 @@ sentence — stop.
 
 | Question you have | Go to |
 |---|---|
+| How do I work — what is authorized, what proves it, when do I stop? | **AGENT_WORKFLOW.md** ← the process contract; this file is the product and code contract |
 | What is this product, what is in and out of scope? | **PRODUCT.md** |
 | What is actually built right now? | **STATUS.md** ← check before proposing anything |
 | What was decided, and what is still open? | **DECISIONS.md** |
@@ -87,15 +89,21 @@ sentence — stop.
 1. **Read STATUS.md** — state what is ✅ / 🔶 / 🔲 in the area being worked on.
 2. **Read DEVLOG.md top entry** — state what was last done and what was left open.
 3. **Check DECISIONS.md** — do not re-litigate settled decisions; do not guess at open ones.
-4. **State what you will do** and which docs you will update afterwards.
+4. **State what you will do** — and which documentation the work will make
+   stale. Reporting that is not authorisation to change it (AGENT_WORKFLOW.md §18).
 
 ## Session end — mandatory checklist
 
-Do this automatically, before saying "done":
+Before saying "done":
 
-1. **Update STATUS.md** — move items between 🔲 / 🔶 / ✅.
-2. **Add a DEVLOG.md entry** — what was built, what was decided, what is deferred.
-3. **If a decision was made or an open question emerged** — update DECISIONS.md.
+1. **Report what the work made stale** — in STATUS.md, DEVLOG.md, DECISIONS.md,
+   FINDINGS.md or any other document — and exactly what reconciliation each needs.
+2. **Do not modify any of them unless the current task explicitly authorises
+   that documentation change.**
+
+Documentation is a repository change and carries no special permission. There
+are no automatic documentation updates. An explicit STOP means no documentation
+changes at all. See AGENT_WORKFLOW.md §18.
 
 ---
 
