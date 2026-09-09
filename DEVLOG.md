@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-09-09 — F-24 closed: the auth identity bindings are now tested
+
+Test-only commit `597bd1110db4675602711da7840890c83d92968c`, one file:
+`api/src/lib/auth.test.ts`. **Production auth code is unchanged** — this closed
+a coverage gap, not a defect. Behaviour was already correct.
+
+**What the two cases protect.** Both identity rows are fetched by an id the
+token supplies, and an id is a pointer, not proof of ownership. Case 17 gives
+the pipeline a Session that is live, unrevoked, unexpired and named exactly by
+the token but belongs to another user, while the membership still belongs to the
+subject and to the token's company — so only `session.userId === claims.sub`
+can reject it. Case 18 gives it a CompanyMembership that is present, active and
+in the token's own company but belongs to another user, while the Session
+belongs correctly to the subject — so only `membership.userId === claims.sub`
+can reject it. Without the second check the holder of any valid session could
+present any `membershipId` and be handed a full `TenantContext` for that
+company. Both assert the frozen generic failure (`401 UNAUTHENTICATED`,
+canonical envelope, no AuthContext), so the boundary stays a non-oracle.
+
+**RED, honestly.** The implementation was already correct, so writing the tests
+and watching them pass would have proved nothing (AGENT_WORKFLOW §8). Each case
+was instead shown load-bearing by temporarily deleting **only its own**
+production check in the working tree: removing `auth.ts:155` failed case 17
+alone with `200 !== 401` while case 18 stayed green; removing `:159` failed case
+18 alone the same way while case 17 stayed green. Both mutations were reverted
+— `auth.ts` restored byte-identical by SHA-256 — and the commit's file list
+contains no production source.
+
+**Verification.** Targeted 2/2; `auth.test.ts` 18/18; `npm run check` exit 0
+(127/127 unit, 50/50 DB, 5 migrations); GitHub Actions run `34368029271`
+`completed/success` for that exact SHA.
+
+**Scope.** This closes exactly the two bindings F-24 named. The rest of that
+audit batch — wrong-*value* `iss`/`aud`, `alg:none`, a missing membership row —
+is still deferred, and F-19, F-22 and F-23 are untouched.
+
+---
+
 ## 2026-08-31 — D18 implemented: company timezone authority
 
 Implementation `4888d63131215d9bac78f2f50fd98ff4a78185d5`, schema, migration,
