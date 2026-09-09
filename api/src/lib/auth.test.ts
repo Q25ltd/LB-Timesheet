@@ -16,9 +16,12 @@
  *
  * Scope is exactly the six behaviours authorised for P1.2a. The wider negative
  * matrix (issuer, audience, alg:none, JWT exp, malformed claims, missing
- * session, session/user mismatch, missing membership, membership/user
- * mismatch, exact-now timing, inactive-membership 403 rules) is required
- * hardening, deferred to its own batch — not rejected.
+ * session, missing membership, exact-now timing, inactive-membership 403
+ * rules) is required hardening, deferred to its own batch — not rejected.
+ *
+ * Two members of that matrix are no longer deferred: the identity bindings
+ * `session.userId === sub` and `membership.userId === sub` are cases 17 and 18
+ * below, added for F-24 against an implementation that already performs them.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,6 +44,8 @@ const SECRET       = process.env.JWT_SECRET;
 const OTHER_SECRET = "9c2e7a41b8d05f36e1a94c7b2d8f60e35a1c9b4d7e2f80a6";
 
 const USER_ID       = "user_cmth00000000000000000001";
+/** A second real user — for the identity-binding cases, never the token subject. */
+const OTHER_USER    = "user_cmth00000000000000000002";
 const COMPANY_ID    = "comp_cmth00000000000000000001";
 const OTHER_COMPANY = "comp_cmth00000000000000000002";
 const MEMBERSHIP_ID = "memb_cmth00000000000000000001";
@@ -421,4 +426,46 @@ test("16. a token whose exp precedes its iat is refused", async () => {
   const res = await get(identity, signToken(claimsWithLifetime(-300, -60), SECRET));
   assert.equal(res.statusCode, 401, "a negative lifetime is malformed");
   assert.deepEqual(res.json(), CANONICAL_401);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 17-18. The loaded identity must belong to the token's SUBJECT (F-24)
+// ─────────────────────────────────────────────────────────────────────────────
+// Both identity rows are fetched by an id the token supplies. An id is a
+// pointer, not proof of ownership: without these two checks a validly signed
+// token could name any live session, or any membership, and be handed that
+// row's authority. Each case below leaves every OTHER check satisfied, so the
+// rejection is attributable to the binding under test and to nothing else.
+
+test("17. a session belonging to a different user is refused, while the same token on its own session succeeds", async () => {
+  const token = signToken(claimsFor(), SECRET);
+
+  const control = await get(reads(liveSession(), activeMembership()), token);
+  assert.equal(control.statusCode, 200, "positive control: the session belonging to the token subject must authenticate");
+
+  // Present, unrevoked, unexpired, named exactly by the token — and another
+  // user's. The membership still belongs to the subject and to the token's
+  // company, so `session.userId === sub` is the only check this identity fails.
+  const othersSession: SessionRow = { ...liveSession(), userId: OTHER_USER };
+  const res = await get(reads(othersSession, activeMembership()), token);
+
+  assert.equal(res.statusCode, 401, "a session belonging to another user must not authenticate the token's subject");
+  assert.deepEqual(res.json(), CANONICAL_401, "the canonical envelope, and no AuthContext: no tenant authority may be obtained");
+});
+
+test("18. a membership belonging to a different user is refused, while the same token on its own membership succeeds", async () => {
+  const token = signToken(claimsFor(), SECRET);
+
+  const control = await get(reads(liveSession(), activeMembership()), token);
+  assert.equal(control.statusCode, 200, "positive control: the membership belonging to the token subject must authenticate");
+
+  // Present, active, in the token's own company — and another user's. The
+  // session belongs to the subject, so `membership.userId === sub` is the only
+  // check this identity fails. Without it, the holder of any valid session
+  // could present any membershipId and receive that membership's authority.
+  const othersMembership: MembershipRow = { ...activeMembership(), userId: OTHER_USER };
+  const res = await get(reads(liveSession(), othersMembership), token);
+
+  assert.equal(res.statusCode, 401, "a membership belonging to another user must not authenticate the token's subject");
+  assert.deepEqual(res.json(), CANONICAL_401, "the canonical envelope, and no AuthContext: no tenant authority may be obtained");
 });
