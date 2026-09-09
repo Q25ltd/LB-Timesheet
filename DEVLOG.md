@@ -4,6 +4,70 @@
 
 ---
 
+## 2026-08-31 — D18 implemented: company timezone authority
+
+Implementation `4888d63131215d9bac78f2f50fd98ff4a78185d5`, schema, migration,
+one pure helper and tests. RED was written and run before the schema changed,
+per AGENT_WORKFLOW §8. This entry was written on 2026-09-09 in a separate
+documentation-only reconciliation; the entry below it, which records that the
+timezone field did **not** exist at that earlier point, is historical and stands.
+
+**The gap it closed.** D18 files a shift under the local calendar date it
+STARTED, derived from the start instant in the **company's** IANA timezone. That
+authority did not exist, so the only date available was the instant's own UTC
+date: a local `2026-07-02 00:30 Europe/London` start resolved to `2026-07-01` —
+the wrong day's timesheet. RED was that gap, not a broken import: the DB test
+failed 5/5 on one before-hook assertion ("the Company table has no timezone
+column"), alongside 7 typecheck errors.
+
+**Built.** `Company.timezone`, `String @default("Europe/London")` — non-null, an
+IANA **identifier**, never a numeric offset (an offset cannot say which zone it
+is, and DST moves it twice a year). Migration
+`20260831210000_company_timezone_authority`: one `ALTER TABLE … ADD COLUMN
+"timezone" TEXT NOT NULL DEFAULT 'Europe/London'`, so PostgreSQL backfills
+pre-existing rows in the same statement — no separate UPDATE, no window where a
+row is NULL. Verified both ways, which are different claims: clean install via
+`migrate deploy` inside `npm run check`, and upgrade of a **populated** database
+on a throwaway DB, where two pre-existing Company rows came out `Europe/London`.
+
+`api/src/lib/timezone.ts` is the pure foundation: `isIanaTimeZone` and
+`localCalendarDate(instant, timeZone)`. The runtime's own ICU tz database is the
+authority — no dependency, no hand-kept world list — with an explicit rejection
+of the offset forms (`+01:00`, `+0100`, `-05:00`) that `Intl` would otherwise
+accept, which is why a try/catch alone was not enough. `localCalendarDate`
+returns midnight UTC, the form a `@db.Date` column stores.
+
+**Europe/London is a default, not an assumption.** `Europe/Vilnius`,
+`America/New_York`, `Asia/Dubai` and `Australia/Sydney` round-trip verbatim, and
+nothing in the helper knows about the UK. Evidence: the required boundary
+(00:30 Europe/London → `2026-07-02`, not the UTC `2026-07-01`); one instant
+filing under different dates in four zones, including a negative offset and a
+45-minute one; a summer/winter pair no fixed offset survives; both DST
+transitions; and a 22:00 → 06:00 night shift filed under its **start** date.
+The `shiftDate` schema comment now states D18 instead of "(O8, provisional)".
+
+**Discovered, not designed around.** `"BST"` is a real IANA identifier — it
+resolves to **Asia/Dhaka**, not British Summer Time. A first-draft test asserting
+it should be rejected was wrong and the runtime was right, so the test was
+corrected to prove the trap: validity is not a safe picker, and a future settings
+path should offer canonical identifiers rather than free text that validates.
+
+**Deliberately not built.** No company settings or onboarding, so **no company
+can choose its timezone** — every company sits on the V1 default, and the data
+model supporting arbitrary zones is not the same thing as worldwide onboarding.
+No production caller of the helper (Start Shift is unbuilt). No `shiftDate`
+immutability constraint, no Night Out field, no schema hardening, no F-24 work,
+no new finding ID.
+
+**Verified.** Targeted 11/11 pure and 50/50 DB before the gate. Authoritative
+`npm run check` exit 0 at `4888d63`: **125/125 unit** (114 + 11), **50/50 DB**
+(45 + 5), **5 migrations** onto a clean database. `git diff --check` clean.
+GitHub Actions run **`33436174195`**, `completed/success`, queried by that exact
+SHA. The local development database was then brought up to all five migrations
+with `migrate deploy`; no application data was inserted, altered or deleted.
+
+---
+
 ## 2026-08-31 — O8 decided and frozen as D18 (documentation only, no code)
 
 Owner decision recorded. **No code, schema, migration, test or static rule was
