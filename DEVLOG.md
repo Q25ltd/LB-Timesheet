@@ -4,6 +4,90 @@
 
 ---
 
+## 2026-09-10 — Registration Increment 1: a driver account, and the second token kind
+
+The first thing a real person can use. `POST /auth/register` and
+`GET /auth/me`, plus an Expo app whose Registration screen calls them.
+Decisions recorded as **D21–D25**; what is built is STATUS.md's to state.
+
+**The invariant.** *A driver account does not require a company.* Zero
+`CompanyMembership` rows is a legitimate, fully authenticated state — no fake
+Company, no fake membership, no personal tenant to make the shape uniform. A
+live end-to-end run finished with 0 Company and 0 CompanyMembership rows in
+the database.
+
+**The architectural boundary, and the reason the phase needed a decision at
+all.** AUTH.md froze "0 memberships → 403, no token issued" and "there is no
+unscoped token in this system". Satisfying the invariant meant amending that
+wording without weakening what it protected. The answer is **two token kinds
+separated by JWT audience** (D21): an identity token carrying only `sub` and
+`sessionId`, and the unchanged tenant token whose `companyId`/`membershipId`
+stay mandatory. The guarantee is restated rather than dropped — *no token
+reaches tenant data without naming and validating a real membership* — and it
+is enforced by the verifier, not by a claim someone must remember to read.
+Separation is symmetric: a tenant token is refused at an identity route too,
+so one token never quietly acquires a second meaning. Route postures went
+from two to three, with tenant still the default and only an exact
+`"public"`/`"identity"` relaxing anything.
+
+**RED, honestly.** 20 route cases, 14 database cases and one new `auth.test`
+case were written and run first: 32 failures, every one at the assertion level
+(`404 !== 201`, `200 !== 401`, `'42703' !== null`) rather than on a missing
+import — `tsc --noEmit` was clean throughout, because the tests import only
+modules that already existed. Three cases passed from the start and were
+reported as guards, not as RED.
+
+**Migrations 7 and 8, both fail-closed.** `user_identity_names` replaces
+`User.name` with `firstName` + `lastName`, splitting on the FIRST space so
+`"John van der Berg"` keeps its surname, and **aborting** on any name that
+cannot yield both halves rather than inventing a surname. `user_email_citext`
+enables `citext`, normalises to trim+lowercase and makes uniqueness
+case-insensitive at the database, **aborting** if normalising would collide
+two accounts. Proven twice, which are different claims: clean install inside
+the gate, and a populated upgrade from the 6-migration baseline on throwaway
+databases, including both abort paths with every row left intact.
+
+**Two defects the evidence caught, both mine.** The citext migration's
+collision guard originally sat *after* the normalising UPDATE, so a real
+collision aborted on a bare `23505` naming neither the rows nor the remedy —
+exactly what its own comment claimed to prevent; the guard moved ahead of the
+write. And `@fastify/jwt` treats a numeric `expiresIn` as **seconds**, so
+passing milliseconds minted a ~25-year token that this API's own
+`exp - iat <= 900` check then refused. Both units are `number`; only a test on
+the claims could catch it. Cheaper next time: assert on the value a first-use
+integration point actually produces, not on the call succeeding.
+
+**Mobile foundation.** `mobile/` — React Native, Expo SDK 57, TypeScript
+strict, `expo-router`, `expo-secure-store`. Refresh secret in SecureStore
+under one key; identity token in memory only; the password never persisted;
+the storage module deliberately exposes no generic setter. No SQLite (D25).
+It joins the root gate, so it cannot rot. Three framework behaviours cost
+time and are documented at their call sites: RNTL v14's `render` **and**
+`fireEvent` are async under React 19, and not awaiting them leaks act scopes
+into the next test.
+
+**F-19 closed.** Present-dated token accepted, `iat = now + 30s` accepted,
+`iat = now + 24h` refused with the canonical 401 and no temporal disclosure —
+for both token kinds, through one shared timing helper. Deleting the bound
+fails exactly those two cases and nothing else. This closes that bound and
+nothing wider; the deferred negative matrix is untouched.
+
+**Verification.** `npm run check` from the repo root, exit 0 — 159 api unit,
+23 mobile, 85 DB, 8 migrations. Six load-bearing mutations each failed exactly
+the cases they should and were reverted with every file verified byte-identical.
+
+**Deliberately not built, and blocking what comes next:** login, refresh,
+logout and session restore. The refresh secret is issued and stored but
+**cannot be redeemed** — there is no `/auth/refresh`, and **F-21** must be
+decided before rotation exists. **F-15** and **F-17** still block public
+deployment, and registration being live locally does not soften that: it is
+the first public mutating route and sits behind the same flat 300/min/IP
+limit. Email verification stays deferred (D24) and must be resolved before
+invitation-by-email can grant authority. Brand assets are still missing — the
+hero area is reserved; that is product polish, not a finding.
+
+---
+
 ## 2026-09-10 — Start Shift Foundation: the first protected business route
 
 `POST /shifts/start` and `GET /shifts/current`, plus migration 6. Decisions

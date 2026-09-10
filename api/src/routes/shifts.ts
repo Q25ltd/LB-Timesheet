@@ -2,7 +2,7 @@
  * The first protected business routes: start a shift, and recover the open one.
  *
  * Both sit behind the default-deny `onRequest` hook in app.ts (F-10) and
- * declare `public: false` so the posture is visible on read. Neither touches
+ * declare `authPosture: "tenant"` so the posture is visible on read. Neither touches
  * Prisma, neither reads tenant identity out of the payload, and neither
  * decides anything — they parse input into a DTO and hand it, with the trusted
  * AuthContext, to the service (AUTH.md's trust boundary).
@@ -44,7 +44,7 @@ function invalidRequest(error: ZodError): AppError {
 export function registerShiftRoutes(app: FastifyInstance, shifts: StartShiftRepository): void {
   app.post(
     "/shifts/start",
-    { config: { public: false } },
+    { config: { authPosture: "tenant" } },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = StartShiftBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
@@ -59,7 +59,7 @@ export function registerShiftRoutes(app: FastifyInstance, shifts: StartShiftRepo
 
   app.get(
     "/shifts/current",
-    { config: { public: false } },
+    { config: { authPosture: "tenant" } },
     async (request: FastifyRequest) => {
       return { shift: await currentShift(authenticated(request.auth), shifts) };
     },

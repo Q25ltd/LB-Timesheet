@@ -53,6 +53,27 @@ export default tseslint.config(
   },
 
   {
+    // The mobile workspace has its own tsconfig, so type-aware linting needs
+    // its own root. Same rules otherwise -- one lint pass over both
+    // workspaces, not a second, laxer standard for the app.
+    files: ["mobile/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: `${import.meta.dirname}/mobile` },
+    },
+  },
+
+  {
+    // Jest supplies these as globals; unlike node:test they are not imported.
+    files: ["mobile/jest.setup.js", "mobile/**/*.test.{ts,tsx}"],
+    languageOptions: {
+      globals: {
+        jest: "readonly", expect: "readonly", test: "readonly", describe: "readonly",
+        beforeEach: "readonly", afterEach: "readonly", beforeAll: "readonly", afterAll: "readonly",
+      },
+    },
+  },
+
+  {
     files: ["**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
   },

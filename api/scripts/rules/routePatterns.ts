@@ -2,7 +2,8 @@ import { stripComments } from "./tenantPatterns.js";
 
 /**
  * Finds Fastify route registrations that don't declare an explicit
- * `public: true|false` (F-10's `route-declares-auth`).
+ * `authPosture: "public" | "identity" | "tenant"` (F-10's
+ * `route-declares-auth`, extended to three postures by D21).
  *
  * This is a guardrail, not the security boundary -- the boundary is the
  * default-deny `onRequest` hook in app.ts, which protects a route whether or
@@ -18,16 +19,17 @@ import { stripComments } from "./tenantPatterns.js";
  *     schema: { ... },
  *   }, handler);
  *
- * Honest limitation: this checks for a literal `public: true|false` anywhere
+ * Honest limitation: this checks for a literal posture declaration anywhere
  * within the matched call's parentheses, not specifically nested under
  * `config`. That is a deliberately loose, cheap check -- a call that somehow
- * contains an unrelated `public:` key would not be caught. The runtime hook
- * does not have this gap: it reads `request.routeOptions.config.public`
- * precisely, so a stray unrelated key elsewhere changes nothing about who
- * actually gets through.
+ * contains an unrelated `authPosture:` key would not be caught. The runtime
+ * hook does not have this gap: it reads `request.routeOptions.config
+ * .authPosture` precisely and treats anything that is not an exact
+ * `"public"` / `"identity"` match as tenant-protected, so a stray key
+ * elsewhere changes nothing about who actually gets through.
  */
 const ROUTE_CALL = /\b[A-Za-z_$][\w$]*\s*\.\s*(?:get|post|put|patch|delete|route)\s*\(/g;
-const PUBLIC_KEY = /\bpublic\s*:\s*(?:true|false)\b/;
+const POSTURE_KEY = /\bauthPosture\s*:\s*["'`](?:public|identity|tenant)["'`]/;
 
 export interface RouteRegistrationHit { line: number; text: string }
 
@@ -49,7 +51,7 @@ export function findUndeclaredRouteRegistrations(source: string): RouteRegistrat
     if (depth !== 0) continue; // unbalanced -- not a call we can span safely
 
     const span = code.slice(start, end);
-    if (PUBLIC_KEY.test(span)) continue;
+    if (POSTURE_KEY.test(span)) continue;
 
     hits.push({
       line: code.slice(0, start).split("\n").length,

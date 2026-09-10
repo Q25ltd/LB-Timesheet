@@ -178,8 +178,13 @@ Full contract in **AUTH.md**. Summary of what was chosen and why:
   weeks; grace because strict rotation logs a driver out when signal drops
   mid-rotation.
 - **The daily unlock is a local PIN/biometric**, not a server login.
-- **0 memberships → denied. 1 → auto-selected. 2+ → list, then an explicit
-  server-validated switch.** There is no unscoped token in this system.
+- ~~**0 memberships → denied.**~~ **SUPERSEDED by D21 (2026-09-10).** A
+  zero-membership driver now authenticates with an **identity token** that
+  carries no tenant authority. **1 → auto-selected. 2+ → list, then an explicit
+  server-validated switch** — both unchanged. The clause "there is no unscoped
+  token in this system" is superseded in its wording only; the guarantee it
+  protected is restated and strengthened by D21: *no token may reach tenant
+  data without naming and validating a real membership.*
 - **A deactivated membership keeps limited authority**: it can read and submit an
   already-open shift, but start nothing new. Default is deny; routes opt in.
 - **Company switching is refused while a draft shift is open.**
@@ -423,6 +428,145 @@ never validation, and it must never become a server-side rejection.
 
 This applies to both ends of a shift. Finish Shift is unbuilt; the rule is
 recorded now so it is not re-litigated when `endedAt` arrives.
+
+### D21 — A driver account exists without a company; identity tokens carry no tenant authority (2026-09-10)
+
+**Implemented for registration in Registration Increment 1** — identity
+tokens, the three route postures and `/auth/me`. The login and company-switch
+halves of the flow this decision describes remain unbuilt; STATUS.md owns
+build state.
+
+A legitimate `User` may hold **zero**, one, or several `CompanyMembership`
+rows. A zero-membership driver must be able to register, authenticate and use
+account-level functionality. This supersedes D13's "0 memberships → denied"
+and AUTH.md's "0 memberships → 403, no token issued".
+
+*Why the old rule existed, and why it is safe to change:* the intent was never
+"a person must have an employer to exist" — it was "no token reaches tenant
+data without a validated membership". Denying login was a blunt way to get
+that. Two explicit token kinds get the same guarantee without it.
+
+**Two token kinds, separated by JWT audience — never one polymorphic token.**
+
+| | Identity token | Tenant access token |
+|---|---|---|
+| `aud` | `timesheets-identity` | `timesheets-api` (unchanged) |
+| Claims | `sub`, `sessionId`, `iat`, `exp`, `iss`, `aud` | `sub`, `companyId`, `membershipId`, `sessionId`, `iat`, `exp`, `iss`, `aud` |
+| Authority | the global account and its session | exactly one membership in one company |
+| Yields | user + session identity | `AuthContext` → `authorizeTenant` → `TenantContext` |
+
+`companyId` and `membershipId` remain **mandatory** in the tenant token. They
+are not made optional, and no token type is allowed to sometimes carry them.
+
+**The security invariant, restated:** *no token may reach tenant data without
+naming and validating a real membership.* An identity token is structurally
+unusable against a tenant route — the verifier's audience check refuses it,
+the same mechanism that keeps a LogisticBay TMS token out (D1). The separation
+is symmetric: a **tenant token is equally refused at an identity route**, so
+one token never silently acquires a second meaning. A client that needs both
+receives both.
+
+**Three route postures**, replacing today's two. The default is unchanged and
+remains the most restrictive:
+
+| Posture | Requires | Yields |
+|---|---|---|
+| public | nothing | nothing |
+| identity | identity token + live Session | user + session; **never** a `TenantContext` |
+| tenant (**default**) | tenant token + live Session + active membership | `AuthContext` |
+
+A route whose posture is not declared is **tenant**-protected. Omission must
+never produce a public or an identity route. The runtime hook in `app.ts` is
+the boundary; `check-rules` remains a guardrail only (D16).
+
+**Registration auto-authenticates** (no "create account, now type it again"):
+one operation creates the `User`, one `Session`, and the identity material,
+and zero memberships is a valid successful outcome. No fake Company,
+no fake CompanyMembership, no fake tenant — ever.
+
+`requireAuth`, `authorizeTenant`, `TenantContext`, membership validation and
+Start Shift authority are **unchanged** by this decision.
+
+### D22 — Driver identity fields: first/last name, normalized email (2026-09-10)
+
+**Implemented in Registration Increment 1.**
+
+**`User.name` is replaced by `User.firstName` + `User.lastName`.** They are the
+canonical identity fields; `name` is not retained as a second authority (one
+concept, one name). Any display or full name is **derived** from the two.
+`Shift.driverName` is unaffected — it stays an immutable historical snapshot
+taken at Start Shift, and is never recomputed from a later name change.
+
+**Email is the account identity, stored canonically as `trim` + `lowercase`.**
+`Driver@Example.com` and `driver@example.com` are the same account. Deliberately
+**not** applied: `+`-tag stripping, dot removal, or any provider-specific
+transformation — those merge mailboxes that genuinely belong to different
+people.
+
+**The database carries the uniqueness guarantee**, not application code
+(D16). Application-side normalization alone is insufficient: one forgotten
+call site reintroduces duplicate identities into the identity system itself.
+
+### D23 — V1 password policy and storage (2026-09-10)
+
+**Implemented in Registration Increment 1**, for the hashing half. There is
+deliberately no password *verification* helper yet: login is its caller and a
+comparison function with no caller is dead code.
+
+- **Minimum 10 characters.**
+- **Maximum 72 UTF-8 BYTES** — not 72 characters. bcrypt processes at most 72
+  bytes; silently accepting a longer password means silently ignoring the
+  end of it. The guarantee is expressed in byte length, because 72 UTF-8 bytes
+  is as few as 18 characters of ordinary accented text.
+- **No mandatory uppercase, lowercase, digit or symbol.** Composition rules
+  produce `Password1`, not entropy.
+- **bcryptjs**, cost factor **12**. Already a declared dependency. The cost
+  must be **measured** on the real Node 22.13 runtime before GREEN is
+  accepted; if it is materially unsuitable, that is reported with evidence,
+  not quietly lowered.
+
+Plaintext passwords are never stored, logged, or returned. The UI states the
+rule that exists ("At least 10 characters") and no implementation detail.
+
+### D24 — Duplicate email answers 409; email ownership is unproven until verified (2026-09-10)
+
+**The 409 is implemented in Registration Increment 1. Email verification is
+deliberately still absent** — that is the decision, not an omission.
+
+Registering an email that already exists returns **`409 EMAIL_IN_USE`** and
+nothing else — no user id, no name, no account status, no membership or
+company information. This is a **knowingly accepted account-enumeration
+trade-off** for V1: the privacy-preserving alternative requires an email
+provider and a verification lifecycle, which do not exist. Login's response
+stays generic and unchanged (AUTH.md).
+
+**Email verification is deferred, and is not a finding** — it is unbuilt
+planned work, not a defect. The requirement it leaves behind is recorded here
+because it will otherwise be forgotten at exactly the wrong moment:
+
+> **A company must not gain authority over a driver account merely because an
+> unverified account claimed an email address.** Email-ownership verification
+> must be resolved before company invitation-by-email is accepted complete.
+
+### D25 — Mobile client foundation and secret storage (2026-09-10)
+
+**Implemented in Registration Increment 1.**
+
+**React Native + Expo + TypeScript (strict).** Not a preference to revisit per
+feature; changing it is an architectural decision.
+
+- **Expo SecureStore** holds the long-lived refresh secret.
+- The short-lived identity / tenant access token lives **in memory only**.
+- **No** authentication secret in AsyncStorage; **no** plaintext token
+  persistence anywhere.
+- **No SQLite yet.** It arrives with local Personal Timesheets / offline
+  operational data and not before — speculative persistence infrastructure is
+  forbidden (AGENT_WORKFLOW §25).
+- Biometric local unlocking remains future work with its own security
+  contract. No biometric control ships before it exists.
+
+The mobile workspace **participates in the authoritative gate**. A mobile
+project CI ignores is a second-class project that rots.
 
 ---
 

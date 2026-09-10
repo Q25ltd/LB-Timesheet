@@ -140,17 +140,29 @@ interface MembershipRow {
 
 interface IdentityReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
-  session: { findUnique(args: { where: { id: string } }): Promise<SessionRow | null> };
-  companyMembership: { findUnique(args: { where: { id: string } }): Promise<MembershipRow | null> };
-  // Start Shift's reads. Unused by this file — these cases stop at the
-  // authentication boundary and never reach a business route — but AppDatabase
-  // names them, so the fixture has to satisfy them.
+  session: {
+    findUnique(args: { where: { id: string } }): Promise<SessionRow | null>;
+    create(): Promise<never>;
+  };
+  companyMembership: {
+    findUnique(args: { where: { id: string } }): Promise<MembershipRow | null>;
+    findMany(): Promise<never[]>;
+  };
+  // Start Shift's reads and the account boundary's reads/writes. Unused by
+  // this file — these cases stop at the authentication boundary and never
+  // reach a business or account route — but AppDatabase names them, so the
+  // fixture has to satisfy them. The WRITES reject: reaching one would mean
+  // the authentication boundary persisted something, which it must never do.
   shift: {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<null> };
-  user: { findUnique(): Promise<null> };
+  user: {
+    findUnique(): Promise<null>;
+    create(): Promise<never>;
+  };
+  $transaction(): Promise<never>;
 }
 
 /** Matches on id, so "the wrong id finds nothing" stays expressible later. */
@@ -160,17 +172,23 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
     session: {
       findUnique: ({ where }) =>
         Promise.resolve(session !== null && session.id === where.id ? session : null),
+      create: () => Promise.reject(new Error("session.create is not part of the authentication pipeline")),
     },
     companyMembership: {
       findUnique: ({ where }) =>
         Promise.resolve(membership !== null && membership.id === where.id ? membership : null),
+      findMany: () => Promise.resolve([]),
     },
     shift: {
       create:    () => Promise.reject(new Error("shift.create is not part of the authentication pipeline")),
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve(null) },
-    user:    { findUnique: () => Promise.resolve(null) },
+    user: {
+      findUnique: () => Promise.resolve(null),
+      create:     () => Promise.reject(new Error("user.create is not part of the authentication pipeline")),
+    },
+    $transaction: () => Promise.reject(new Error("$transaction is not part of the authentication pipeline")),
   };
 }
 
@@ -483,4 +501,37 @@ test("18. a membership belonging to a different user is refused, while the same 
 
   assert.equal(res.statusCode, 401, "a membership belonging to another user must not authenticate the token's subject");
   assert.deepEqual(res.json(), CANONICAL_401, "the canonical envelope, and no AuthContext: no tenant authority may be obtained");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. A future-dated token is not a valid token (F-19)
+// ─────────────────────────────────────────────────────────────────────────────
+// The declared-lifetime rule proves `0 < exp - iat <= 900`, which a token
+// dated tomorrow satisfies perfectly — and it is then honoured for the whole
+// of tomorrow. The verifier cannot catch it either: `exp` is genuinely in the
+// future. Only a bound on `iat` against server-now can.
+//
+// The allowance is 60 seconds (AUTH.md, "Future-dated tokens", D10 of the
+// 2026-09-10 gate). This is a JWT rule and has nothing to do with D20: the
+// driver's DECLARED start and finish times may be any instant, past or
+// future, and are never rejected on temporal grounds.
+
+test("19. a token issued more than 60 seconds in the future is refused, while ordinary clock skew still authenticates", async () => {
+  const identity   = reads(liveSession(), activeMembership());
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  const control = await get(identity, signToken(claimsFor(), SECRET));
+  assert.equal(control.statusCode, 200, "positive control: a present-dated token must authenticate");
+
+  // Inside the allowance. A minter 30 seconds ahead of this verifier is
+  // ordinary skew between two of our own processes, not an attack — refusing
+  // it would log drivers out for a clock difference nobody can see.
+  const skewed = await get(identity, signToken({ ...claimsFor(), iat: nowSeconds + 30, exp: nowSeconds + 30 + 900 }, SECRET));
+  assert.equal(skewed.statusCode, 200, "30 seconds of clock skew is within the frozen 60-second allowance");
+
+  // Outside it. Correctly signed, correct issuer and audience, a 900-second
+  // declared lifetime — every existing check passes.
+  const future = await get(identity, signToken({ ...claimsFor(), iat: nowSeconds + 86400, exp: nowSeconds + 86400 + 900 }, SECRET));
+  assert.equal(future.statusCode, 401, "a token dated 24 hours ahead must be refused, not honoured for a day");
+  assert.deepEqual(future.json(), CANONICAL_401, "and the response must not disclose that the reason was temporal");
 });

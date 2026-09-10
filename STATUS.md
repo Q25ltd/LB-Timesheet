@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-09-10
+> Last updated: 2026-09-10 (Registration Increment 1)
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -10,21 +10,25 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 
 ## Overall
 
-🔶 **Hardened foundation plus the first business route; still nothing a user
-can use.** No auth routes, so no driver can obtain a token; no vehicle/check
-flow, no finish, no PDF, no email sending, no web app, no mobile app.
+🔶 **A driver can now create an account on a phone and end up signed in — and
+that is the only thing a user can do.** There is no login, so a driver who
+closes the app cannot get back in; no vehicle/check flow, no finish, no PDF,
+no email sending, no web app.
 
 What IS real: migration-managed schema with membership-bound shifts, a
 one-open-shift invariant, a non-null company IANA timezone (D18) and offline
 Start Shift identity; Session persistence; protected-request authentication
 (P1.2a — see below); **the Start Shift backend foundation — `POST /shifts/start`
-and `GET /shifts/current` (D19, D20)**; a
-tenant-safe repository boundary with Company A/B proofs;
+and `GET /shifts/current` (D19, D20)**; **Registration Increment 1 — `POST
+/auth/register` and `GET /auth/me`, the identity token, the three route
+postures, and an Expo driver app whose Registration screen calls the real
+API**; a tenant-safe repository boundary with Company A/B proofs;
 global error handling that cannot leak internals; fail-closed env validation
 (CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
-verbatim, ending in a clean-database migrate-deploy + integrity suite. Findings
-F-01…F-11, F-13 and F-14 closed; F-15…F-21 opened or deferred by the 2026-08-31
-backend foundation audit (F-12 reserved); see FINDINGS.md.
+verbatim, covering both workspaces and ending in a clean-database
+migrate-deploy + integrity suite. Findings
+F-01…F-11, F-13, F-14 and **F-19** closed; F-15…F-18, F-20, F-21 open or
+deferred (F-12 reserved); see FINDINGS.md.
 
 **Independently audited 2026-08-31** against `0591241`: **0 Critical, 0 High**,
 5 Medium, 4 Low, 4 Observation. No authentication bypass, no cross-company
@@ -32,12 +36,15 @@ escape and no same-company driver-to-driver escape was demonstrated. The audit
 did not invalidate P1.2a. What it did establish is what must come next — see
 "Blocked until" below.
 
-**Authentication verifies identity; nothing issues one.** `requireAuth` is no
-longer a stub — a request carrying a valid token, a live Session and a matching
-CompanyMembership now reaches a route with a trusted AuthContext. But **no code
-mints a token**: there is no login, no refresh rotation, no logout, no company
-selection or switching, and no route that reads `request.auth`. No driver can
-obtain a token through this product today.
+**Registration mints tokens; login does not exist.** `POST /auth/register`
+creates a User and a Session atomically and returns an identity token, so a
+driver can obtain a token — by registering, and only by registering. There is
+still **no login, no refresh rotation, no logout, no session restore after an
+app restart, and no company selection or switching**. A refresh secret IS
+issued and stored, but nothing can redeem it yet: there is no `/auth/refresh`.
+In practice a driver is signed in for 15 minutes after registering and cannot
+get back in afterwards. That is expected at this increment and is the reason
+Login is next.
 
 **Authorization now exists above authentication (P1.2b).** The AuthContext →
 TenantContext bridge is built: `authorizeTenant` turns an authenticated active
@@ -82,8 +89,11 @@ date from an instant plus that zone. The route itself is now **built** — see t
 unbuilt (`shiftDate` immutability enforcement and Night Out). *Public
 deployment* is blocked by at
 least the rate-limit/proxy architecture (F-15) and the production `tsx` runtime
-(F-17). **Development itself is not blocked** — login/token-minting groundwork
-may proceed.
+(F-17) — and registration and `/auth/register` being live locally does not
+change that: they are the product's first public mutating routes and sit
+behind the same flat 300/min/IP limit F-15 describes. **Refresh-token
+rotation is blocked by F-21**, which must be decided before it is
+implemented. **Development itself is not blocked** — Login may proceed.
 
 Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
@@ -127,8 +137,18 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 ## Driver app
 
+The Expo workspace exists (`mobile/`) — React Native + Expo SDK 57 +
+TypeScript strict, `expo-router`, `expo-secure-store`. It participates in the
+root `npm run check` (typecheck, lint, tests), so it cannot rot unnoticed.
+**No SQLite yet** (D25) — that arrives with offline/personal data.
+
 | Area | State |
 |---|---|
+| Driver registration (first name, last name, email, password) | ✅ — a real screen calling the real `POST /auth/register`: validation, show/hide password, submitting and disabled states, field-level and form-level errors, a distinct no-connection state, `409 EMAIL_IN_USE` in the driver's words, safe areas, keyboard reflow, ≥44pt targets. 11 screen-behaviour tests plus 8 validation tests. The brand hero area is a neutral placeholder — no approved logo or photograph exists in the repo yet (product polish, not a finding) |
+| Signed-in state with ZERO companies | ✅ — after registering, the driver enters an authenticated shell that states the account is ready and that no company is linked. No join-company gate, no error, no fake membership. Proven by the screen suite and by a live end-to-end run that created 0 Company and 0 CompanyMembership rows |
+| Session material handling | ✅ — refresh secret in `expo-secure-store` under one key; identity token **in memory only**; nothing in AsyncStorage; the password is never persisted. The storage module exposes no generic setter, and one of its 4 tests asserts its export list |
+| Login screen | 🔲 — deliberately a visible "Sign in is not built yet" placeholder with no fields and no submit control, so the reference design's "Already have an account?" link has somewhere honest to go |
+| Session restore after app restart | 🔲 — the refresh secret is stored but there is no `/auth/refresh` to redeem it, so relaunching loses the session |
 | Start shift (date, time, driver, truck, trailer) | 🔲 — **mobile UI**. The backend it will call exists (see Backend, "Start Shift backend foundation"); no screen, no offline queue, no time picker and no ±15-minute confirmation (D20) is built |
 | Company selection (only when driver holds >1 membership) | 🔲 |
 | Truck check | 🔲 |
@@ -161,23 +181,26 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 | Area | State |
 |---|---|
-| Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19); validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 136 unit tests, test:db integrity gate |
+| Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19). **`User` now carries `firstName` + `lastName` (both NOT NULL) and `email` is `citext`** with one unique index (D22) — `User.name` is gone, not retained alongside. Validated, generated, migrated |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 159 api unit tests, **mobile typecheck + 23 mobile tests**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
-| Database tenant-integrity proof | ✅ 71/71 against a clean database built by `migrate deploy` (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
-| Migrations | ✅ 6 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`, `20260831210000_company_timezone_authority` (D18), `20260909120000_shift_client_event_identity` (D19 — nullable `clientEventId` + its unique index; proven on a clean database AND as an upgrade of a populated one, pre-existing Shift rows keeping NULL, no backfill); `migrate deploy` proven on a clean database; partial index verified in pg_indexes. The local development database has the first five applied (`migrate deploy`, 2026-08-31); migration 6 has not been applied to it |
+| Database tenant-integrity proof | ✅ 85/85 against a clean database built by `migrate deploy` (71 → 85 at Registration Increment 1, the fourteen added being registration's — schema shape, citext uniqueness at raw-SQL level, persistence, session, zero-membership, duplicate/concurrency and identity-token cases). Previously 71/71 (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
+| Migrations | ✅ **8** migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`, `20260831210000_company_timezone_authority` (D18), `20260909120000_shift_client_event_identity` (D19 — nullable `clientEventId` + its unique index; proven on a clean database AND as an upgrade of a populated one, pre-existing Shift rows keeping NULL, no backfill), **`20260910120000_user_identity_names`** (D22 — `firstName`/`lastName` added nullable, deterministic backfill splitting on the FIRST space so `"John van der Berg"` keeps its surname intact, a guard that **ABORTS** on any name that cannot yield both halves, then NOT NULL and `DROP COLUMN name`), **`20260910130000_user_email_citext`** (D22 — `CREATE EXTENSION citext`, a collision guard that ABORTS before any write, normalise to trim+lowercase, then `ALTER COLUMN email TYPE citext`, leaving exactly one unique index). Both new migrations proven **twice**: clean install inside `npm run check`, and a populated upgrade from the 6-migration baseline on throwaway databases — `"John Smith"`, `"John van der Berg"` and a padded mixed-case email all converted correctly, while a one-word name and a pair of case-colliding emails each aborted their migration with a named reason and left every row intact; `migrate deploy` proven on a clean database; partial index verified in pg_indexes. The local development database has the first five applied (`migrate deploy`, 2026-08-31); migration 6 has not been applied to it |
 | CI (GitHub Actions) | ✅ runs on github.com/Q25ltd/LB-Timesheet, executing `npm run check` verbatim (run #1 failed against the original workflow, which was then rewritten). Remote results were independently queried from the GitHub Actions API on 2026-08-31 and are `completed/success` for every commit checked: `5641691` (P1.2a), `0591241`, `2c85f4f` (P1.2b), `60effc9` and `d1f0c1b`. This states what those five runs returned — it is not a claim about any other commit. Queried again for `4888d63` (company timezone authority): run `33436174195`, `completed/success`, `headSha` matching that exact commit. Queried again for `597bd111` (F-24 identity-binding tests): run `34368029271`, `completed/success`, `headSha` matching that exact commit. |
-| Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. **Public deployment is additionally blocked by F-15** (auth-before-rate-limit + unreviewed proxy trust) **and F-17** (production `npm start` runs `tsx`, a devDependency). |
+| Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. **Public deployment is additionally blocked by F-15** (auth-before-rate-limit + unreviewed proxy trust) **and F-17** (production `npm start` runs `tsx`, a devDependency). Registration being live locally does not soften either: `/auth/register` is the product's first public mutating route and sits behind the same flat 300/min/IP limit, so it must not be described as production-ready. |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
 | Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`, joined at Start Shift by `startShiftRepository` — a second, deliberately narrow repository over the same boundary (its selectors are built from `TenantContext` only; it exists because `buildApp` takes a structural database rather than a `PrismaClient`, and because Company/User reads do not belong to a Shift repository). 11 Company A/B tests. Since `c742b03` a `TenantContext` is frozen on construction, so tenant authority cannot be repointed, extended or trimmed by anything holding it — 4 tests in `api/src/lib/tenantContext.test.ts`, written RED. Forging one with a double cast remains possible and is documented in the class itself; see **F-22** and D16. |
 | Outbox enqueue uniqueness (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 — this is **storage/enqueue uniqueness only**. Transaction atomicity of transition-plus-enqueue, worker-claim idempotency and exactly-once external email delivery are **not** proven; see **F-16**. Do not describe this row as "submission idempotency". |
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
-| Default-deny route authentication (F-10) | ✅ closed — a root `onRequest` hook in `app.ts` rejects every route unless explicitly marked `public`. A secondary static guardrail (`route-declares-auth`) enforces explicit route posture in `check-rules`; the root runtime hook remains the security boundary. See "Known limitations" below for the guardrail's known parser gap. |
+| Default-deny route authentication (F-10) | ✅ closed — a root `onRequest` hook in `app.ts` rejects every route unless explicitly marked (since D21, `authPosture`; the marker was `public` before). A secondary static guardrail (`route-declares-auth`) enforces explicit route posture in `check-rules`; the root runtime hook remains the security boundary. See "Known limitations" below for the guardrail's known parser gap. |
 | Same-company driver isolation (F-11) | ✅ closed — driver-facing repository methods are scoped by `companyId` AND owning membership, not company alone; same-company driver-vs-driver isolation is proven by the DB integration suite (counted in "Database tenant-integrity proof" above). |
-| Protected-request authentication (P1.2a) | ✅ — `requireAuth` verifies a Bearer JWT (HS256 pinned; issuer `logisticbay-timesheets`; audience `timesheets-api`; `iat`/`exp`/`iss`/`aud` required by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by the claims schema), enforces the frozen declared lifetime `0 < exp - iat <= 900s`, then requires a persisted Session (present, not revoked, not past its absolute expiry, `userId === sub`) and a persisted CompanyMembership (present, `userId === sub`, `companyId === token.companyId`). The token's `companyId` is cross-checked against the row and never authority on its own — the AuthContext company comes from the persisted membership, and `role` is read fresh from that row on every request. Produces exactly `{ userId, companyId, membershipId, sessionId, role, membershipStatus }`. Every failure is the identical `401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, so the boundary is not an oracle for which check failed. Database access is the narrow `AuthStore` (two primary-key reads, records rebuilt field by field) — `requireAuth` never receives a PrismaClient or `AppDatabase`. Proven by 18 pipeline tests (`src/lib/auth.test.ts`, each negative paired with a positive control) and 2 tests against real persisted rows (`src/tests/db/authProtectedRequest.test.ts`). Two of the eighteen are the identity bindings `session.userId === sub` and `membership.userId === sub`, added in `597bd111` (**F-24 closed**): each was proven load-bearing by deleting only its own production check, which failed that case alone with `200 !== 401` and left the other green. That is evidence for those two bindings, not for the whole boundary — the deferred negative matrix (wrong-*value* `iss`/`aud`, `alg:none`, a missing membership row) is still outstanding. |
-| Auth routes — login, company select, company switch, refresh, logout, token minting | 🔲 — nothing in this product issues a token; the verifier is configured for `verify` only. **F-19** (a far-future `iat` is currently accepted) must be resolved before this work is accepted complete |
+| Protected-request authentication (P1.2a) | ✅ — `requireAuth` verifies a Bearer JWT (HS256 pinned; issuer `logisticbay-timesheets`; audience `timesheets-api`; `iat`/`exp`/`iss`/`aud` required by the verifier, `sub`/`companyId`/`membershipId`/`sessionId` by the claims schema), enforces the frozen declared lifetime `0 < exp - iat <= 900s` **and, since F-19 closed, `iat <= now + 60s`** (shared with the identity pipeline through one helper, so the two kinds cannot drift apart on timing), then requires a persisted Session (present, not revoked, not past its absolute expiry, `userId === sub`) and a persisted CompanyMembership (present, `userId === sub`, `companyId === token.companyId`). The token's `companyId` is cross-checked against the row and never authority on its own — the AuthContext company comes from the persisted membership, and `role` is read fresh from that row on every request. Produces exactly `{ userId, companyId, membershipId, sessionId, role, membershipStatus }`. Every failure is the identical `401 { "error": "Not authenticated", "code": "UNAUTHENTICATED" }`, so the boundary is not an oracle for which check failed. Database access is the narrow `AuthStore` (two primary-key reads, records rebuilt field by field) — `requireAuth` never receives a PrismaClient or `AppDatabase`. Proven by 18 pipeline tests (`src/lib/auth.test.ts`, each negative paired with a positive control) and 2 tests against real persisted rows (`src/tests/db/authProtectedRequest.test.ts`). Two of the eighteen are the identity bindings `session.userId === sub` and `membership.userId === sub`, added in `597bd111` (**F-24 closed**): each was proven load-bearing by deleting only its own production check, which failed that case alone with `200 !== 401` and left the other green. That is evidence for those two bindings, not for the whole boundary — the deferred negative matrix (wrong-*value* `iss`/`aud`, `alg:none`, a missing membership row) is still outstanding. |
+| **Registration + identity authentication (Increment 1)** | ✅ — `POST /auth/register` (public) and `GET /auth/me` (identity posture). Registration accepts EXACTLY `firstName`, `lastName`, `email`, `password`; the DTO is `.strict()`, so `companyId`, `membershipId`, `userId`, `id`, `role`, `passwordHash` or any unknown key is **refused**, not ignored. Email is stored trim+lowercase and the DATABASE (citext) refuses a case variant. Password: min 10 characters, max **72 UTF-8 bytes** (measured in bytes, because bcrypt truncates there and 72 bytes is as few as 18 accented characters), no composition rules, bcryptjs cost 12 (measured ~230 ms hash / ~231 ms verify on Node 22.13). A success creates a `User` and ONE `Session` **atomically** — 90-day absolute expiry, `revokedAt`/previous-token columns null, `refreshTokenHash` = SHA-256 of the returned secret — and returns `{ user, identityToken, refreshToken, memberships: [] }`. **Zero memberships is a success**, and no Company, CompanyMembership or Shift is created. A duplicate email (any casing, including concurrently) is `409 EMAIL_IN_USE` disclosing nothing else — a knowingly accepted enumeration trade-off (D24). Proven by 20 route-contract tests, 14 database tests and a live end-to-end run against a real server |
+| Identity token + the two-token separation (D21) | ✅ — `{ sub, sessionId, iat, exp, iss, aud: "timesheets-identity" }`, HS256, **TTL 15 minutes**, no `companyId`, `membershipId` or `role` and no optional slot for one. `requireSession` verifies signature/algorithm/issuer/**identity audience**/required claims, the timing rules, then the Session (present, unrevoked, unexpired, `userId === sub`) and **stops** — no membership read, no `AuthContext`, no `TenantContext`, and no function converts an `IdentityContext` into one. The separation is symmetric and enforced by the verifier, not by a claim someone must remember to read: an identity token at a tenant route is `401` (proven with a tenant-token positive control, and again with forged `companyId`/`membershipId`/`role` bolted on), and a tenant token at an identity route is `401`. **No token reaches tenant data without naming and validating a real membership.** The tenant token is unchanged and its `companyId`/`membershipId` remain mandatory |
+| Three route postures (D21) | ✅ — `config: { authPosture: "public" \| "identity" \| "tenant" }`, one branch in the existing root `onRequest` hook. **Tenant is the default** and only an EXACT `"public"`/`"identity"` relaxes anything: a test injects `"Public"`, `"PUBLIC"`, `"publik"`, `"identity "`, `"none"`, `""` and `"true"` through a cast — because the compiler would catch these at a real call site, so the runtime must not depend on it — and every one is `401`. F-10's polarity extended, not replaced; `route-declares-auth` and its fixtures now understand the third posture, and remain a guardrail, not the boundary (D16) |
+| Auth routes — login, company select, company switch, refresh, logout | 🔲 — **none of these exist.** A driver can obtain a token only by registering. The refresh secret registration returns is stored on the device but **cannot be redeemed**: there is no `/auth/refresh`, and **F-21** must be decided before rotation is implemented |
 | **P1.2b — Authorized Tenant Context** | ✅ — F-14 closed in `2c85f4f`. `authorizeTenant(auth: AuthContext): TenantContext` (`api/src/lib/authorization.ts`) is the one production place authenticated identity becomes tenant authority, and the only production caller of `TenantContext.trust()`. It takes the trusted `AuthContext` and **nothing else** — no `companyId`, `membershipId`, `userId`, `role`, request, body, query or options parameter — so client-supplied identity has no channel to arrive through; and it performs **no database read**, because `requireAuth` already validated the identity against persistence. Active membership → a `TenantContext` carrying `companyId`, `userId` **and** `membershipId` (all three; `membershipId` is what `shiftRepository` scopes `findById`/`update`/`delete` on, per D15). Anything not exactly `"active"` → generic `403 FORBIDDEN` (D17); the comparison is `!== "active"`, so a future third membership state would fail closed. Proven by 5 tests in `api/src/lib/authorization.test.ts`, written RED and reviewed before implementation; `npm run check` exit 0 at `2c85f4f` (110/110 unit, 45/45 DB, 4 migrations). The static rules were **not** changed: `tenant-context-trust-sites` already permitted `lib/auth*`, so the bridge needed no rule change. That exemption is an unanchored path substring and its coverage is narrower than earlier wording here claimed — see **F-23**. Independently audited 2026-08-31 against `60effc9`: the P1.2b invariant held under every attack constructed against it (no inactive bypass, no role bypass, no alternate construction path, no client channel through body, query, path params or headers); the audit opened **F-22**, **F-23** and **F-24**, none of which invalidates this row (**F-24** has since been closed in `597bd111`). |
 | Inactive-membership authorization — **ordinary/default rule** | ✅ — the default-deny half of AUTH.md's "Deactivated membership" section is implemented: an inactive membership still authenticates and is reported as `inactive` (P1.2a, unchanged), and is then refused ordinary tenant authority with `403 { "error": "Not allowed", "code": "FORBIDDEN" }`. Generic on purpose — the response never discloses that a deactivated membership caused the denial (D17). Role is not a bypass: an inactive **admin** is denied identically. |
 | Inactive-membership authorization — **the narrow exception** | 🔲 — AUTH.md permits a deactivated membership to read, update and submit an **already-open** shift, and nothing else. **None of that exists.** There is no finalise capability, no discard capability, no `allowInactive`, no bypass flag, no capability token, no permission enum and no policy engine. Its concrete API is an open design question, not a settled one; the only frozen fact is that any such operation must be explicit and narrow. It will be designed with the business feature that needs it. |
@@ -185,7 +208,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | First protected business route — remaining schema facts | 🔲 — two facts the row above deliberately did not build: (1) `shiftDate` immutability is still design intent — no database constraint prevents an update, and nothing updates it today because Start Shift creates no update path; (2) no Night Out field exists on `Shift`. Also unchanged: no company can choose its timezone (settings/onboarding unbuilt), so every company sits on the `Europe/London` default |
 | Company timezone authority (D18) | ✅ — implemented in `4888d63`. `Company.timezone` is `String @default("Europe/London")`, NOT NULL in PostgreSQL (`TEXT NOT NULL DEFAULT 'Europe/London'`, migration 5), so every Company row carries the authority D18 derives `Shift.shiftDate` from. An IANA **identifier**, never a numeric offset. `Europe/London` is the **V1 default, not a statement that the product is UK-only** — `Europe/Vilnius`, `America/New_York`, `Asia/Dubai` and `Australia/Sydney` round-trip verbatim; 5 tests in `src/tests/db/companyTimezone.test.ts`, written RED against the missing column, also prove NOT NULL (SQLSTATE 23502), that the stored column default is itself a real IANA identifier, and that no competing timezone column exists on any other model. The conversion foundation is `api/src/lib/timezone.ts` — `isIanaTimeZone` (the runtime's own ICU tz database is the authority, plus explicit rejection of the offset forms `Intl` would otherwise accept) and `localCalendarDate(instant, timeZone)` (pure; returns midnight UTC, the `@db.Date` storage form). 11 tests in `src/lib/timezone.test.ts` cover the required boundary — a `2026-07-02 00:30 Europe/London` start files under **2026-07-02**, not the UTC date `2026-07-01` — plus one instant filing under different dates in four zones (including a negative offset and a 45-minute one), a summer/winter pair no fixed offset survives, both DST transitions, and a 22:00 → 06:00 night shift filed under its **start** date. The schema's `shiftDate` comment now states D18 rather than "(O8, provisional)". **What this is not:** nothing WRITES this column in production — there is no company settings/onboarding path to choose a timezone, so every company sits on the `Europe/London` default and worldwide *usability* does not follow from the data model supporting it. It is now READ in production: Start Shift derives every `shiftDate` from it through `localCalendarDate`, which is the helper's first production caller. `npm run check` exit 0 at `4888d63` (125/125 unit, 50/50 DB, 5 migrations); GitHub Actions run `33436174195` `completed/success` for that exact SHA. |
 | Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. Since P1.2a the pipeline reads existence, `revokedAt`, `expiresAt` and `userId` on every protected request; the refresh-token columns and the grace deadline remain unread — no rotation logic exists. |
-| Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist; the logic does not. **F-21** (cross-column refresh-hash ambiguity) must be decided before this is implemented |
+| Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist and registration now WRITES `refreshTokenHash`; the rotation logic does not exist and nothing can redeem the secret. **F-21** (cross-column refresh-hash ambiguity) must be decided before this is implemented |
 | Multi-company driver memberships | 🔲 |
 | Shift submission pipeline | 🔲 — F-16 (atomicity / worker claim / exactly-once delivery) must be resolved as part of this boundary |
 | PDF generation | 🔲 |
@@ -203,7 +226,7 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   but not quote/string state (unlike `stripComments`). A route handler
   containing an unbalanced `(` inside a string or template literal can make
   the matcher's span overrun past the handler and pick up an unrelated
-  `public:` key elsewhere in the file — a false negative where a genuinely
+  `authPosture:` key elsewhere in the file — a false negative where a genuinely
   undeclared route is silently treated as declared by the static check.
   **Not a runtime security gap**: the real enforcement boundary is the
   default-deny `onRequest` hook in `app.ts`, which has no such blind spot and
@@ -217,8 +240,8 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   2026-08-31).** The rule could not tell an untrusted client DTO declaring
   `companyId` from the verified access-token claims schema, which legitimately
   declares one. It now skips exactly the modules where `jwt-centralised`
-  already confines token verification — today that is `src/lib/auth.ts` alone
-  (the pattern also covers a `src/lib/tokens.ts`, which does not exist yet), an
+  already confines token verification — today `src/lib/auth.ts` and
+  `src/lib/tokens.ts`, both of which now exist, an
   enforced boundary rather than a directory or a schema name. Client DTOs are
   still reported everywhere else, including shared modules a route imports;
   both sides are proven by good/bad fixtures in `scripts/rules/engine.test.ts`.
@@ -312,9 +335,9 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 |---|---|
 | Repo initialised (git) | ✅ `main` — active repository; Git and the live remote own the current baseline (AGENT_WORKFLOW.md §2) |
 | API skeleton boots (`/health`) | ✅ verified on the Mac |
-| First Prisma schema | ✅ migration-managed (5 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
+| First Prisma schema | ✅ migration-managed (8 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
 | Local Postgres (docker-compose, port 5544) | ✅ running |
-| Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2 |
+| Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2. **Three workspaces now**: root, `api/`, `mobile/` — each needs its own `npm install`/`npm ci`, and CI installs all three |
 | `timesheets.logisticbay.com` DNS | 🔲 |
 | `timesheets-api.logisticbay.com` DNS | 🔲 |
 | Database provisioned | 🔲 |

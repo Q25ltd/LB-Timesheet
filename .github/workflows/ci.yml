@@ -39,18 +39,25 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             api/package-lock.json
+            mobile/package-lock.json
 
-      # Both workspaces. eslint and knip live at the root; installing only api
-      # is what made run #1 fail with "Unlisted binaries".
+      # All three workspaces. eslint and knip live at the root; installing only
+      # api is what made run #1 fail with "Unlisted binaries". Mobile is
+      # installed for the same reason -- `npm run check` typechecks and tests
+      # it, and root eslint lints it.
       - name: Install (root)
         run: npm ci
 
       - name: Install (api)
         run: npm ci --prefix api
 
+      - name: Install (mobile)
+        run: npm ci --prefix mobile
+
       # Deliberately ONE command, identical to what a developer runs locally:
-      # generate -> typecheck -> eslint -> check-rules -> prisma validate ->
-      # knip -> unit tests -> db integrity tests. The db step provisions its own
+      # generate -> typecheck -> eslint (both workspaces) -> check-rules ->
+      # prisma validate -> knip -> api unit tests -> mobile typecheck ->
+      # mobile tests -> db integrity tests. The db step provisions its own
       # clean database from DATABASE_URL's server and applies REAL migrations
       # with `prisma migrate deploy` — never `db push`. Adding a gate to
       # `npm run check` adds it to CI automatically; do not re-list steps here.

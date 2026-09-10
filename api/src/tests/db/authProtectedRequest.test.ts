@@ -101,7 +101,7 @@ before(async () => {
   const company = await prisma.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A` } });
   const other   = await prisma.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B` } });
   const user    = await prisma.user.create({
-    data: { email: `${TAG}-driver@example.com`, name: `${TAG}-driver`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
   });
   // role admin, while the token carries no role at all — so observing "admin"
   // can only mean the pipeline read this row.

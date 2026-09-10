@@ -32,13 +32,21 @@ cp api/.env.example api/.env  # then follow the comments in it — the JWT
                               # placeholder is deliberately rejected
 npm install                   # root deps: eslint, knip
 npm install --prefix api      # api deps + prisma generate
+npm install --prefix mobile   # Expo driver app deps
 cd api
 npx prisma migrate deploy     # build YOUR dev database from the real migrations
 npm run db:smoke              # prove it actually enforces the guarantees
 cd ..
 npm run check                 # the authoritative gate — see below
-npm run dev                   # http://localhost:3000/health
+npm run dev                   # API on http://localhost:3000/health
+npm start --prefix mobile     # Expo driver app (needs the API running)
 ```
+
+The app finds the API at `http://localhost:3000` on an iOS simulator and
+`http://10.0.2.2:3000` on an Android emulator. On a physical phone neither
+works — set `EXPO_PUBLIC_API_URL` to the Mac's LAN address. Only the public
+API base URL belongs in mobile configuration; never a signing secret or a
+database URL, both of which ship inside the app bundle.
 
 **The schema reaches every database through migrations only** (`api/prisma/migrations`)
 — there is no `db push` script; it does not exist in this repo. `npm run check`'s
@@ -60,10 +68,12 @@ else.
 
 ## The authoritative gate
 
-`npm run check` = generate → typecheck → eslint → check-rules → prisma validate
-→ knip → unit tests → **db stage** (clean database + real migrations + the
-PostgreSQL integrity and Company A/B repository suites). CI runs exactly this
-one command — there is no separate CI checklist to drift.
+`npm run check` = generate → typecheck → eslint (**both workspaces**) →
+check-rules → prisma validate → knip → api unit tests → **mobile typecheck and
+tests** → **db stage** (clean database + real migrations + the PostgreSQL
+integrity and Company A/B repository suites). CI runs exactly this one command
+— there is no separate CI checklist to drift, and no second, laxer standard for
+the app.
 
 `npm run studio` (in `api/`) opens a table editor — during early development
 that is the admin screen.
@@ -75,6 +85,6 @@ passes them through as arguments.
 
 ```
 api/      Fastify + Prisma backend
+mobile/   Expo driver app          (registration only — see STATUS.md)
 web/      company web app          (not started)
-mobile/   Expo driver app          (not started)
 ```

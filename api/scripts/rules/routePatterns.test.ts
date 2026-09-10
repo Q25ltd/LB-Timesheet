@@ -13,20 +13,20 @@ test("flags a route whose options object omits public entirely", () => {
   assert.equal(findUndeclaredRouteRegistrations(source).length, 1);
 });
 
-test("does not flag a route explicitly marked public: true", () => {
-  const source = 'app.get("/health", { config: { public: true } }, handler);';
+test("does not flag a route explicitly marked authPosture: public", () => {
+  const source = 'app.get("/health", { config: { authPosture: "public" } }, handler);';
   assert.equal(findUndeclaredRouteRegistrations(source).length, 0);
 });
 
-test("does not flag a route explicitly marked public: false", () => {
-  const source = 'app.post("/timesheets", { config: { public: false } }, handler);';
+test("does not flag a route explicitly marked authPosture: tenant", () => {
+  const source = 'app.post("/timesheets", { config: { authPosture: "tenant" } }, handler);';
   assert.equal(findUndeclaredRouteRegistrations(source).length, 0);
 });
 
 test("handles a multi-line options object", () => {
   const source = [
     'app.post("/timesheets", {',
-    "  config: { public: false },",
+    "  config: { authPosture: \"tenant\" },",
     "  schema: { body: {} },",
     "}, handler);",
   ].join("\n");
@@ -53,9 +53,9 @@ test("ignores an unrelated .get( call with no route-shaped receiver", () => {
   assert.equal(hits.length, 1, "documents the known false-positive shape -- see file-scoping in engine.ts");
 });
 
-test("a comment mentioning public: true does not suppress a real violation", () => {
+test("a comment mentioning a posture does not suppress a real violation", () => {
   const source = [
-    "// public: true was the old behavior, now removed",
+    "// authPosture: \"public\" was the old behavior, now removed",
     'app.get("/thing", handler);',
   ].join("\n");
   const hits = findUndeclaredRouteRegistrations(source);

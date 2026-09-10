@@ -5,15 +5,13 @@ import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
 import { allowedOrigins } from "./lib/env.schema.js";
 import { AppError, registerErrorHandling } from "./lib/errors.js";
-import {
-  requireAuth,
-  ACCESS_TOKEN_ALGORITHM,
-  ACCESS_TOKEN_AUDIENCE,
-  ACCESS_TOKEN_ISSUER,
-} from "./lib/auth.js";
+import { requireAuth, requireSession } from "./lib/auth.js";
+import { TENANT_VERIFY_OPTIONS } from "./lib/tokens.js";
 import { authStore, type AuthQueryable } from "./lib/authStore.js";
 import { startShiftRepository, type StartShiftDatabase } from "./repositories/startShiftRepository.js";
+import { identityRepository, type IdentityDatabase } from "./repositories/identityRepository.js";
 import { registerShiftRoutes } from "./routes/shifts.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -23,10 +21,17 @@ import { registerShiftRoutes } from "./routes/shifts.js";
  * The two identity reads arrive through AuthQueryable, which names them
  * individually. They are handed to `authStore` here and never travel further:
  * requireAuth receives the narrow AuthStore, not this type.
+ *
+ * An INTERSECTION rather than an interface extending all three: the same
+ * delegate legitimately appears in more than one of them (`user` is read by
+ * Start Shift and written by the account boundary), and an interface may not
+ * extend two parents that describe one property differently. Intersecting
+ * keeps every contributor's requirements simultaneously in force instead of
+ * making one of them win.
  */
-export interface AppDatabase extends AuthQueryable, StartShiftDatabase {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
-}
+};
 
 export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   const app = Fastify({
@@ -39,36 +44,38 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // (AUTH.md), not a cookie. Enabling it is an architectural change.
   await app.register(cors, { origin: allowedOrigins(env), credentials: false });
 
-  // AUTH.md's access token. Only `verify` is configured: this boundary
-  // verifies tokens, it does not mint them. `algorithms` is pinned so an
-  // `alg: none` or algorithm-confusion token cannot verify, and iss/aud make a
-  // LogisticBay TMS token structurally unusable here (D1). The secret is the
-  // one already validated by env.schema.ts -- there is no second source.
+  // AUTH.md's tokens. `algorithms` is pinned so an `alg: none` or
+  // algorithm-confusion token cannot verify, and iss/aud make a LogisticBay
+  // TMS token structurally unusable here (D1). The secret is the one already
+  // validated by env.schema.ts -- there is no second source.
   //
   // `requiredClaims` is not optional hardening: allowedIss/allowedAud are
   // VALUE validators that skip a claim which is absent, and expiry is only
   // checked when `exp` exists. Without this, a token simply omitting exp/iss/
   // aud verifies -- an unexpiring, cross-product-usable token. Presence of the
-  // registered claims is enforced here; the identity claims (sub, companyId,
-  // membershipId, sessionId) are enforced by the schema in lib/auth.ts, so
+  // registered claims is enforced there; the identity claims (sub, companyId,
+  // membershipId, sessionId) are enforced by the schemas in lib/auth.ts, so
   // each claim is decided in exactly one place.
+  //
+  // Registered ONCE, with the TENANT option set as the default (D21). The
+  // identity pipeline passes its own COMPLETE option set to `verify` per call
+  // (lib/tokens.ts), which @fastify/jwt builds a fresh verifier from -- so the
+  // two audiences never share a verifier, and neither kind can be reached by
+  // omitting an option. Signing is enabled by the secret being a plain string;
+  // each token kind states its own sign options at the mint site.
   await app.register(jwt, {
     secret: env.JWT_SECRET,
-    verify: {
-      algorithms:     [ACCESS_TOKEN_ALGORITHM],
-      allowedIss:     ACCESS_TOKEN_ISSUER,
-      allowedAud:     ACCESS_TOKEN_AUDIENCE,
-      requiredClaims: ["iat", "exp", "iss", "aud"],
-    },
+    verify: TENANT_VERIFY_OPTIONS,
   });
 
   // Built once, from the two named delegates. This is the only object the
   // authentication boundary can read through.
   const identity = authStore(prisma);
 
-  // F-10: every route is authenticated by default. A route becomes public
-  // only through the explicit `config: { public: true }` marker below --
-  // never by omission, and never by living outside some protected structure.
+  // F-10, extended to three postures by D21: every route is TENANT-
+  // authenticated by default. A route becomes public or identity-scoped only
+  // through the explicit `config: { authPosture }` marker below -- never by
+  // omission, and never by living outside some protected structure.
   // Registered on the root instance before any route, so Fastify's
   // encapsulation model applies it to every route added afterwards --
   // including ones later split into their own plugin files -- with no
@@ -82,7 +89,19 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // rate-limit slot on a request that was never getting through.
   app.addHook("onRequest", async (request) => {
     if (request.is404) return; // no route matched -- let 404 handling run
-    if (request.routeOptions.config.public === true) return;
+
+    // Three postures (D21), and the polarity is unchanged from F-10: only an
+    // EXACT match relaxes anything. `"tenant"`, an omitted marker, a typo, a
+    // non-string, or future metadata this switch has never seen all fall
+    // through to the tenant branch -- the strictest one. There is no default
+    // that produces a public or identity-scoped route, so adding a third
+    // posture did not add a way to become public by accident.
+    const posture = request.routeOptions.config.authPosture;
+    if (posture === "public") return;
+    if (posture === "identity") {
+      await requireSession(request, identity);
+      return;
+    }
     await requireAuth(request, identity);
   });
 
@@ -101,12 +120,18 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   registerErrorHandling(app);
 
   // The first protected business routes. Registered AFTER the default-deny
-  // hook above, so they inherit it; the explicit `public: false` inside the
-  // route file states the posture where it is read. The repository is built
-  // here, from the same database object, so a route never sees Prisma.
+  // hook above, so they inherit it; the explicit `authPosture: "tenant"`
+  // inside the route file states the posture where it is read. The repository
+  // is built here, from the same database object, so a route never sees Prisma.
   registerShiftRoutes(app, startShiftRepository(prisma));
 
-  app.get("/health", { config: { public: true } }, async () => {
+  // The account routes. `/auth/register` is public because there is no
+  // identity to authenticate yet; `/auth/me` is identity-scoped and reaches
+  // no tenant model. Both are registered after the hook above, so their
+  // posture is applied by it and not by anything inside the route file.
+  registerAuthRoutes(app, identityRepository(prisma));
+
+  app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
     return {
       status:  dbOk ? "ok" : "degraded",

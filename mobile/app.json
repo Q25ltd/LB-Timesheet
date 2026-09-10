@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "LogisticBay Timesheets",
+    "slug": "lb-timesheet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "lbtimesheets",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.logisticbay.timesheets"
+    },
+    "android": {
+      "package": "com.logisticbay.timesheets"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-status-bar"
+    ]
+  }
+}

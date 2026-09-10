@@ -103,9 +103,16 @@ async function newDriver(
   options: { role?: "driver" | "admin"; active?: boolean } = {},
 ): Promise<Driver> {
   seq += 1;
-  const name = `${TAG}-${label}`;
+  // Two canonical halves (D22), and the display name DERIVED from them — the
+  // same derivation `startContext` performs. `driver.name` below therefore
+  // still means "what should be snapshotted onto the Shift", so the
+  // driverName assertion proves the derivation rather than merely echoing a
+  // stored column.
+  const firstName = TAG;
+  const lastName  = label;
+  const name      = `${firstName} ${lastName}`;
   const user = await prisma.user.create({
-    data: { email: `${TAG}-${String(seq)}-${label}@example.com`, name, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-${String(seq)}-${label}@example.com`, firstName, lastName, passwordHash: "not-a-real-hash" },
   });
   const membership = await prisma.companyMembership.create({
     data: { companyId, userId: user.id, role: options.role ?? "driver", active: options.active ?? true },
@@ -245,7 +252,7 @@ test("an active driver starts one ACTIVE shift with ZERO segments, owned by the 
   assert.equal(shift.companyId, companyA,           "company comes from the token's membership");
   assert.equal(shift.userId, driver.userId,         "user comes from the token's membership");
   assert.equal(shift.membershipId, driver.membershipId, "membership comes from the token");
-  assert.equal(shift.driverName, driver.name,       "driverName is a server-side snapshot of User.name");
+  assert.equal(shift.driverName, driver.name,       "driverName is a server-side snapshot derived from User.firstName + User.lastName");
   assert.equal(shift.clientEventId, clientEventId);
   assert.equal(shift.status, "active");
   assert.equal(shift.startedAt.getTime(), new Date(startedAt).getTime());

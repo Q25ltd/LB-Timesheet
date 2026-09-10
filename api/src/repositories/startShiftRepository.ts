@@ -5,7 +5,7 @@
  * taste. First, `shiftRepository` takes a whole `PrismaClient`, and `buildApp`
  * takes a narrow structural database on purpose — widening that to the real
  * client would make the app unbuildable without one. Second, Start Shift needs
- * two reads (`Company.timezone`, `User.name`) that a Shift repository has no
+ * two reads (`Company.timezone`, the driver's name) that a Shift repository has no
  * business owning. What is shared is the thing that matters: every selector
  * below is built HERE, from a `TenantContext`, so an id-only query is not
  * expressible through this API either.
@@ -76,7 +76,7 @@ export interface StartShiftDatabase {
     findUnique(args: { where: { id: string } }): Promise<{ timezone: string } | null>;
   };
   user: {
-    findUnique(args: { where: { id: string } }): Promise<{ name: string } | null>;
+    findUnique(args: { where: { id: string } }): Promise<{ firstName: string; lastName: string } | null>;
   };
 }
 
@@ -104,7 +104,12 @@ export function startShiftRepository(db: StartShiftDatabase) {
         db.user.findUnique({ where: { id: ctx.userId } }),
       ]);
       if (company === null || user === null) return null;
-      return { timezone: company.timezone, driverName: user.name };
+      // Derived, not stored (D22): `User.name` was replaced by the two
+      // canonical halves, and a third column holding the joined form would be
+      // a second authority that drifts. What IS stored is the RESULT, once,
+      // on the Shift — `Shift.driverName` is a snapshot taken here and never
+      // recomputed, so a later rename does not rewrite finished timesheets.
+      return { timezone: company.timezone, driverName: `${user.firstName} ${user.lastName}` };
     },
 
     /**

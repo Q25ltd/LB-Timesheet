@@ -48,10 +48,10 @@ before(async () => {
   // One driver per company — the one-open-shift invariant is per USER, so two
   // concurrent open shifts need two people.
   const driverA = await prisma.user.create({
-    data: { email: `${TAG}-a@example.com`, name: `${TAG}-a`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-a@example.com`, firstName: TAG, lastName: "a", passwordHash: "not-a-real-hash" },
   });
   const driverB = await prisma.user.create({
-    data: { email: `${TAG}-b@example.com`, name: `${TAG}-b`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-b@example.com`, firstName: TAG, lastName: "b", passwordHash: "not-a-real-hash" },
   });
   const memberA = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA.id } });
   const memberB = await prisma.companyMembership.create({ data: { companyId: companyB.id, userId: driverB.id } });
@@ -77,7 +77,7 @@ before(async () => {
   // A second driver in Company A itself — every test above proves
   // cross-COMPANY isolation; this is the same-company case F-11 exists for.
   const driverA2 = await prisma.user.create({
-    data: { email: `${TAG}-a2@example.com`, name: `${TAG}-a2`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-a2@example.com`, firstName: TAG, lastName: "a2", passwordHash: "not-a-real-hash" },
   });
   const memberA2 = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA2.id } });
   ctxA2 = TenantContext.trust({ companyId: companyA.id, userId: driverA2.id, membershipId: memberA2.id });

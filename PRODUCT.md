@@ -51,6 +51,14 @@ The customer should not need to adopt a fleet-management system. Setup is:
 create account → company name → destination email → configure checks →
 subscribe → get activation code → give drivers access.
 
+**A driver account is not the same thing, and does not require a company.** A
+driver registers with first name, last name, email and password — nothing
+else, and no company field. They may hold **zero, one or several** company
+memberships over time, and a driver with none has a real, fully working
+account: the private diary (below) is theirs regardless of who employs them,
+and an agency driver's account outlives any one employer. No personal
+"company" is ever invented to represent them. See DECISIONS D21.
+
 The convenience is concrete: on paper, a driver who uses three trailers in a day
 fills in and carries three separate check sheets. Here it is a few taps and one
 PDF.

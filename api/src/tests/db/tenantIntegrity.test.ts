@@ -54,10 +54,10 @@ before(async () => {
   const a = await prisma.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A` } });
   const b = await prisma.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B` } });
   const d = await prisma.user.create({
-    data: { email: `${TAG}-driver@example.com`, name: TAG, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
   });
   const o = await prisma.user.create({
-    data: { email: `${TAG}-outsider@example.com`, name: `${TAG}-out`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-outsider@example.com`, firstName: TAG, lastName: "outsider", passwordHash: "not-a-real-hash" },
   });
   companyA = a.id;
   companyB = b.id;

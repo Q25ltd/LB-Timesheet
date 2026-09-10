@@ -90,8 +90,28 @@ model Company {
 /// he drives for (D12) — his private diary spans all of them and belongs to him.
 model User {
   id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
+
+  /// THE account identity (D21, D22). Stored canonically as trim + lowercase,
+  /// and `citext` so the DATABASE — not a remembered `.toLowerCase()` at one
+  /// call site — refuses `Driver@Example.com` once `driver@example.com`
+  /// exists. Application normalisation alone is not the guarantee (D16): one
+  /// forgotten write path would otherwise split a driver's identity in two,
+  /// inside the identity system itself.
+  ///
+  /// Deliberately NOT normalised further: `+`-tags and dots are NOT stripped.
+  /// Those forms address genuinely different mailboxes, and merging them
+  /// would be a worse bug than the one this fixes.
+  email        String    @unique @db.Citext
+
+  /// The canonical name fields (D22). `name` was replaced, not supplemented —
+  /// two columns for one concept disagree eventually. Any display or full
+  /// name is DERIVED from these two; there is no third column to drift.
+  ///
+  /// `Shift.driverName` is unaffected: it is a snapshot taken when the shift
+  /// started and is never recomputed from a later rename.
+  firstName    String
+  lastName     String
+
   passwordHash String
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

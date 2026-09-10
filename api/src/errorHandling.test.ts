@@ -14,8 +14,14 @@ const { AppError } = await import("./lib/errors.js");
 
 const db = {
   $queryRaw: (_q: TemplateStringsArray, ..._v: unknown[]): Promise<unknown> => Promise.resolve([{ ok: 1 }]),
-  session:           { findUnique: (): Promise<null> => Promise.resolve(null) },
-  companyMembership: { findUnique: (): Promise<null> => Promise.resolve(null) },
+  session: {
+    findUnique: (): Promise<null> => Promise.resolve(null),
+    create:     () => Promise.reject(new Error("session.create is not part of this test")),
+  },
+  companyMembership: {
+    findUnique: (): Promise<null> => Promise.resolve(null),
+    findMany:   () => Promise.resolve([]),
+  },
   // Start Shift's reads. Not exercised here — these tests never authenticate,
   // and /health is public — but AppDatabase now names them, so the stand-in
   // has to be honest about what the app is able to ask for.
@@ -24,7 +30,14 @@ const db = {
     findFirst: () => Promise.resolve(null),
   },
   company: { findUnique: () => Promise.resolve(null) },
-  user:    { findUnique: () => Promise.resolve(null) },
+  user: {
+    findUnique: () => Promise.resolve(null),
+    // The account boundary's write (D21). It REJECTS: no case in this file
+    // registers an account, so reaching it would mean the app did something
+    // the test never asked for.
+    create: () => Promise.reject(new Error("user.create is not part of this test")),
+  },
+  $transaction: () => Promise.reject(new Error("$transaction is not part of this test")),
 };
 
 /** The envelope, and NOTHING else: no Fastify `message`/`statusCode` keys. */
@@ -49,16 +62,16 @@ async function appWithFailingRoutes(): Promise<FastifyInstance> {
   // are deliberately marked public rather than fighting the default-deny
   // guard with a fake authenticated request.
   app.post("/boom-sync", {
-    config: { public: true },
+    config: { authPosture: "public" },
     schema: { body: { type: "object", required: ["truckReg"], properties: { truckReg: { type: "string" } } } },
   }, () => {
     throw new Error("INTERNAL-MARKER sync: pg password=hunter2 at /Users/nk/secret.ts:12");
   });
-  app.get("/boom-async", { config: { public: true } }, async () => {
+  app.get("/boom-async", { config: { authPosture: "public" } }, async () => {
     await Promise.resolve();
     throw new Error("INTERNAL-MARKER async: PrismaClientKnownRequestError P2002 on Shift_one_open_per_user");
   });
-  app.get("/deliberate", { config: { public: true } }, () => {
+  app.get("/deliberate", { config: { authPosture: "public" } }, () => {
     throw new AppError(409, "Shift already submitted", "SHIFT_ALREADY_SUBMITTED", { shiftId: "abc" });
   });
   return app;
@@ -138,7 +151,7 @@ test("an unknown error with a fabricated 4xx statusCode is masked, not trusted",
   const app = await buildApp(db);
   // Same reasoning as appWithFailingRoutes: this route tests error masking,
   // not auth, so it is deliberately public under F-10's default-deny.
-  app.get("/teapot", { config: { public: true } }, () => {
+  app.get("/teapot", { config: { authPosture: "public" } }, () => {
     const error = new Error("INTERNAL-MARKER fabricated: rate limit exceeded, retry in 1 minute") as Error & {
       statusCode: number;
     };
@@ -156,7 +169,7 @@ test("a fabricated allowlisted Fastify code cannot impersonate a trusted parser 
   const marker = "ALLOWLIST-SPOOF-INTERNAL-9f73c2";
   const app = await buildApp(db);
   t.after(() => app.close());
-  app.get("/spoofed-fastify-code", { config: { public: true } }, () => {
+  app.get("/spoofed-fastify-code", { config: { authPosture: "public" } }, () => {
     const error = new Error(marker) as Error & { statusCode: number; code: string };
     error.statusCode = 400;
     error.code = "FST_ERR_CTP_INVALID_JSON_BODY";
@@ -175,7 +188,7 @@ test("fabricated validation metadata cannot impersonate trusted framework valida
   const marker = "VALIDATION-SPOOF-INTERNAL-a4d81e";
   const app = await buildApp(db);
   t.after(() => app.close());
-  app.get("/spoofed-validation", { config: { public: true } }, () => {
+  app.get("/spoofed-validation", { config: { authPosture: "public" } }, () => {
     const error = new Error("fabricated validation error") as Error & {
       validation: Array<{ instancePath: string; message: string }>;
     };

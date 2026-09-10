@@ -247,16 +247,28 @@ interface MembershipRow {
 
 interface IdentityReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
-  session: { findUnique(args: { where: { id: string } }): Promise<SessionRow | null> };
-  companyMembership: { findUnique(args: { where: { id: string } }): Promise<MembershipRow | null> };
-  // Start Shift's reads. Unused here — this file stops at the authorization
-  // boundary — but AppDatabase names them, so the fixture must satisfy them.
+  session: {
+    findUnique(args: { where: { id: string } }): Promise<SessionRow | null>;
+    create(): Promise<never>;
+  };
+  companyMembership: {
+    findUnique(args: { where: { id: string } }): Promise<MembershipRow | null>;
+    findMany(): Promise<never[]>;
+  };
+  // Start Shift's reads and the account boundary's reads/writes. Unused here
+  // — this file stops at the authorization boundary — but AppDatabase names
+  // them, so the fixture must satisfy them. The writes reject: authorization
+  // must not persist anything.
   shift: {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<null> };
-  user: { findUnique(): Promise<null> };
+  user: {
+    findUnique(): Promise<null>;
+    create(): Promise<never>;
+  };
+  $transaction(): Promise<never>;
 }
 
 function base64url(value: string): string {
@@ -292,14 +304,24 @@ function activeIdentity(): IdentityReads {
   };
   return {
     $queryRaw: () => Promise.resolve([{ ok: 1 }]),
-    session:           { findUnique: ({ where }) => Promise.resolve(session.id === where.id ? session : null) },
-    companyMembership: { findUnique: ({ where }) => Promise.resolve(membership.id === where.id ? membership : null) },
+    session: {
+      findUnique: ({ where }) => Promise.resolve(session.id === where.id ? session : null),
+      create:     () => Promise.reject(new Error("session.create is not part of this test")),
+    },
+    companyMembership: {
+      findUnique: ({ where }) => Promise.resolve(membership.id === where.id ? membership : null),
+      findMany:   () => Promise.resolve([]),
+    },
     shift: {
       create:    () => Promise.reject(new Error("shift.create is not part of this test")),
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve(null) },
-    user:    { findUnique: () => Promise.resolve(null) },
+    user: {
+      findUnique: () => Promise.resolve(null),
+      create:     () => Promise.reject(new Error("user.create is not part of this test")),
+    },
+    $transaction: () => Promise.reject(new Error("$transaction is not part of this test")),
   };
 }
 

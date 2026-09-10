@@ -73,7 +73,7 @@ async function cleanup(): Promise<void> {
 
 async function makeUser(label: string): Promise<string> {
   const user = await prisma.user.create({
-    data: { email: `${TAG}-${label}@example.com`, name: `${TAG}-${label}`, passwordHash: "not-a-real-hash" },
+    data: { email: `${TAG}-${label}@example.com`, firstName: TAG, lastName: label, passwordHash: "not-a-real-hash" },
   });
   return user.id;
 }

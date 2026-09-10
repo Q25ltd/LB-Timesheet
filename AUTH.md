@@ -1,22 +1,35 @@
 # Authentication & Tenant Context — Frozen Contract
 
-> **Status: FROZEN 2026-08-25.** Agreed before implementation, deliberately, so
-> that every protected route inherits a correct design instead of a fixable one.
+> **Status: FROZEN 2026-08-25. Amended 2026-09-10 by D21–D24.** Agreed before
+> implementation, deliberately, so that every protected route inherits a
+> correct design instead of a fixable one.
 >
 > Changing anything in this file is an architectural decision, not a refactor.
 > Stop and ask.
+>
+> **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
+> only file allowed to say which parts exist — and much of this contract still
+> does not: login, company selection and switching, refresh rotation and
+> logout are all unbuilt. What the 2026-09-10 amendment describes is
+> implemented as of Registration Increment 1: identity tokens, the three route
+> postures, and registration.
 
 ---
 
 ## The governing rule
 
 > Authentication proves the global **User** identity. Authorization operates
-> through an active **CompanyMembership**. Every access token is scoped to
-> exactly one CompanyMembership and Company. The server derives tenant context
-> from the verified token and membership, and **never trusts a client-supplied
-> `companyId` as authority**. Multiple memberships require an explicit,
-> server-validated company-switch exchange; a single membership is selected
-> automatically.
+> through an active **CompanyMembership**. Every **tenant** access token is
+> scoped to exactly one CompanyMembership and Company. The server derives
+> tenant context from the verified token and membership, and **never trusts a
+> client-supplied `companyId` as authority**. Multiple memberships require an
+> explicit, server-validated company-switch exchange; a single membership is
+> selected automatically.
+>
+> **No token may reach tenant data without naming and validating a real
+> membership.** A driver with no membership still has an account, and
+> authenticates with an **identity token** that carries no tenant authority at
+> all (D21).
 
 A `companyId` claim inside a token does **not** by itself prevent tenant leaks.
 It removes the client from the decision and gives the server something to
@@ -33,23 +46,26 @@ resolves a trusted `AuthContext`, every query using that context, and
 | **User** | Global human identity. One person, one row, regardless of how many companies they drive for. |
 | **Company** | The tenant. Data controller for its own timesheets (DECISIONS D11). |
 | **CompanyMembership** | The relationship between a User and a Company: role, active flag. Authorization hangs off this, not off User. |
-| **Session** | One authenticated device/login. Survives company switching. Revoking it logs that device out. |
-| **Access token** | Short-lived authority for exactly one membership, in one company. |
+| **Session** | One authenticated device/login. Survives company switching. Revoking it logs that device out. Belongs to the User; carries no company. |
+| **Tenant access token** | Short-lived authority for exactly one membership, in one company. `aud: timesheets-api`. |
+| **Identity token** | Short-lived authority for the ACCOUNT only — the User and their Session. No company, no membership, no role, no tenant reach. `aud: timesheets-identity` (D21). |
 
 ```
-Nerijus                        Driver John
- ├── Company A → admin          └── Company A → driver
+Nerijus                        Driver John          Driver Sam
+ ├── Company A → admin          └── Company A → driver   (no memberships yet)
  └── Company B → driver
 
 (Role values are the schema's lowercase `driver | admin` — canonical in
 prisma/schema.prisma, per CLAUDE.md "one concept, one name".)
 ```
 
-John never sees a company selector. Nerijus does.
+John never sees a company selector. Nerijus does. Sam has a real account, a
+real session and no company at all — and that is a legitimate, fully supported
+state, not a broken one (D21).
 
 ---
 
-## Access token
+## Tenant access token
 
 JWT. **TTL 15 minutes.**
 
@@ -75,7 +91,71 @@ advisory claims become authoritative eventually.
 **`iss` / `aud` are not decoration.** They make it structurally impossible for a
 LogisticBay TMS token to be accepted by this API even if a secret were ever
 copied between the two products. That is DECISIONS D1 enforced in the token
-format itself.
+format itself. Since D21 they carry a second load: `aud` is what separates a
+tenant token from an identity token, so the separation is enforced by the
+verifier rather than by a claim the code has to remember to read.
+
+`companyId` and `membershipId` are **mandatory here and never optional**. A
+token that sometimes omits them is not a smaller tenant token — it is a
+different kind, and it gets a different audience.
+
+## Identity token (D21)
+
+JWT. **TTL 15 minutes**, same signing secret, same issuer, **different
+audience**.
+
+*Minting note, because it cost a debugging cycle:* `@fastify/jwt` documents a
+numeric `expiresIn` as **seconds** and converts to milliseconds itself. Passing
+milliseconds mints a token whose declared lifetime is ~25 years, which this
+API's own `exp - iat <= 900` check then refuses — a self-inflicted 401 that
+looks like a verification bug. Both units are `number`, so nothing catches it
+but a test on the claims.
+
+```ts
+{
+  sub:       userId,
+  sessionId: string,
+  iat:       number,
+  exp:       number,
+  iss:       "logisticbay-timesheets",
+  aud:       "timesheets-identity",
+}
+```
+
+Account-level authority only: who the user is, and which device session they
+are on. **Never** `companyId`, `membershipId` or `role` — the absence is the
+design, not an omission to fill in later.
+
+Verified through the same pipeline shape as the tenant token — signature,
+algorithm, issuer, audience, required claims, `0 < exp - iat <= 900`, the
+future-`iat` bound below — then the Session (present, `userId === sub`, not
+revoked, not expired). It produces user + session identity and **stops there**:
+no membership read, no `AuthContext`, no `TenantContext`, no route to one.
+
+**The separation is symmetric and structural.**
+
+- An identity token presented to a **tenant** route → `401`. The verifier's
+  audience check refuses it before any claim is read, so it cannot reach
+  `requireAuth`'s membership logic at all.
+- A tenant token presented to an **identity** route → `401`. A more
+  authoritative token is still the wrong *kind*; one token never silently
+  acquires a second meaning. A client that needs both is issued both.
+
+### Future-dated tokens (F-19)
+
+`iat` **must not exceed server-now by more than 60 seconds.** Without this a
+correctly signed token dated 24 hours ahead satisfies `0 < exp - iat <= 900`
+and is honoured for a day. The 60 seconds is a clock-skew allowance between
+this product's own minter and verifier, nothing more.
+
+This is a **JWT security rule and has nothing to do with D20**, which governs
+the driver's *declared* Start/Finish times. Those may legitimately be any past
+or future instant and are never rejected on temporal grounds. Do not let one
+rule leak into the other.
+
+Failure is the canonical `401 { "error": "Not authenticated", "code":
+"UNAUTHENTICATED" }`, like every other authentication failure. The response
+never says the token was future-dated.
 
 ## Refresh token
 
@@ -96,6 +176,28 @@ build an email-and-password screen for every morning.
 
 ---
 
+## Registration (D21, D22, D23, D24)
+
+```
+REGISTER (firstName, lastName, email, password)   ← exactly these four
+  ↓
+normalise email (trim + lowercase)  ·  policy-check password  ·  hash (bcrypt)
+  ↓
+email already registered → 409 EMAIL_IN_USE, and nothing else about the account
+  ↓
+create User + one Session, atomically
+  ↓
+issue IDENTITY token + refresh token   ·   zero memberships   ·   zero shifts
+```
+
+The driver is **authenticated on success** — no second credential entry (D6).
+Zero memberships is a successful outcome, not a degraded one. No Company, no
+CompanyMembership and no tenant of any kind is created; a "personal" tenant is
+never invented to make the shape uniform.
+
+The request body is exact: any field beyond the four is **refused**, not
+ignored — including `companyId`, `membershipId`, `userId`, `role` and `id`.
+
 ## Login flow
 
 ```
@@ -103,16 +205,37 @@ LOGIN (email + password)
   ↓
 verify identity  → fail: 401, no detail about which half was wrong
   ↓
+issue IDENTITY token + refresh  (always — the account exists regardless)
+  ↓
 load ACTIVE memberships
 
-  0 memberships  → 403, no token issued
-  1 membership   → select automatically → issue company-scoped access + refresh
-  2+ memberships → return the membership list; NO access token yet
+  0 memberships  → identity token only. The driver is IN. (D21, was: 403)
+  1 membership   → also issue a company-scoped tenant access token
+  2+ memberships → also return the membership list; NO tenant token yet
                    client picks → POST /auth/select-company → scoped tokens
 ```
 
-A login that returns a membership list returns **no usable access token**. There
-is no "unscoped" token in this system.
+A login that returns a membership list returns **no usable tenant access
+token**. An identity token is not a weaker tenant token and is not a step
+toward one: it can never reach tenant data, at any point, by any route. The
+tenant boundary is unchanged — *no token reaches tenant data without naming
+and validating a real membership*.
+
+## Route postures (D21)
+
+Three, and the default is the most restrictive one.
+
+| Posture | Token required | Result | Marked |
+|---|---|---|---|
+| **public** | none | no identity | explicit |
+| **identity** | identity token (`aud: timesheets-identity`) | user + session; **never** a `TenantContext` | explicit |
+| **tenant** | tenant token (`aud: timesheets-api`) + active membership | `AuthContext` → `authorizeTenant` | **default** |
+
+A route that declares nothing is **tenant**-protected. An oversight must fail
+closed to the strictest posture — never to public, and never to identity.
+This is F-10's polarity extended, not replaced: the runtime `onRequest` hook
+in `app.ts` remains the boundary, and `check-rules` remains a guardrail that
+only forces the posture to be written down (D16).
 
 ## Company switch
 
@@ -139,10 +262,14 @@ or discards first.
 
 ---
 
-## Every protected request
+## Every TENANT-protected request
+
+This is the **tenant** posture — the default, and the only one that yields
+tenant authority. The identity posture is a different, shorter pipeline that
+stops at the Session and never reaches a membership (see "Identity token").
 
 ```
-JWT
+JWT  (aud: timesheets-api)
  ↓ verify signature, exp, iss, aud
  ↓ load Session       → revoked or expired?     → 401
  ↓ load CompanyMembership by membershipId
@@ -228,9 +355,10 @@ Tenant authority enters only through `AuthContext`.
 
 Login and selection:
 
-1. valid credentials, 0 active memberships → 403, no token
+1. valid credentials, 0 active memberships → **identity token, no tenant
+   token** (D21; was "403, no token")
 2. valid credentials, 1 active membership → tokens issued, scoped to it
-3. valid credentials, 2+ memberships → membership list, **no access token**
+3. valid credentials, 2+ memberships → membership list, **no tenant access token**
 4. wrong password → 401, response identical in shape to unknown-email
 5. inactive membership is not offered in the list
 
@@ -268,3 +396,27 @@ Deactivated membership:
 23. can submit own open shift
 24. cannot start a new shift
 25. cannot read anything else
+
+Registration (D21–D24):
+
+26. exactly four fields accepted; any fifth — `companyId`, `membershipId`,
+    `userId`, `role`, `id` — is **refused**, not ignored
+27. password under 10 characters → 400; over 72 UTF-8 **bytes** → 400, proven
+    with a multibyte string whose byte length exceeds its character count
+28. email is stored `trim`+`lowercase`, and the DATABASE refuses a second
+    account differing only in case
+29. duplicate email → `409 EMAIL_IN_USE`, disclosing nothing else
+30. success → one User, one Session, **zero** memberships, **zero** shifts,
+    and an authenticated client
+31. no password plaintext and no refresh-token hash appears in any response
+
+Identity token (D21):
+
+32. an identity token carries `sub` and `sessionId` and **no** `companyId`,
+    `membershipId` or `role`
+33. an identity token presented to a tenant route (`GET /shifts/current`) →
+    `401`, and never reaches Start Shift authority
+34. a tenant token presented to an identity route → `401`
+35. identity authentication requires `session.userId === sub`, an unrevoked
+    session and an unexpired one — each failing generically
+36. `iat` more than 60 seconds in the future → `401`, for both token kinds (F-19)

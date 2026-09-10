@@ -143,6 +143,10 @@ narrow, or an `instanceof` check. Use `unknown` and narrow it. No silent
 ### Every Zod string has `.max()`
 Free text caps at 4000, references and codes at 64, names at 200, emails at 320,
 postcodes at 16, vehicle registrations at 16. User-visible strings also `.trim()`.
+Passwords cap at **72 UTF-8 BYTES** — bcrypt reads no further, and 72 bytes is
+as few as 18 accented characters, so the check is on byte length, never on
+`.length` (D23). A character `.max()` alongside it satisfies this rule; it is
+not the guarantee.
 
 ### One error envelope
 All API errors use `{ error: string, code?: string, details?: unknown }` via
@@ -158,6 +162,15 @@ deliberate, visible exception, not the default. `requireAuth()` in
 `jwt.verify` outside it or the token helpers. `check-rules`' `route-declares-auth`
 enforces only that every registration states its posture — the hook above is
 what actually protects the route, not the static check.
+
+There are **three** postures — `config: { authPosture: "public" | "identity"
+| "tenant" }` — and **tenant is the default** (D21). Only an exact `"public"`
+or `"identity"` relaxes anything: an omitted marker, a typo or unrecognised
+metadata all fall through to tenant, so a third posture did not create a way
+to become public by accident. An identity token authenticates the account and
+its Session only; it carries no `companyId`, no `membershipId` and no role,
+and can never reach tenant data. **No token reaches tenant data without
+naming and validating a real membership.**
 
 ### Tenant scoping is the law
 Every read filters by `companyId` from the JWT. Every write includes `companyId`
@@ -213,10 +226,12 @@ on the linter.
 Escape hatch: `// rules-ignore: <id>` on the line, **with a reason**. Reaching for
 it often means the rule is wrong — change the rule, don't paper over it.
 
-Before saying "done": `npm run check` from the repo root — generate, typecheck,
-eslint, check-rules, prisma validate, knip, unit tests, then the db stage, which
-builds a clean database from the real migrations and runs the integrity and
-Company A/B suites. One command; CI runs the same one.
+Before saying "done": `npm run check` **from the repo root** (the api-local
+`check` is a narrower script — running it by accident skips mobile and the
+database) — generate, typecheck, eslint over both workspaces, check-rules,
+prisma validate, knip, api unit tests, mobile typecheck and tests, then the db
+stage, which builds a clean database from the real migrations and runs the
+integrity and Company A/B suites. One command; CI runs the same one.
 
 Never `npm audit fix --force` — see DEVLOG 2026-08-25.
 

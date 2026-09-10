@@ -34,7 +34,8 @@ const USER_ID       = "user_cmth00000000000000000001";
 const COMPANY_ID    = "comp_cmth00000000000000000001";
 const MEMBERSHIP_ID = "memb_cmth00000000000000000001";
 const SESSION_ID    = "sess_cmth00000000000000000001";
-const DRIVER_NAME   = "Fixture Driver";
+const DRIVER_FIRST_NAME = "Fixture";
+const DRIVER_LAST_NAME  = "Driver";
 const TIMEZONE      = "Europe/London";
 
 /** A syntactically valid client event id — one logical Start Shift. */
@@ -79,19 +80,30 @@ function fixtures(options: { active?: boolean } = {}) {
         id: SESSION_ID, userId: USER_ID,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), revokedAt: null,
       }),
+      create: () => Promise.reject(new Error("session.create must not be reached by a refused request")),
     },
     companyMembership: {
       findUnique: () => Promise.resolve({
         id: MEMBERSHIP_ID, userId: USER_ID, companyId: COMPANY_ID,
         role, active: options.active ?? true,
       }),
+      findMany: () => Promise.resolve([]),
     },
     company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE }) },
-    user:    { findUnique: () => Promise.resolve({ name: DRIVER_NAME }) },
+    // D22: the two canonical halves. `startContext` derives the snapshot name
+    // from them, so DRIVER_NAME below is the DERIVED value, not a column.
+    user: {
+      findUnique: () => Promise.resolve({
+        id: USER_ID, email: "fixture-driver@example.com",
+        firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME,
+      }),
+      create:     () => Promise.reject(new Error("user.create must not be reached by a refused request")),
+    },
     shift: {
       create:    () => Promise.reject(new Error("shift.create must not be reached by a refused request")),
       findFirst: () => Promise.resolve(null),
     },
+    $transaction: () => Promise.reject(new Error("$transaction must not be reached by a refused request")),
   };
 }
 
