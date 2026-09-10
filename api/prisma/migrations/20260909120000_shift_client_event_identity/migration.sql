@@ -1,0 +1,44 @@
+-- Offline Start Shift identity.
+--
+-- The app is offline-first: a driver starts a shift in a yard with no signal,
+-- the phone stores it locally, and the call reaches this API later — possibly
+-- more than once, because a lost response looks exactly like a lost request.
+-- Nothing in the schema could tell a REPLAY of one start from a genuinely new
+-- one, so retry safety had no representation at all.
+--
+-- The client generates `clientEventId` once per logical Start Shift and reuses
+-- it on every replay of that start. It is not authority: it never selects a
+-- company, a user or a membership, and it is only ever looked up inside a
+-- scope the verified token already established.
+--
+-- NULLABLE, deliberately. Shift rows may already exist from before this column,
+-- and a client id cannot be invented for a start no client ever identified —
+-- fabricating one would be exactly the "never invent data" mistake. PostgreSQL
+-- treats NULLs as distinct under a unique index, so any number of pre-existing
+-- rows coexist and no backfill is needed. Every Start Shift creation path
+-- requires the id; a NULL here means "written before offline identity existed",
+-- never "the client omitted it".
+--
+-- The unique index is scoped to (membershipId, clientEventId), NOT to the id
+-- alone:
+--   * global uniqueness would let one driver's id collide with another's, and
+--     would turn a client id into a way to learn that a row exists in another
+--     tenant;
+--   * membership is the narrowest trusted identity a call already carries
+--     (D15), so a replay lookup is expressible only inside the scope the token
+--     authorised;
+--   * keying on userId instead would break the multi-company driver (D12): a
+--     replay presented under company B could resolve to a company A shift and
+--     hand it back in the response.
+--
+-- The one-open-shift partial index from migration 1 is untouched and remains
+-- the concurrency authority for "a driver may not start a second shift".
+--
+-- Generated with `prisma migrate diff` (previous schema -> current). Earlier
+-- migrations untouched; invariants.sql untouched.
+
+-- AlterTable
+ALTER TABLE "Shift" ADD COLUMN     "clientEventId" TEXT;
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Shift_membershipId_clientEventId_key" ON "Shift"("membershipId", "clientEventId");

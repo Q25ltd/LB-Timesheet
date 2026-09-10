@@ -12,6 +12,8 @@ import {
   ACCESS_TOKEN_ISSUER,
 } from "./lib/auth.js";
 import { authStore, type AuthQueryable } from "./lib/authStore.js";
+import { startShiftRepository, type StartShiftDatabase } from "./repositories/startShiftRepository.js";
+import { registerShiftRoutes } from "./routes/shifts.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -22,7 +24,7 @@ import { authStore, type AuthQueryable } from "./lib/authStore.js";
  * individually. They are handed to `authStore` here and never travel further:
  * requireAuth receives the narrow AuthStore, not this type.
  */
-export interface AppDatabase extends AuthQueryable {
+export interface AppDatabase extends AuthQueryable, StartShiftDatabase {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 }
 
@@ -97,6 +99,12 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // through the one envelope. Without this, Fastify's defaults return their
   // own shape and a 500 echoes the exception message to the client.
   registerErrorHandling(app);
+
+  // The first protected business routes. Registered AFTER the default-deny
+  // hook above, so they inherit it; the explicit `public: false` inside the
+  // route file states the posture where it is read. The repository is built
+  // here, from the same database object, so a route never sees Prisma.
+  registerShiftRoutes(app, startShiftRepository(prisma));
 
   app.get("/health", { config: { public: true } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

@@ -4,6 +4,72 @@
 
 ---
 
+## 2026-09-10 — Start Shift Foundation: the first protected business route
+
+`POST /shifts/start` and `GET /shifts/current`, plus migration 6. Decisions
+recorded as **D19** and **D20**; what is built is STATUS.md's to state.
+
+**The invariant.** An authenticated active driver starts exactly one open Shift
+for the membership their token names, using the driver's own declared start
+instant, with `shiftDate` derived once from that instant in the company's IANA
+timezone — and that Shift is valid with **zero** asset segments. The
+zero-segment part is the product point: a driver books on at 06:00 and may not
+get a truck until 08:00, and inventing a placeholder vehicle to satisfy a
+schema is exactly what this refuses to do.
+
+**RED, honestly.** 10 route-contract tests and 21 database tests were written
+and run first: 31 failures, every one at the assertion level (`404 !== 201`,
+`404 !== 409`) rather than on a missing import — the app was built and the route
+simply was not there. The 50 pre-existing database tests stayed green
+throughout.
+
+**Built.** `api/src/routes/shifts.ts` (parse, narrow `request.auth`, delegate),
+`api/src/services/startShift.ts` (the invariant and the three conflict
+outcomes), `api/src/repositories/startShiftRepository.ts` (a second, narrow
+repository over the same tenant boundary — selectors from `TenantContext` only;
+it exists because `buildApp` takes a structural database, not a `PrismaClient`,
+and because Company/User reads do not belong to a Shift repository). `app.ts`
+widened `AppDatabase` and registered the routes; the four existing test fakes
+gained the three new delegates.
+
+**Migration 6** — `20260909120000_shift_client_event_identity`: a NULLABLE
+`Shift.clientEventId` plus `@@unique([membershipId, clientEventId])`. Nullable
+because rows may predate the column and a client id cannot be invented for a
+start no client ever identified; PostgreSQL treats NULLs as distinct, so no
+backfill exists to get wrong. Proven **both** ways, which are different claims:
+clean install via `migrate deploy` inside `npm run check`, and an upgrade of a
+*populated* database at the 5-migration baseline — two pre-existing Shift rows
+came through with NULL, both indexes present, ledger at 6, and a duplicate
+insert rejected `23505`.
+
+**The database is the guarantee, and it was proved so.** Four ephemeral
+mutations, each reverted and each file verified byte-identical afterwards:
+deleting the pre-read left **71/71 green** — retry safety comes from the unique
+index, the read is only an optimisation; unmapping `P2002` failed exactly the
+four conflict/concurrency cases; deleting the mismatch check failed exactly one;
+substituting UTC for the company zone failed exactly the timezone case. A fifth
+mutation put `request.body.companyId` into the route and `check-rules` reported
+`[no-client-tenant]` — the three tenant rules that had never scanned a
+production file now do.
+
+**Two temporal policies were tried and revoked before commit.** First a flat ban
+on future start times; then a 120-second clock-skew tolerance, implemented,
+tested and mutation-proved. Both were wrong for the product: `startedAt` is the
+driver's *declared* timesheet time, and a company that rounds 15:40 up to 15:45
+is not a client with a fast clock. The rule that shipped is D20 — any valid
+offset-aware instant is accepted and stored verbatim, with the ±15-minute
+confirmation belonging to the app as a warning. Neither superseded policy
+survives anywhere in the tree. Cheaper next time: settle a temporal rule before
+building an evidence matrix around it.
+
+**Verification.** `npm run check` exit 0 — 136/136 unit, 71/71 DB, 6 migrations.
+
+**Deliberately not built:** the mobile UI, the vehicle/trailer/check branch,
+Finish Shift, Night Out, notes, PDF, email — and still no way to obtain a token,
+so no real driver can reach this route yet.
+
+---
+
 ## 2026-09-09 — F-24 closed: the auth identity bindings are now tested
 
 Test-only commit `597bd1110db4675602711da7840890c83d92968c`, one file:

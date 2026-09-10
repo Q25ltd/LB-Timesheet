@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-09-09
+> Last updated: 2026-09-10
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -10,12 +10,15 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 
 ## Overall
 
-🔶 **Hardened foundation; still nothing a user can use.** No auth routes, no
-shift flow, no PDF, no email sending, no web app, no mobile app.
+🔶 **Hardened foundation plus the first business route; still nothing a user
+can use.** No auth routes, so no driver can obtain a token; no vehicle/check
+flow, no finish, no PDF, no email sending, no web app, no mobile app.
 
 What IS real: migration-managed schema with membership-bound shifts, a
-one-open-shift invariant and a non-null company IANA timezone (D18); Session
-persistence; protected-request authentication (P1.2a — see below); a
+one-open-shift invariant, a non-null company IANA timezone (D18) and offline
+Start Shift identity; Session persistence; protected-request authentication
+(P1.2a — see below); **the Start Shift backend foundation — `POST /shifts/start`
+and `GET /shifts/current` (D19, D20)**; a
 tenant-safe repository boundary with Company A/B proofs;
 global error handling that cannot leak internals; fail-closed env validation
 (CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
@@ -74,9 +77,9 @@ decided on 2026-08-31 as D18** — one timesheet per shift, filed under the loca
 calendar date it started, in the company's IANA timezone. D18's data-model
 prerequisite is now **built**: `Company.timezone` exists, non-null, defaulted to
 `Europe/London` for V1 (`4888d63`), and a pure helper derives the local calendar
-date from an instant plus that zone. What remains is the route itself and two
-still-unbuilt schema facts — `shiftDate` immutability enforcement and Night Out —
-see the "First protected business route" row below. *Public
+date from an instant plus that zone. The route itself is now **built** — see the
+"Start Shift backend foundation" row below; two schema facts named there remain
+unbuilt (`shiftDate` immutability enforcement and Night Out). *Public
 deployment* is blocked by at
 least the rate-limit/proxy architecture (F-15) and the production `tsx` runtime
 (F-17). **Development itself is not blocked** — login/token-minting groundwork
@@ -126,7 +129,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 | Area | State |
 |---|---|
-| Start shift (date, time, driver, truck, trailer) | 🔲 |
+| Start shift (date, time, driver, truck, trailer) | 🔲 — **mobile UI**. The backend it will call exists (see Backend, "Start Shift backend foundation"); no screen, no offline queue, no time picker and no ±15-minute confirmation (D20) is built |
 | Company selection (only when driver holds >1 membership) | 🔲 |
 | Truck check | 🔲 |
 | Trailer check | 🔲 |
@@ -158,16 +161,16 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 | Area | State |
 |---|---|
-| Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 127 unit tests, test:db integrity gate |
+| Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19); validated, generated, migrated |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` — generate, tsc, eslint (type-aware), check-rules (17 checks), prisma validate, knip, 136 unit tests, test:db integrity gate |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
-| Database tenant-integrity proof | ✅ 50/50 against a clean database built by `migrate deploy` (2026-08-31; 45 → 50 at `4888d63`, the five added being the company timezone authority's). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
-| Migrations | ✅ 5 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`, `20260831210000_company_timezone_authority` (D18); `migrate deploy` proven on a clean database; partial index verified in pg_indexes. The local development database has all five applied (`migrate deploy`, 2026-08-31) |
+| Database tenant-integrity proof | ✅ 71/71 against a clean database built by `migrate deploy` (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
+| Migrations | ✅ 6 migrations, migration-managed bootstrap (no `db:push`) — `20260830132905_init` (schema + invariants.sql), `20260830150000_submit_job_status_enum_and_one_outbox_per_shift` (F-09), `20260830160000_membership_role_enum`, `20260831090000_session_persistence_foundation`, `20260831210000_company_timezone_authority` (D18), `20260909120000_shift_client_event_identity` (D19 — nullable `clientEventId` + its unique index; proven on a clean database AND as an upgrade of a populated one, pre-existing Shift rows keeping NULL, no backfill); `migrate deploy` proven on a clean database; partial index verified in pg_indexes. The local development database has the first five applied (`migrate deploy`, 2026-08-31); migration 6 has not been applied to it |
 | CI (GitHub Actions) | ✅ runs on github.com/Q25ltd/LB-Timesheet, executing `npm run check` verbatim (run #1 failed against the original workflow, which was then rewritten). Remote results were independently queried from the GitHub Actions API on 2026-08-31 and are `completed/success` for every commit checked: `5641691` (P1.2a), `0591241`, `2c85f4f` (P1.2b), `60effc9` and `d1f0c1b`. This states what those five runs returned — it is not a claim about any other commit. Queried again for `4888d63` (company timezone authority): run `33436174195`, `completed/success`, `headSha` matching that exact commit. Queried again for `597bd111` (F-24 identity-binding tests): run `34368029271`, `completed/success`, `headSha` matching that exact commit. |
 | Deployment | 🔲 — API to Railway, web to Vercel (D14). Neither connected. **Public deployment is additionally blocked by F-15** (auth-before-rate-limit + unreviewed proxy trust) **and F-17** (production `npm start` runs `tsx`, a devDependency). |
 | Auth contract (AUTH.md) | ✅ frozen 2026-08-25 |
-| Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`; 11 Company A/B tests. Since `c742b03` a `TenantContext` is frozen on construction, so tenant authority cannot be repointed, extended or trimmed by anything holding it — 4 tests in `api/src/lib/tenantContext.test.ts`, written RED. Forging one with a double cast remains possible and is documented in the class itself; see **F-22** and D16. |
+| Tenant repository boundary (F-01) | ✅ `TenantContext` + `shiftRepository`, joined at Start Shift by `startShiftRepository` — a second, deliberately narrow repository over the same boundary (its selectors are built from `TenantContext` only; it exists because `buildApp` takes a structural database rather than a `PrismaClient`, and because Company/User reads do not belong to a Shift repository). 11 Company A/B tests. Since `c742b03` a `TenantContext` is frozen on construction, so tenant authority cannot be repointed, extended or trimmed by anything holding it — 4 tests in `api/src/lib/tenantContext.test.ts`, written RED. Forging one with a double cast remains possible and is documented in the class itself; see **F-22** and D16. |
 | Outbox enqueue uniqueness (F-09) | ✅ `SubmitJobStatus` enum + one row per shift, migration 2 — this is **storage/enqueue uniqueness only**. Transaction atomicity of transition-plus-enqueue, worker-claim idempotency and exactly-once external email delivery are **not** proven; see **F-16**. Do not describe this row as "submission idempotency". |
 | Rule-engine fixture tests (F-08) | ✅ `scripts/rules/engine.test.ts` — every rule proven wired |
 | Email fail-closed in production (F-07) | ✅ SENDGRID_API_KEY + MAIL_FROM required unless explicitly dev/test |
@@ -178,8 +181,9 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 | **P1.2b — Authorized Tenant Context** | ✅ — F-14 closed in `2c85f4f`. `authorizeTenant(auth: AuthContext): TenantContext` (`api/src/lib/authorization.ts`) is the one production place authenticated identity becomes tenant authority, and the only production caller of `TenantContext.trust()`. It takes the trusted `AuthContext` and **nothing else** — no `companyId`, `membershipId`, `userId`, `role`, request, body, query or options parameter — so client-supplied identity has no channel to arrive through; and it performs **no database read**, because `requireAuth` already validated the identity against persistence. Active membership → a `TenantContext` carrying `companyId`, `userId` **and** `membershipId` (all three; `membershipId` is what `shiftRepository` scopes `findById`/`update`/`delete` on, per D15). Anything not exactly `"active"` → generic `403 FORBIDDEN` (D17); the comparison is `!== "active"`, so a future third membership state would fail closed. Proven by 5 tests in `api/src/lib/authorization.test.ts`, written RED and reviewed before implementation; `npm run check` exit 0 at `2c85f4f` (110/110 unit, 45/45 DB, 4 migrations). The static rules were **not** changed: `tenant-context-trust-sites` already permitted `lib/auth*`, so the bridge needed no rule change. That exemption is an unanchored path substring and its coverage is narrower than earlier wording here claimed — see **F-23**. Independently audited 2026-08-31 against `60effc9`: the P1.2b invariant held under every attack constructed against it (no inactive bypass, no role bypass, no alternate construction path, no client channel through body, query, path params or headers); the audit opened **F-22**, **F-23** and **F-24**, none of which invalidates this row (**F-24** has since been closed in `597bd111`). |
 | Inactive-membership authorization — **ordinary/default rule** | ✅ — the default-deny half of AUTH.md's "Deactivated membership" section is implemented: an inactive membership still authenticates and is reported as `inactive` (P1.2a, unchanged), and is then refused ordinary tenant authority with `403 { "error": "Not allowed", "code": "FORBIDDEN" }`. Generic on purpose — the response never discloses that a deactivated membership caused the denial (D17). Role is not a bypass: an inactive **admin** is denied identically. |
 | Inactive-membership authorization — **the narrow exception** | 🔲 — AUTH.md permits a deactivated membership to read, update and submit an **already-open** shift, and nothing else. **None of that exists.** There is no finalise capability, no discard capability, no `allowInactive`, no bypass flag, no capability token, no permission enum and no policy engine. Its concrete API is an open design question, not a settled one; the only frozen fact is that any such operation must be explicit and narrow. It will be designed with the business feature that needs it. |
-| First protected business route | 🔲 — **no open decision blocks it any more.** P1.2b (F-14) closed `2c85f4f`, and O8 closed 2026-08-31 as **D18**: a shift is one timesheet, filed under the local calendar date it started, derived at creation from the start instant in the **company's** IANA timezone and immutable afterwards. D18's data-model prerequisite was built in `4888d63` — see the "Company timezone authority (D18)" row below — so the local date is now derivable. What remains is concrete: (1) `shiftDate` immutability is design intent — no database constraint prevents an update; (2) no Night Out field exists on `Shift`; (3) nothing **calls** the derivation yet — `localCalendarDate` has no production caller until Start Shift exists; (4) no company can choose its timezone (settings/onboarding unbuilt), so every company sits on the `Europe/London` default today. **F-24 is no longer a prerequisite here** — the two identity bindings this route's authentication boundary rests on gained permanent regression evidence in `597bd111` and the finding is closed |
-| Company timezone authority (D18) | ✅ — implemented in `4888d63`. `Company.timezone` is `String @default("Europe/London")`, NOT NULL in PostgreSQL (`TEXT NOT NULL DEFAULT 'Europe/London'`, migration 5), so every Company row carries the authority D18 derives `Shift.shiftDate` from. An IANA **identifier**, never a numeric offset. `Europe/London` is the **V1 default, not a statement that the product is UK-only** — `Europe/Vilnius`, `America/New_York`, `Asia/Dubai` and `Australia/Sydney` round-trip verbatim; 5 tests in `src/tests/db/companyTimezone.test.ts`, written RED against the missing column, also prove NOT NULL (SQLSTATE 23502), that the stored column default is itself a real IANA identifier, and that no competing timezone column exists on any other model. The conversion foundation is `api/src/lib/timezone.ts` — `isIanaTimeZone` (the runtime's own ICU tz database is the authority, plus explicit rejection of the offset forms `Intl` would otherwise accept) and `localCalendarDate(instant, timeZone)` (pure; returns midnight UTC, the `@db.Date` storage form). 11 tests in `src/lib/timezone.test.ts` cover the required boundary — a `2026-07-02 00:30 Europe/London` start files under **2026-07-02**, not the UTC date `2026-07-01` — plus one instant filing under different dates in four zones (including a negative offset and a 45-minute one), a summer/winter pair no fixed offset survives, both DST transitions, and a 22:00 → 06:00 night shift filed under its **start** date. The schema's `shiftDate` comment now states D18 rather than "(O8, provisional)". **What this is not:** nothing writes this column in production and nothing reads the helper yet — there is no company settings/onboarding path to choose a timezone, and Start Shift is unbuilt, so worldwide *usability* does not follow from the data model supporting it. `npm run check` exit 0 at `4888d63` (125/125 unit, 50/50 DB, 5 migrations); GitHub Actions run `33436174195` `completed/success` for that exact SHA. |
+| **Start Shift backend foundation** | ✅ — the first protected business route. `POST /shifts/start` and `GET /shifts/current` (`api/src/routes/shifts.ts`), behind the existing pipeline: default-deny hook → `requireAuth` → `authorizeTenant` → `TenantContext` → `api/src/repositories/startShiftRepository.ts`. An active `driver` **or** `admin` membership starts ONE shift for its own trusted identity: `status = active` (D19) with **zero** `ShiftSegment` rows — the driver who has booked on but has no truck yet, represented with no placeholder asset of any kind. `driverName` is snapshotted from `User.name` and `shiftDate` derived once from the declared `startedAt` in `Company.timezone` (D18) — both server-side; the DTO is `.strict()`, so a client sending `companyId`, `userId`, `membershipId`, `shiftDate`, `timezone`, `driverName` or `status` is refused, not ignored. Offline identity is a client-generated `clientEventId`, unique per `(membershipId, clientEventId)` (D19): an exact replay returns the existing shift with `200`, the same event with a different `startedAt` is `409 CLIENT_EVENT_MISMATCH`, and a genuinely new start while any shift is open is an opaque `409 SHIFT_ALREADY_OPEN` — identical whether that open shift is in this company or another, so company B never learns the driver is on shift for company A. `startedAt` is driver-declared data: any valid offset-aware instant is accepted and stored verbatim, past or future, never clamped (D20). Proven by **21 database tests** (`api/src/tests/db/startShift.test.ts`) plus 9 route-contract tests (`api/src/routes/shifts.test.ts`), including a 4-way concurrency race producing exactly one row, a non-UK timezone boundary where the UTC and company-local dates differ, and same-company driver-vs-driver isolation on the recovery read. Four ephemeral mutations each failed exactly the cases they should and were reverted before commit: deleting the pre-read left all tests green (the DATABASE carries retry safety, not the read), unmapping `P2002` failed the four conflict cases, deleting the mismatch check failed only that case, and substituting UTC for the company zone failed only the timezone case. **What this is NOT:** no mobile UI, no vehicle/trailer/check branch, no Finish Shift, and no way for a driver to obtain a token — so no real driver can reach it yet |
+| First protected business route — remaining schema facts | 🔲 — two facts the row above deliberately did not build: (1) `shiftDate` immutability is still design intent — no database constraint prevents an update, and nothing updates it today because Start Shift creates no update path; (2) no Night Out field exists on `Shift`. Also unchanged: no company can choose its timezone (settings/onboarding unbuilt), so every company sits on the `Europe/London` default |
+| Company timezone authority (D18) | ✅ — implemented in `4888d63`. `Company.timezone` is `String @default("Europe/London")`, NOT NULL in PostgreSQL (`TEXT NOT NULL DEFAULT 'Europe/London'`, migration 5), so every Company row carries the authority D18 derives `Shift.shiftDate` from. An IANA **identifier**, never a numeric offset. `Europe/London` is the **V1 default, not a statement that the product is UK-only** — `Europe/Vilnius`, `America/New_York`, `Asia/Dubai` and `Australia/Sydney` round-trip verbatim; 5 tests in `src/tests/db/companyTimezone.test.ts`, written RED against the missing column, also prove NOT NULL (SQLSTATE 23502), that the stored column default is itself a real IANA identifier, and that no competing timezone column exists on any other model. The conversion foundation is `api/src/lib/timezone.ts` — `isIanaTimeZone` (the runtime's own ICU tz database is the authority, plus explicit rejection of the offset forms `Intl` would otherwise accept) and `localCalendarDate(instant, timeZone)` (pure; returns midnight UTC, the `@db.Date` storage form). 11 tests in `src/lib/timezone.test.ts` cover the required boundary — a `2026-07-02 00:30 Europe/London` start files under **2026-07-02**, not the UTC date `2026-07-01` — plus one instant filing under different dates in four zones (including a negative offset and a 45-minute one), a summer/winter pair no fixed offset survives, both DST transitions, and a 22:00 → 06:00 night shift filed under its **start** date. The schema's `shiftDate` comment now states D18 rather than "(O8, provisional)". **What this is not:** nothing WRITES this column in production — there is no company settings/onboarding path to choose a timezone, so every company sits on the `Europe/London` default and worldwide *usability* does not follow from the data model supporting it. It is now READ in production: Start Shift derives every `shiftDate` from it through `localCalendarDate`, which is the helper's first production caller. `npm run check` exit 0 at `4888d63` (125/125 unit, 50/50 DB, 5 migrations); GitHub Actions run `33436174195` `completed/success` for that exact SHA. |
 | Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. Since P1.2a the pipeline reads existence, `revokedAt`, `expiresAt` and `userId` on every protected request; the refresh-token columns and the grace deadline remain unread — no rotation logic exists. |
 | Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist; the logic does not. **F-21** (cross-column refresh-hash ambiguity) must be decided before this is implemented |
 | Multi-company driver memberships | 🔲 |
@@ -234,8 +238,12 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 - **`request.auth` is optional at the Fastify type level (P1.2a).** Declared
   `auth?: AuthContext` because a public route never runs `requireAuth`, so a
   non-optional declaration would be false on exactly the routes where being
-  wrong matters most. Every future protected route must therefore narrow it.
-  Revisit when the first route consumes it.
+  wrong matters most. Every protected route must therefore narrow it. The first
+  consumer landed with Start Shift and does so through one small local helper
+  (`authenticated()` in `api/src/routes/shifts.ts`) that fails closed as an
+  internal fault rather than as a 401 — a protected route reached without a
+  context is a wiring defect, not a client error. Accepted as-is; revisit if a
+  second narrowing style appears.
 
 - **`db-check` can force-drop a fixed database name (audit 2026-08-31, Low).**
   `api/scripts/db-check.ts:56` runs `DROP DATABASE IF EXISTS
@@ -253,13 +261,12 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
   Non-blocking backlog; direction is an explicit Prisma `select`, when that
   boundary is next touched under owner authorization.
 
-- **Three of the four tenant rules currently scan zero production files (P1.2b
-  audit, 2026-08-31, Observation).** `src/routes/` and `src/services/` do not
-  exist yet, so `no-client-tenant`, `no-raw-request-past-route` and
-  `no-request-in-services` are today proven only against `__fixtures__`.
-  Correct and expected at this stage — recorded so that "4 tenant-boundary
-  rules ✅" is not read as "4 rules currently guarding production code". No
-  action; it resolves itself when the first route lands.
+- **RESOLVED at Start Shift.** The P1.2b audit (2026-08-31) recorded that three
+  of the four tenant rules scanned zero production files, because `src/routes/`
+  and `src/services/` did not exist. They do now, and the rules were shown to
+  bite on them: with `request.body.companyId` temporarily inserted into
+  `api/src/routes/shifts.ts`, `check-rules` reported `[no-client-tenant]` at
+  that line; the line was reverted and the file verified byte-identical.
 
 - **Company-level state is never consulted on the authority path (P1.2b audit,
   2026-08-31, Observation).** `Company.status` (`trial | active | past_due |

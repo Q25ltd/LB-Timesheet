@@ -2,7 +2,7 @@
 
 > What this product is and where its edges are.
 > For what is actually built, see **STATUS.md**. For settled/open decisions, see **DECISIONS.md**.
-> Last updated: 2026-08-25
+> Last updated: 2026-09-10
 
 ---
 
@@ -68,6 +68,29 @@ The driver interacts with the app **as little as possible**.
 
 No driving/working/break/POA status updates. No job interaction. No GPS tracking.
 No background monitoring. **Every additional mandatory tap needs justification.**
+
+---
+
+## Start and finish times
+
+The times on the sheet are what the driver **declares**, not a measurement of
+when he opened the app. A driver who forgot to book on enters 06:00 at 08:00; a
+company that rounds to the quarter hour enters 15:45 at 15:40. Both are correct
+timesheet data.
+
+So the app must let the time be edited, and must keep exactly what the driver
+confirms. It does one check, and it is a **warning, not a rule**: when a
+manually entered Start or Finish time is more than **15 minutes** from the
+current time in either direction, ask the driver to confirm — showing the time
+he actually entered:
+
+> The time you entered is more than 15 minutes from the current time.
+> **Use 06:00?** · *Yes, use this time* · *No, change it*
+
+Confirming keeps the entered time unchanged and carries on. Within 15 minutes
+there is no prompt at all — the common case costs no extra tap, per the driver
+philosophy above. The rule is identical at both ends of the shift. See
+DECISIONS.md D20; the server never rejects a declared time on these grounds.
 
 ---
 

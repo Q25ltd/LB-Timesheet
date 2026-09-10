@@ -217,6 +217,27 @@ model Shift {
   /// Snapshot of the driver's name as it should print on the PDF.
   driverName   String
 
+  /// The CLIENT's own stable id for ONE logical Start Shift operation.
+  ///
+  /// The app is offline-first: a shift is started in a yard with no signal,
+  /// stored locally, and posted later — possibly more than once, because a
+  /// lost response is indistinguishable from a lost request. The client
+  /// generates this id once, keeps it with its local shift, and reuses it on
+  /// every replay of THAT start. The server can then tell a replay of the same
+  /// start from a genuinely new one, which no server-generated id can do.
+  ///
+  /// It is NOT authority and NOT tenant identity: it never selects a company,
+  /// a user or a membership, and it is only ever looked up INSIDE a scope the
+  /// verified token already established (see the unique index below).
+  ///
+  /// Nullable ONLY for Shift rows created before this column existed — a
+  /// client id cannot be invented for a start that no client ever identified,
+  /// and PostgreSQL treats NULLs as distinct under a unique index, so any
+  /// number of them coexist. Every Start Shift creation path requires one; a
+  /// null here means "written before offline identity", never "the client
+  /// omitted it".
+  clientEventId String?
+
   /// The local calendar date on which this shift STARTED — what the timesheet
   /// is filed under (D18). Derived once, at creation, from startedAt expressed
   /// in the company's IANA timezone (Company.timezone is the authority; the
@@ -249,6 +270,20 @@ model Shift {
   /// convention — guarantees a child can never sit under a different company
   /// than its parent shift. Redundant against the primary key by design.
   @@unique([id, companyId])
+
+  /// Idempotent Start Shift, enforced by the database rather than by a
+  /// read-then-write the next concurrent call can slip through.
+  ///
+  /// Scoped to the MEMBERSHIP, which is the narrowest trusted identity a
+  /// request already carries (D15): the token names one membership, so the
+  /// lookup for a replay is expressible only inside the scope the token
+  /// authorised. Deliberately NOT global — two drivers coincidentally
+  /// generating the same id must not collide, and a client id must never
+  /// become a way to discover that a row exists in another tenant.
+  /// Deliberately not keyed on userId either: a driver who works for two
+  /// companies (D12) would otherwise have a company-B replay resolve to a
+  /// company-A shift and receive it in the response.
+  @@unique([membershipId, clientEventId])
 
   // "At most one OPEN shift per user" cannot be expressed in Prisma — it needs a
   // PARTIAL unique index. The SQL lives in prisma/invariants.sql and must be

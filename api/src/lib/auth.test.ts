@@ -142,6 +142,15 @@ interface IdentityReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: { findUnique(args: { where: { id: string } }): Promise<SessionRow | null> };
   companyMembership: { findUnique(args: { where: { id: string } }): Promise<MembershipRow | null> };
+  // Start Shift's reads. Unused by this file — these cases stop at the
+  // authentication boundary and never reach a business route — but AppDatabase
+  // names them, so the fixture has to satisfy them.
+  shift: {
+    create(): Promise<never>;
+    findFirst(): Promise<null>;
+  };
+  company: { findUnique(): Promise<null> };
+  user: { findUnique(): Promise<null> };
 }
 
 /** Matches on id, so "the wrong id finds nothing" stays expressible later. */
@@ -156,6 +165,12 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
       findUnique: ({ where }) =>
         Promise.resolve(membership !== null && membership.id === where.id ? membership : null),
     },
+    shift: {
+      create:    () => Promise.reject(new Error("shift.create is not part of the authentication pipeline")),
+      findFirst: () => Promise.resolve(null),
+    },
+    company: { findUnique: () => Promise.resolve(null) },
+    user:    { findUnique: () => Promise.resolve(null) },
   };
 }
 

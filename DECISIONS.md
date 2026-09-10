@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-08-31
+> Last updated: 2026-09-10
 
 ---
 
@@ -320,6 +320,109 @@ timezone** must be available at shift creation, because the local date cannot be
 derived without one and the device's timezone must not be substituted for it; and
 `shiftDate` must be written once at creation and never updated afterwards. What
 exists today, and what remains to be built for that, is STATUS.md's to state.
+
+### D19 — Start Shift: one active shift, owned by a membership, identified by the client (2026-09-10)
+Owner-decided at the Start Shift Foundation decision gate. What is built against
+this is STATUS.md's to state.
+
+**Completing Start Shift makes the shift `active`.** A driver who has booked on
+is working, so the shift is created `active`, not `draft`. `draft` stays
+reserved for the recoverable, not-yet-finished setup the vehicle/check branch
+will need — one state, one meaning.
+
+**An `active` shift with ZERO `ShiftSegment` rows is a valid, ordinary state.**
+A driver books on at 06:00 and may not be handed a truck until 08:00. That is
+one shift starting at 06:00, and until the truck arrives it has no asset
+segment — not a placeholder vehicle, not `"UNKNOWN"`, not zero mileage, not an
+empty segment. Vehicle type belongs to the asset flow, not to starting work.
+
+**Both roles may start their own shift.** An active `driver` and an active
+`admin` membership may each start a shift for *itself*; there is no role gate
+and no RBAC. Admin confers no authority over another user or membership —
+ownership comes from `TenantContext` in every case.
+
+**One open shift, and the refusal says nothing.** A genuinely new start while
+that user already has any open shift is `409 { code: "SHIFT_ALREADY_OPEN" }`,
+carrying no shift id, date, start time, membership or company — and identical
+whether the open shift is in this company or another. A driver may work for
+several (D12); company B must not learn he is on shift for company A. The
+per-user partial unique index remains the concurrency authority: the
+application may read first for a better answer, but the database is what makes
+a second open shift impossible.
+
+**Offline identity is client-generated.** Start Shift is created offline, so
+the same logical start may reach the API more than once — a lost response is
+indistinguishable from a lost request. The client generates one stable
+`clientEventId` per logical start and reuses it on every replay of that start;
+the server keeps its own `Shift.id`. A client-generated primary key was
+rejected: it hands the client id-space control and turns a collision into an
+existence oracle for another tenant.
+
+**Idempotency is scoped to `(membershipId, clientEventId)`** — the narrowest
+trusted identity a request already carries (D15). Not global (two drivers'
+ids would collide, and a client id would become a probe for another tenant's
+rows) and not `(userId, …)`, which would break D12: a replay presented under a
+company-B token could resolve to a company-A shift and return it.
+
+- same membership + same event id + same `startedAt` → the existing shift, no
+  duplicate, no `SHIFT_ALREADY_OPEN`;
+- same membership + same event id + a DIFFERENT `startedAt` → `409 { code:
+  "CLIENT_EVENT_MISMATCH" }`. Neither mutating the stored shift nor creating a
+  second one is acceptable: one of the two values is wrong and the server
+  cannot tell which, so it refuses instead of silently re-timing a working day.
+
+**`GET /shifts/current` is the recovery contract** — the caller's own open
+shift within the membership and company the token names, or none. It is how a
+phone that crashed, restarted or lost its response finds out it is already on
+shift. An open shift in another company is correctly invisible to it. It is not
+a history or listing endpoint.
+
+**Request authority stays server-derived.** The client supplies its declared
+start and its event id, and nothing else: `companyId`, `userId`,
+`membershipId`, `shiftDate`, `timezone`, `driverName` and `status` are refused
+by strict validation rather than ignored, and every one of them is taken from
+the verified token, the Company row or the User row (AUTH.md).
+
+*Why record the refusal rather than a silent drop:* ignoring an authority field
+teaches a client that it was accepted. Refusing it says plainly where tenant
+identity comes from.
+
+### D20 — Declared start and finish times are the driver's data; the app warns, the server does not block (2026-09-10)
+Owner-decided 2026-09-10, superseding two policies that were tried and revoked
+before they ever reached a commit: an outright ban on future start times, and a
+120-second clock-skew tolerance. **Neither is current. Do not reintroduce
+either as a server rule.**
+
+**`startedAt` is official timesheet data the driver declares**, not a
+measurement of when the app was opened. The backend accepts any valid
+offset-aware ISO-8601 instant — past, now, or future — and persists it exactly.
+There is no backdating limit, no future-time limit, no clamping to server time
+and no rounding.
+
+- 08:00, driver enters 06:00 because he forgot to open the app → accepted.
+- 15:40, driver enters 15:45 because his company rounds → accepted.
+- 05:57, driver enters 06:00 → accepted.
+
+*Why:* none of those is distinguishable server-side from a mistake, and all
+three are ordinary. A server that rejected them would block real drivers from
+recording real work for a reason they can neither see nor fix. Rounding or
+clamping would be worse still: it would rewrite payroll data and, because
+idempotency compares the declared instant (D19), silently change what counts as
+a replay.
+
+**The offset is still mandatory**, and a bare wall-clock value is still
+refused: the server must never guess a zone (D18). Validity of the *instant* is
+enforced; its *distance from now* is not.
+
+**The check belongs in the app, as a warning.** When a manually entered Start
+**or** Finish time differs from the device's current time by more than 15
+minutes in either direction, the app asks the driver to confirm — showing the
+entered time itself ("Use 06:00?"), with the choice to keep it or change it. A
+confirmed time is preserved exactly and the flow continues. It is a warning,
+never validation, and it must never become a server-side rejection.
+
+This applies to both ends of a shift. Finish Shift is unbuilt; the rule is
+recorded now so it is not re-litigated when `endedAt` arrives.
 
 ---
 

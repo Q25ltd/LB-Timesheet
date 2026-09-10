@@ -16,6 +16,15 @@ const db = {
   $queryRaw: (_q: TemplateStringsArray, ..._v: unknown[]): Promise<unknown> => Promise.resolve([{ ok: 1 }]),
   session:           { findUnique: (): Promise<null> => Promise.resolve(null) },
   companyMembership: { findUnique: (): Promise<null> => Promise.resolve(null) },
+  // Start Shift's reads. Not exercised here — these tests never authenticate,
+  // and /health is public — but AppDatabase now names them, so the stand-in
+  // has to be honest about what the app is able to ask for.
+  shift: {
+    create:    () => Promise.reject(new Error("shift.create is not part of this test")),
+    findFirst: () => Promise.resolve(null),
+  },
+  company: { findUnique: () => Promise.resolve(null) },
+  user:    { findUnique: () => Promise.resolve(null) },
 };
 
 /** The envelope, and NOTHING else: no Fastify `message`/`statusCode` keys. */

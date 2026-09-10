@@ -249,6 +249,14 @@ interface IdentityReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: { findUnique(args: { where: { id: string } }): Promise<SessionRow | null> };
   companyMembership: { findUnique(args: { where: { id: string } }): Promise<MembershipRow | null> };
+  // Start Shift's reads. Unused here — this file stops at the authorization
+  // boundary — but AppDatabase names them, so the fixture must satisfy them.
+  shift: {
+    create(): Promise<never>;
+    findFirst(): Promise<null>;
+  };
+  company: { findUnique(): Promise<null> };
+  user: { findUnique(): Promise<null> };
 }
 
 function base64url(value: string): string {
@@ -286,6 +294,12 @@ function activeIdentity(): IdentityReads {
     $queryRaw: () => Promise.resolve([{ ok: 1 }]),
     session:           { findUnique: ({ where }) => Promise.resolve(session.id === where.id ? session : null) },
     companyMembership: { findUnique: ({ where }) => Promise.resolve(membership.id === where.id ? membership : null) },
+    shift: {
+      create:    () => Promise.reject(new Error("shift.create is not part of this test")),
+      findFirst: () => Promise.resolve(null),
+    },
+    company: { findUnique: () => Promise.resolve(null) },
+    user:    { findUnique: () => Promise.resolve(null) },
   };
 }
 
