@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-09-10 (Registration Increment 1)
+> Last updated: 2026-09-11 (Registration completed on device)
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -10,10 +10,10 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 
 ## Overall
 
-🔶 **A driver can now create an account on a phone and end up signed in — and
-that is the only thing a user can do.** There is no login, so a driver who
-closes the app cannot get back in; no vehicle/check flow, no finish, no PDF,
-no email sending, no web app.
+🔶 **A driver can now create an account on a phone and end up signed in —
+verified by hand on a physical device — and that is the only thing a user can
+do.** There is no login, so a driver who closes the app cannot get back in; no
+vehicle/check flow, no finish, no PDF, no email sending, no web app.
 
 What IS real: migration-managed schema with membership-bound shifts, a
 one-open-shift invariant, a non-null company IANA timezone (D18) and offline
@@ -139,14 +139,20 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 The Expo workspace exists (`mobile/`) — React Native + Expo SDK 57 +
 TypeScript strict, `expo-router`, `expo-secure-store`. It participates in the
-root `npm run check` (typecheck, lint, tests), so it cannot rot unnoticed.
+root `npm run check` (typecheck, lint, 39 tests), so it cannot rot unnoticed.
 **No SQLite yet** (D25) — that arrives with offline/personal data.
+
+**Run the gate from the repository root.** The api-local `check` script is
+narrower and silently skips mobile and the database; running it by mistake is
+the one way to believe the gate passed when it did not.
 
 | Area | State |
 |---|---|
-| Driver registration (first name, last name, email, password) | ✅ — a real screen calling the real `POST /auth/register`: validation, show/hide password, submitting and disabled states, field-level and form-level errors, a distinct no-connection state, `409 EMAIL_IN_USE` in the driver's words, safe areas, keyboard reflow, ≥44pt targets. 11 screen-behaviour tests plus 8 validation tests. The brand hero area is a neutral placeholder — no approved logo or photograph exists in the repo yet (product polish, not a finding) |
+| Driver registration (first name, last name, email, password) | ✅ — **manually approved on a physical phone by the owner, 2026-09-11**. A real screen calling the real `POST /auth/register`: validation, show/hide on both password fields, submitting and disabled states, field-level and form-level errors, a distinct no-connection state, `409 EMAIL_IN_USE` in the driver's words, safe areas, ≥44pt targets. A fifth box — **Repeat password** — is validated client-side and is deliberately NOT a request field: the DTO is four fields and `.strict()`, so a fifth is refused `400`; the request is built field by field, never by spreading form state, and a test asserts the exact body. The password rule renders INSIDE the password field rather than on a line between the two password inputs. The hero photograph is integrated edge to edge |
+| Registration layout | ✅ — at rest the form fits with **no scrolling in either direction** (`scrollEnabled={false}`, `flexGrow: 1`, bounce off). The hero shrinks on shorter screens and is dropped entirely below 720pt or while the keyboard is up. Scrolling is enabled **only** with the keyboard covering the screen, because the alternative there is fields the driver cannot reach. Form height ≈592pt; proven by 4 layout tests |
+| Mobile → API host resolution | ✅ — the API host is derived from the Metro dev server the bundle was loaded from (`Constants.expoConfig.hostUri`), so a physical phone and both simulators work with no per-machine configuration. `EXPO_PUBLIC_API_URL` overrides it and is required for any build Metro does not serve. **A connection failure in development names the URL it tried**; that detail is null in a production build, so no internal hostname reaches a driver. 6 tests. The previous per-platform default resolved to `localhost` on a phone — which is the phone — and reported as "check your signal" |
 | Signed-in state with ZERO companies | ✅ — after registering, the driver enters an authenticated shell that states the account is ready and that no company is linked. No join-company gate, no error, no fake membership. Proven by the screen suite and by a live end-to-end run that created 0 Company and 0 CompanyMembership rows |
-| Session material handling | ✅ — refresh secret in `expo-secure-store` under one key; identity token **in memory only**; nothing in AsyncStorage; the password is never persisted. The storage module exposes no generic setter, and one of its 4 tests asserts its export list |
+| Session material handling | ✅ — unchanged by the registration completion. Refresh secret in `expo-secure-store` under one key; identity token **in memory only**; nothing in AsyncStorage; the password is never persisted. The storage module exposes no generic setter, and one of its 4 tests asserts its export list |
 | Login screen | 🔲 — deliberately a visible "Sign in is not built yet" placeholder with no fields and no submit control, so the reference design's "Already have an account?" link has somewhere honest to go |
 | Session restore after app restart | 🔲 — the refresh secret is stored but there is no `/auth/refresh` to redeem it, so relaunching loses the session |
 | Start shift (date, time, driver, truck, trailer) | 🔲 — **mobile UI**. The backend it will call exists (see Backend, "Start Shift backend foundation"); no screen, no offline queue, no time picker and no ±15-minute confirmation (D20) is built |
@@ -182,7 +188,7 @@ root `npm run check` (typecheck, lint, tests), so it cannot rot unnoticed.
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19). **`User` now carries `firstName` + `lastName` (both NOT NULL) and `email` is `citext`** with one unique index (D22) — `User.name` is gone, not retained alongside. Validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 159 api unit tests, **mobile typecheck + 23 mobile tests**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 159 api unit tests, **mobile typecheck + 39 mobile tests**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
 | Database tenant-integrity proof | ✅ 85/85 against a clean database built by `migrate deploy` (71 → 85 at Registration Increment 1, the fourteen added being registration's — schema shape, citext uniqueness at raw-SQL level, persistence, session, zero-membership, duplicate/concurrency and identity-token cases). Previously 71/71 (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |

@@ -4,6 +4,68 @@
 
 ---
 
+## 2026-09-11 — Registration completed on a real phone
+
+The increment below was proven in tests and by curl; this is what it took to
+make it work in a driver's hand. Owner-approved on the device.
+
+**The bug worth remembering.** On a physical phone the app resolved the API
+to `http://localhost:3000` — which on a phone is the phone. The request never
+left the device, and the UI reported it as *"No connection. Check your
+signal"*, which sends the reader to inspect the network instead of the
+address. Nothing was wrong with the network. The API host is now derived from
+the Metro dev server the bundle came from: the device downloaded the app from
+that host, so by construction it can reach it, and one rule then covers a
+physical phone and both simulators. A connection failure in development now
+names the URL it tried; in production that detail is null.
+
+A second blocker sat behind the first: the dev database was three migrations
+behind, so registration would have failed on a schema with no `firstName`
+column the moment the URL was fixed. `prisma migrate deploy` on a dev
+database after pulling a migration is now called out in the README.
+
+**Hero.** The photograph had been placed inside the form's padded container
+and the padding cancelled with `marginHorizontal: -24`. That full-bleed trick
+only holds if every ancestor is exactly screen-width; it wasn't, so a white
+strip showed down one edge. The hero is now a sibling of the form — no
+padding to cancel, nothing to get out of step.
+
+**Repeat password, and why it is client-only.** The registration DTO is four
+fields and `.strict()`. Posting a fifth returns `400 Unrecognized key:
+"confirmPassword"` — verified live against the running API. So the field
+exists in form state only, the request is assembled field by field rather
+than by spreading, and a test asserts the exact body.
+
+**Layout.** Visible field labels were removed (the placeholder carries the
+name, as the reference design does) — that alone bought ~120pt, which is the
+difference between fitting a screen and scrolling. At rest there is no
+scrolling in either direction; the hero shrinks, then is dropped below 720pt
+or when the keyboard is up; scrolling turns on only while the keyboard covers
+the screen, because unreachable fields are worse than a scroll. The password
+rule moved inside the password field, where it describes the box it belongs
+to instead of reading as a gap between two inputs — that made the form 13pt
+*shorter*, not taller.
+
+**Two process notes.** A wholesale `jest.mock("react-native")` in one new
+suite leaked across suites and made Jest exit 1 while reporting every suite
+passed; narrowed to `jest.replaceProperty`. And the gate was run from `api/`
+by mistake, where the narrower local `check` script skips mobile and the
+database entirely and still exits 0 — now warned about in CLAUDE.md, STATUS.md
+and the README.
+
+**Verification.** Root `npm run check` exit 0 — 159 api unit, 39 mobile, 85
+DB, 8 migrations. `mobile/tsconfig.json` had been reformatted by an earlier UI
+agent and had `.expo/types/**/*.ts` and `expo-env.d.ts` dropped from
+`include`; neither file exists and nothing needed the change, so it was
+restored to baseline rather than carried in.
+
+**Unchanged:** the API, the identity-token boundary, refresh-secret storage
+and tenant architecture — `git diff 0a9d7c2 -- api/` is empty. Login, refresh,
+logout and session restore remain unbuilt, and **F-21 is still unresolved** and
+must be decided before refresh-token rotation.
+
+---
+
 ## 2026-09-10 — Registration Increment 1: a driver account, and the second token kind
 
 The first thing a real person can use. `POST /auth/register` and
