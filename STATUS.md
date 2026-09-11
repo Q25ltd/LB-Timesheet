@@ -10,10 +10,13 @@ Legend: ✅ done · 🔶 partial · 🔲 not started
 
 ## Overall
 
-🔶 **A driver can now create an account on a phone and end up signed in —
-verified by hand on a physical device — and that is the only thing a user can
-do.** There is no login, so a driver who closes the app cannot get back in; no
-vehicle/check flow, no finish, no PDF, no email sending, no web app.
+🔶 **The complete driver AUTHENTICATION experience is built and green in the
+gate — register, log in, stay logged in across restarts, unlock with Face ID /
+Touch ID / Android biometrics, select a company, and log out with server-side
+revocation.** Registration was approved on a physical phone on 2026-09-11; the
+rest is proven by tests and **awaits owner device acceptance**. Beyond
+authentication a driver still cannot do anything: no vehicle/check flow, no
+start-shift UI, no finish, no PDF, no email sending, no web app.
 
 What IS real: migration-managed schema with membership-bound shifts, a
 one-open-shift invariant, a non-null company IANA timezone (D18) and offline
@@ -27,8 +30,13 @@ global error handling that cannot leak internals; fail-closed env validation
 (CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
 verbatim, covering both workspaces and ending in a clean-database
 migrate-deploy + integrity suite. Findings
-F-01…F-11, F-13, F-14 and **F-19** closed; F-15…F-18, F-20, F-21 open or
-deferred (F-12 reserved); see FINDINGS.md.
+F-01…F-11, F-13, F-14, **F-19** and **F-21** closed; F-15…F-18 and F-20 open or
+deferred, F-22 partial, F-23 open (F-12 reserved); see FINDINGS.md.
+
+**An INDEPENDENT full-authentication audit is the next step.** This phase was
+implemented and self-verified by the same agent, which is not an audit. A fresh
+security agent must review the complete authentication system before any
+further inside-app feature work.
 
 **Independently audited 2026-08-31** against `0591241`: **0 Critical, 0 High**,
 5 Medium, 4 Low, 4 Observation. No authentication bypass, no cross-company
@@ -36,15 +44,43 @@ escape and no same-company driver-to-driver escape was demonstrated. The audit
 did not invalidate P1.2a. What it did establish is what must come next — see
 "Blocked until" below.
 
-**Registration mints tokens; login does not exist.** `POST /auth/register`
-creates a User and a Session atomically and returns an identity token, so a
-driver can obtain a token — by registering, and only by registering. There is
-still **no login, no refresh rotation, no logout, no session restore after an
-app restart, and no company selection or switching**. A refresh secret IS
-issued and stored, but nothing can redeem it yet: there is no `/auth/refresh`.
-In practice a driver is signed in for 15 minutes after registering and cannot
-get back in afterwards. That is expected at this increment and is the reason
-Login is next.
+**The authentication lifecycle is complete (2026-09-11).** `POST /auth/register`,
+`POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` and
+`POST /auth/switch-company` all exist, with identity/tenant audience separation
+intact. A refresh secret is redeemable, rotation is atomic and conditional, the
+60-second recovery grace works, reuse outside it revokes the session, and the
+mobile app restores a session at startup behind an optional biometric gate.
+**F-21 is CLOSED** — the ambiguous cross-column lookup is now unrepresentable
+in the refresh repository's database interface, with no schema change. See the
+auth rows below for exactly what each piece does and does not prove.
+
+**NOT YET PHYSICALLY VERIFIED — a pre-release gate, not a blocker on
+development (owner decision, 2026-09-11).** Login's *layout* was approved on
+the phone. The following are proven by automated and architectural evidence
+only, and must be validated on real hardware before any release:
+
+- Face ID
+- Touch ID
+- Android biometric authentication
+- iOS password AutoFill
+- Android credential AutoFill
+- native cold-start biometric restoration
+- store / dev-build permission behaviour
+
+An attempt on 2026-09-11 (`npx expo run:ios --device`) could not run: both
+iPhones were offline to Xcode and **no iOS simulator runtime is installed**, so
+Expo's device picker was empty and crashed on `undefined.udid`. Earlier runs
+used **Expo Go**, which has no `NSFaceIDUsageDescription` and therefore cannot
+exercise Face ID at all. Nothing about the implementation was invalidated; it
+simply has not been observed on a device.
+
+The mobile workspace is **Expo managed / prebuild** (D25): `mobile/ios/` and
+`mobile/android/` are generated and gitignored, and `app.json` plus the config
+plugins are the authority. The generated `Info.plist` was confirmed to carry
+`NSFaceIDUsageDescription`; the generated entitlements file is **empty**, so
+there is no Associated Domains entitlement and iOS will offer credentials
+saved *in this app* but nothing shared from Safari — that needs a real domain
+and an `apple-app-site-association` file, and stays deferred.
 
 **Authorization now exists above authentication (P1.2b).** The AuthContext →
 TenantContext bridge is built: `authorizeTenant` turns an authenticated active
@@ -91,9 +127,8 @@ deployment* is blocked by at
 least the rate-limit/proxy architecture (F-15) and the production `tsx` runtime
 (F-17) — and registration and `/auth/register` being live locally does not
 change that: they are the product's first public mutating routes and sit
-behind the same flat 300/min/IP limit F-15 describes. **Refresh-token
-rotation is blocked by F-21**, which must be decided before it is
-implemented. **Development itself is not blocked** — Login may proceed.
+behind the same flat 300/min/IP limit F-15 describes. **Refresh-token rotation is no longer blocked** — F-21 was closed on
+2026-09-11 and rotation is built. **Development itself is not blocked.**
 
 Requires **Node 22.13+** (`.nvmrc`). Local Postgres on **port 5544**.
 
@@ -139,7 +174,7 @@ Jobs · JobDetail · Deliveries screens · `DeliveryTask` model · Holidays ·
 
 The Expo workspace exists (`mobile/`) — React Native + Expo SDK 57 +
 TypeScript strict, `expo-router`, `expo-secure-store`. It participates in the
-root `npm run check` (typecheck, lint, 39 tests), so it cannot rot unnoticed.
+root `npm run check` (typecheck, lint, 100 tests), so it cannot rot unnoticed.
 **No SQLite yet** (D25) — that arrives with offline/personal data.
 
 **Run the gate from the repository root.** The api-local `check` script is
@@ -153,10 +188,11 @@ the one way to believe the gate passed when it did not.
 | Mobile → API host resolution | ✅ — the API host is derived from the Metro dev server the bundle was loaded from (`Constants.expoConfig.hostUri`), so a physical phone and both simulators work with no per-machine configuration. `EXPO_PUBLIC_API_URL` overrides it and is required for any build Metro does not serve. **A connection failure in development names the URL it tried**; that detail is null in a production build, so no internal hostname reaches a driver. 6 tests. The previous per-platform default resolved to `localhost` on a phone — which is the phone — and reported as "check your signal" |
 | Signed-in state with ZERO companies | ✅ — after registering, the driver enters an authenticated shell that states the account is ready and that no company is linked. No join-company gate, no error, no fake membership. Proven by the screen suite and by a live end-to-end run that created 0 Company and 0 CompanyMembership rows |
 | Session material handling | ✅ — unchanged by the registration completion. Refresh secret in `expo-secure-store` under one key; identity token **in memory only**; nothing in AsyncStorage; the password is never persisted. The storage module exposes no generic setter, and one of its 4 tests asserts its export list |
-| Login screen | 🔲 — deliberately a visible "Sign in is not built yet" placeholder with no fields and no submit control, so the reference design's "Already have an account?" link has somewhere honest to go |
-| Session restore after app restart | 🔲 — the refresh secret is stored but there is no `/auth/refresh` to redeem it, so relaunching loses the session |
+| Login screen | ✅ — the real screen, Registration's visual sibling from the shared `authLayout` (same `Brand`, `Field`, `PrimaryButton`, theme, hero, scroll contract and short-screen threshold). Email + password + show/hide + Sign in + "Create account". The content block is VERTICALLY CENTRED in the white area above the hero (owner correction, physical phone) by one flex property applied to this screen only — Registration's top-aligned layout is untouched and a test pins that. No "Keep me signed in", no company field, no Forgot Password (recovery does not exist). A secondary biometric action appears only when the device is genuinely eligible. 30 tests. **Layout approved on the phone; the biometric action has not been seen on hardware** |
+| Platform credential AutoFill | ✅ (code) / 🔲 (device-verified) — both forms declare the credential pair the OS password manager reads: the account field is `textContentType="username"` + `autoComplete="email"` and the password fields are `password`/`current-password` on Login and `newPassword`/`new-password` on Registration, all with `importantForAutofill="yes"`. **Registration previously used `textContentType="emailAddress"`**, a CONTACT hint, so iOS never had a username to pair with the password it was asked to save and Login had nothing to suggest — that was the defect the owner reported. 8 tests assert the rendered hints and their pairing. The app itself persists **no** password: `secureStore.ts` exports six named functions, none of them a credential the user typed, and no generic setter. **AutoFill actually appearing is an OS behaviour and is NOT proven by these tests** — see the pre-release list above |
+| Session restore after app restart | ✅ — at startup the app reads the SecureStore secret, applies the biometric gate when opted in, redeems it through `/auth/refresh`, **replaces the rotated secret**, reads `/auth/me`, and only then becomes authenticated. `AuthProvider` has an explicit `restoring` status and `app/index.tsx` HOLDS on it, so there is no sign-in flash. A refused credential is deleted; an OFFLINE failure KEEPS it, because a tunnel is not a logout. Company authority is never restored — a tenant token is never stored |
 | Start shift (date, time, driver, truck, trailer) | 🔲 — **mobile UI**. The backend it will call exists (see Backend, "Start Shift backend foundation"); no screen, no offline queue, no time picker and no ±15-minute confirmation (D20) is built |
-| Company selection (only when driver holds >1 membership) | 🔲 |
+| Company selection (only when driver holds >1 membership) | 🔶 — the SERVER endpoint and the client call exist and are proven; there is no picker SCREEN yet, and nothing can create a second membership to pick from |
 | Truck check | 🔲 |
 | Trailer check | 🔲 |
 | Defect reporting (written description, no photo) | 🔲 |
@@ -188,7 +224,7 @@ the one way to believe the gate passed when it did not.
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19). **`User` now carries `firstName` + `lastName` (both NOT NULL) and `email` is `citext`** with one unique index (D22) — `User.name` is gone, not retained alongside. Validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 159 api unit tests, **mobile typecheck + 39 mobile tests**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 177 api unit tests, **mobile typecheck + 100 mobile tests**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
 | Database tenant-integrity proof | ✅ 85/85 against a clean database built by `migrate deploy` (71 → 85 at Registration Increment 1, the fourteen added being registration's — schema shape, citext uniqueness at raw-SQL level, persistence, session, zero-membership, duplicate/concurrency and identity-token cases). Previously 71/71 (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
@@ -206,7 +242,11 @@ the one way to believe the gate passed when it did not.
 | **Registration + identity authentication (Increment 1)** | ✅ — `POST /auth/register` (public) and `GET /auth/me` (identity posture). Registration accepts EXACTLY `firstName`, `lastName`, `email`, `password`; the DTO is `.strict()`, so `companyId`, `membershipId`, `userId`, `id`, `role`, `passwordHash` or any unknown key is **refused**, not ignored. Email is stored trim+lowercase and the DATABASE (citext) refuses a case variant. Password: min 10 characters, max **72 UTF-8 bytes** (measured in bytes, because bcrypt truncates there and 72 bytes is as few as 18 accented characters), no composition rules, bcryptjs cost 12 (measured ~230 ms hash / ~231 ms verify on Node 22.13). A success creates a `User` and ONE `Session` **atomically** — 90-day absolute expiry, `revokedAt`/previous-token columns null, `refreshTokenHash` = SHA-256 of the returned secret — and returns `{ user, identityToken, refreshToken, memberships: [] }`. **Zero memberships is a success**, and no Company, CompanyMembership or Shift is created. A duplicate email (any casing, including concurrently) is `409 EMAIL_IN_USE` disclosing nothing else — a knowingly accepted enumeration trade-off (D24). Proven by 20 route-contract tests, 14 database tests and a live end-to-end run against a real server |
 | Identity token + the two-token separation (D21) | ✅ — `{ sub, sessionId, iat, exp, iss, aud: "timesheets-identity" }`, HS256, **TTL 15 minutes**, no `companyId`, `membershipId` or `role` and no optional slot for one. `requireSession` verifies signature/algorithm/issuer/**identity audience**/required claims, the timing rules, then the Session (present, unrevoked, unexpired, `userId === sub`) and **stops** — no membership read, no `AuthContext`, no `TenantContext`, and no function converts an `IdentityContext` into one. The separation is symmetric and enforced by the verifier, not by a claim someone must remember to read: an identity token at a tenant route is `401` (proven with a tenant-token positive control, and again with forged `companyId`/`membershipId`/`role` bolted on), and a tenant token at an identity route is `401`. **No token reaches tenant data without naming and validating a real membership.** The tenant token is unchanged and its `companyId`/`membershipId` remain mandatory |
 | Three route postures (D21) | ✅ — `config: { authPosture: "public" \| "identity" \| "tenant" }`, one branch in the existing root `onRequest` hook. **Tenant is the default** and only an EXACT `"public"`/`"identity"` relaxes anything: a test injects `"Public"`, `"PUBLIC"`, `"publik"`, `"identity "`, `"none"`, `""` and `"true"` through a cast — because the compiler would catch these at a real call site, so the runtime must not depend on it — and every one is `401`. F-10's polarity extended, not replaced; `route-declares-auth` and its fixtures now understand the third posture, and remain a guardrail, not the boundary (D16) |
-| Auth routes — login, company select, company switch, refresh, logout | 🔲 — **none of these exist.** A driver can obtain a token only by registering. The refresh secret registration returns is stored on the device but **cannot be redeemed**: there is no `/auth/refresh`, and **F-21** must be decided before rotation is implemented |
+| **Login** | ✅ — `POST /auth/login` (public), strict two-field DTO (`companyId`/`membershipId`/`role`/`userId`/`sessionId`/`id`/`passwordHash`/`identityToken`/`refreshToken`/`memberships` all REFUSED, not ignored). Email canonicalised as registration does; password **not** trimmed and **not** subject to D23's 10-character minimum (a policy governs NEW credentials — an account created under an older policy must still get in), but capped at 72 UTF-8 bytes because bcrypt reads no further. Unknown email verifies against a FIXED cost-12 dummy hash so it costs the same ~230 ms a wrong password costs; a malformed/unsupported stored hash fails closed to the same 401 rather than escaping as a 500. Every failure is the canonical `401 UNAUTHENTICATED`, byte-identical. A NEW Session per login; no other session touched. 31 route/DB tests |
+| **Refresh rotation + the 60-second grace (F-21 CLOSED)** | ✅ — `POST /auth/refresh` (public posture; the CREDENTIAL authenticates it). Two unique lookups with CURRENT precedence, never an `OR` across both digest columns — `RefreshDatabase` declares only `findUnique`/`updateMany`, so the ambiguous query does not typecheck. Rotation and recovery are conditional `updateMany` writes whose `where` restates the expected state; the affected-row count is the proof. `Session.expiresAt` is never in `data`. Recovery from a previous credential leaves the previous digest and its deadline UNTOUCHED, so retries work and the window cannot be stretched. Reuse outside grace revokes the session. **Reuse detection is one generation deep** — the schema holds a single previous digest, so an older credential is answered as unknown, not as reuse, and that is stated rather than papered over. 20 DB tests including a crafted cross-column collision and three concurrency races. **No schema change: still 8 migrations** |
+| **Logout + revocation** | ✅ — `POST /auth/logout` (identity posture, no body — a logout that could name its own session could log out another device). Conditioned on `revokedAt IS NULL`, so the first revocation timestamp is kept. Proven to kill all THREE credentials at once (identity, tenant, refresh) through their three separate pipelines, and to kill nothing belonging to another session. On the device the local clear happens even with no network, and the client never claims the server revocation succeeded when it did not. 7 DB tests |
+| **0 / 1 / 2+ membership authentication + company switch** | ✅ — zero active memberships → identity only, `memberships: []`, no tenant token. Exactly one ACTIVE membership → auto-selected, tenant token minted from the ROW (D12/D13). Two or more → the list and NO tenant token until `POST /auth/switch-company` (identity posture) revalidates the requested `membershipId` against the authenticated user AND `active: true` in one query, then mints from the row it loaded. Same Session; no new session; the refresh lineage is untouched. Another user's membership, an inactive one and a nonexistent one are refused **byte-identically** (`403 FORBIDDEN`). A switch away from an open shift under a DIFFERENT membership is the opaque `409 SHIFT_ALREADY_OPEN`; selecting the open shift's own company is allowed. Memberships are seeded directly in tests — **no onboarding exists**, so no real driver can reach the 1/2+ branches yet (F-18 still blocks that). 15 DB tests |
+| Cross-company open-shift guard | ✅ — the ONE sanctioned cross-tenant read (`hasOpenShiftOutsideMembership`). Identity comes from the authenticated session, never a request; the delegate is `count`, so no shift row can leave; the result is collapsed to a boolean, so not even the count escapes. A test pins that the refused 409 discloses no shift id, driver name, company id, company name or membership id, and that a stranger cannot aim it at another driver |
 | **P1.2b — Authorized Tenant Context** | ✅ — F-14 closed in `2c85f4f`. `authorizeTenant(auth: AuthContext): TenantContext` (`api/src/lib/authorization.ts`) is the one production place authenticated identity becomes tenant authority, and the only production caller of `TenantContext.trust()`. It takes the trusted `AuthContext` and **nothing else** — no `companyId`, `membershipId`, `userId`, `role`, request, body, query or options parameter — so client-supplied identity has no channel to arrive through; and it performs **no database read**, because `requireAuth` already validated the identity against persistence. Active membership → a `TenantContext` carrying `companyId`, `userId` **and** `membershipId` (all three; `membershipId` is what `shiftRepository` scopes `findById`/`update`/`delete` on, per D15). Anything not exactly `"active"` → generic `403 FORBIDDEN` (D17); the comparison is `!== "active"`, so a future third membership state would fail closed. Proven by 5 tests in `api/src/lib/authorization.test.ts`, written RED and reviewed before implementation; `npm run check` exit 0 at `2c85f4f` (110/110 unit, 45/45 DB, 4 migrations). The static rules were **not** changed: `tenant-context-trust-sites` already permitted `lib/auth*`, so the bridge needed no rule change. That exemption is an unanchored path substring and its coverage is narrower than earlier wording here claimed — see **F-23**. Independently audited 2026-08-31 against `60effc9`: the P1.2b invariant held under every attack constructed against it (no inactive bypass, no role bypass, no alternate construction path, no client channel through body, query, path params or headers); the audit opened **F-22**, **F-23** and **F-24**, none of which invalidates this row (**F-24** has since been closed in `597bd111`). |
 | Inactive-membership authorization — **ordinary/default rule** | ✅ — the default-deny half of AUTH.md's "Deactivated membership" section is implemented: an inactive membership still authenticates and is reported as `inactive` (P1.2a, unchanged), and is then refused ordinary tenant authority with `403 { "error": "Not allowed", "code": "FORBIDDEN" }`. Generic on purpose — the response never discloses that a deactivated membership caused the denial (D17). Role is not a bypass: an inactive **admin** is denied identically. |
 | Inactive-membership authorization — **the narrow exception** | 🔲 — AUTH.md permits a deactivated membership to read, update and submit an **already-open** shift, and nothing else. **None of that exists.** There is no finalise capability, no discard capability, no `allowInactive`, no bypass flag, no capability token, no permission enum and no policy engine. Its concrete API is an open design question, not a settled one; the only frozen fact is that any such operation must be explicit and narrow. It will be designed with the business feature that needs it. |
@@ -214,8 +254,8 @@ the one way to believe the gate passed when it did not.
 | First protected business route — remaining schema facts | 🔲 — two facts the row above deliberately did not build: (1) `shiftDate` immutability is still design intent — no database constraint prevents an update, and nothing updates it today because Start Shift creates no update path; (2) no Night Out field exists on `Shift`. Also unchanged: no company can choose its timezone (settings/onboarding unbuilt), so every company sits on the `Europe/London` default |
 | Company timezone authority (D18) | ✅ — implemented in `4888d63`. `Company.timezone` is `String @default("Europe/London")`, NOT NULL in PostgreSQL (`TEXT NOT NULL DEFAULT 'Europe/London'`, migration 5), so every Company row carries the authority D18 derives `Shift.shiftDate` from. An IANA **identifier**, never a numeric offset. `Europe/London` is the **V1 default, not a statement that the product is UK-only** — `Europe/Vilnius`, `America/New_York`, `Asia/Dubai` and `Australia/Sydney` round-trip verbatim; 5 tests in `src/tests/db/companyTimezone.test.ts`, written RED against the missing column, also prove NOT NULL (SQLSTATE 23502), that the stored column default is itself a real IANA identifier, and that no competing timezone column exists on any other model. The conversion foundation is `api/src/lib/timezone.ts` — `isIanaTimeZone` (the runtime's own ICU tz database is the authority, plus explicit rejection of the offset forms `Intl` would otherwise accept) and `localCalendarDate(instant, timeZone)` (pure; returns midnight UTC, the `@db.Date` storage form). 11 tests in `src/lib/timezone.test.ts` cover the required boundary — a `2026-07-02 00:30 Europe/London` start files under **2026-07-02**, not the UTC date `2026-07-01` — plus one instant filing under different dates in four zones (including a negative offset and a 45-minute one), a summer/winter pair no fixed offset survives, both DST transitions, and a 22:00 → 06:00 night shift filed under its **start** date. The schema's `shiftDate` comment now states D18 rather than "(O8, provisional)". **What this is not:** nothing WRITES this column in production — there is no company settings/onboarding path to choose a timezone, so every company sits on the `Europe/London` default and worldwide *usability* does not follow from the data model supporting it. It is now READ in production: Start Shift derives every `shiftDate` from it through `localCalendarDate`, which is the helper's first production caller. `npm run check` exit 0 at `4888d63` (125/125 unit, 50/50 DB, 5 migrations); GitHub Actions run `33436174195` `completed/success` for that exact SHA. |
 | Session persistence foundation | ✅ P1.1 — a global `Session` owned by `User`, carrying NO company authority (no `companyId`, no `membershipId`); absolute `expiresAt` (90-day device lifetime, not extended by rotation); explicit `revokedAt`; current and optional previous refresh-token hash; previous-token grace deadline. Enforced by the database: unique current hash, unique non-null previous hash, CHECK `Session_previous_token_paired` (previous hash and grace deadline both NULL or both set), CHECK `Session_previous_token_distinct` (previous ≠ current), and `onDelete: Cascade` from User. Proven by 10 tests in `src/tests/db/sessionPersistence.test.ts`, written RED before the schema existed. Since P1.2a the pipeline reads existence, `revokedAt`, `expiresAt` and `userId` on every protected request; the refresh-token columns and the grace deadline remain unread — no rotation logic exists. |
-| Refresh-token rotation + grace-window behaviour | 🔲 — the columns exist and registration now WRITES `refreshTokenHash`; the rotation logic does not exist and nothing can redeem the secret. **F-21** (cross-column refresh-hash ambiguity) must be decided before this is implemented |
-| Multi-company driver memberships | 🔲 |
+| Refresh-token rotation + grace-window behaviour | ✅ — see the refresh row above. F-21 closed 2026-09-11 |
+| Multi-company driver memberships | 🔶 — AUTHENTICATION for 0/1/2+ memberships is built and proven (see above). What is missing is the way to CREATE a membership: no onboarding, no invitation, no join-code flow (F-18), and no company UI. So the 1/2+ branches are reachable only by seeding rows |
 | Shift submission pipeline | 🔲 — F-16 (atomicity / worker claim / exactly-once delivery) must be resolved as part of this boundary |
 | PDF generation | 🔲 |
 | Email delivery + retry outbox | 🔲 |

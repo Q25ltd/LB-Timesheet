@@ -555,6 +555,27 @@ because it will otherwise be forgotten at exactly the wrong moment:
 **React Native + Expo + TypeScript (strict).** Not a preference to revisit per
 feature; changing it is an architectural decision.
 
+**MANAGED / prebuild, confirmed 2026-09-11.** `mobile/ios/` and
+`mobile/android/` are **generated build artifacts and are never committed** —
+they are gitignored. The authoritative native configuration is `app.json`, the
+Expo-compatible dependency set, and the Expo config plugins; `npx expo
+prebuild` recreates the native projects from those on demand. Committing them
+would create a second authority that silently drifts from the plugin config,
+which is exactly how a plugin change stops taking effect. Migrating to a bare
+workflow is an architectural decision and would amend this decision.
+
+*Consequence worth knowing:* `expo run:ios` / `run:android` prebuild before
+they build, so they will recreate those directories and may normalise
+`package.json` scripts. That is expected and not a repository change to
+resist.
+
+**`mobile/tsconfig.json` is synchronised by Expo CLI**, which runs on
+`expo start` / `expo run:*` and normalises the `include` array. It drops
+`.expo/types/**/*.ts` and `expo-env.d.ts` because neither exists unless
+`experiments.typedRoutes` is enabled. Expo's form is canonical; do not restore
+those entries, and do not open a finding when the synchronisation recurs.
+Investigated and accepted 2026-09-11 after it happened three times.
+
 - **Expo SecureStore** holds the long-lived refresh secret.
 - The short-lived identity / tenant access token lives **in memory only**.
 - **No** authentication secret in AsyncStorage; **no** plaintext token
@@ -562,13 +583,72 @@ feature; changing it is an architectural decision.
 - **No SQLite yet.** It arrives with local Personal Timesheets / offline
   operational data and not before — speculative persistence infrastructure is
   forbidden (AGENT_WORKFLOW §25).
-- Biometric local unlocking remains future work with its own security
-  contract. No biometric control ships before it exists.
+- ~~Biometric local unlocking remains future work with its own security
+  contract. No biometric control ships before it exists.~~ **SUPERSEDED by
+  D26 (2026-09-11)** — the contract now exists and biometric unlock ships.
+  Every other bullet in this decision is unchanged.
 
 The mobile workspace **participates in the authoritative gate**. A mobile
 project CI ignores is a second-class project that rots.
 
 ---
+
+### D26 — Biometric unlock is LOCAL authentication; the server still decides (2026-09-11)
+
+**Supersedes exactly one clause of D25** — "no biometric control ships before
+the security contract exists". This is that contract. Everything else in D25
+stands: Expo SecureStore for the refresh secret, access tokens in memory, no
+auth secret in AsyncStorage, no SQLite.
+
+**The boundary, and it is the whole decision:**
+
+> A biometric success grants PERMISSION TO USE the refresh credential this
+> device already holds. It is not authentication.
+
+```
+Face ID / Touch ID / Android biometric success
+  → the app may read the SecureStore refresh secret
+  → POST /auth/refresh
+  → the SERVER validates the Session and issues fresh material
+  → only THEN is the app authenticated
+```
+
+A biometric success must NEVER set an authenticated flag, mint or fabricate an
+identity or tenant token, create company authority, bypass Session validation,
+or reach the app without a server round trip. `mobile/src/auth/biometrics.ts`
+returns a `boolean` and holds no tokens, no session and no API client — it
+cannot authenticate anyone because it has nothing to authenticate with.
+
+**No biometric data leaves the device.** No backend endpoint, no database
+column, no template, no score. The OS answers yes or no, locally.
+
+**Biometrics are OPTIONAL and revocable.** Declining costs the driver nothing,
+and email/password sign-in is always available. Cancel, failure, lockout, a
+removed enrolment and missing hardware are ONE outcome: no authenticated
+state, the credential kept, the password form shown. A changed fingerprint
+must never revoke a valid server Session.
+
+**The storage trade-off, stated because an auditor must not have to find it.**
+The refresh secret is stored WITHOUT SecureStore's `requireAuthentication`, so
+this is an **application-level gate in front of a keychain-protected
+credential — NOT a hardware biometric-bound encryption key.** On a
+jailbroken/rooted device whose keychain is readable, the secret can be read
+without a biometric, and that is not claimed otherwise.
+
+`requireAuthentication: true` was considered and rejected on measured grounds
+from `expo-secure-store@57.0.3`'s own documentation: keys are invalidated when
+biometrics change ("impossible to read its value"), so adding a fingerprint
+would destroy a valid session; Android requires authentication on *all*
+operations, so biometrics could not stay optional; it is unsupported in Expo
+Go; and it cannot share the keychain service used by non-authenticated
+operations.
+
+**The opt-in flag** (`logisticbay.biometricUnlock`) is a non-secret
+preference. Forging it grants nothing — the OS prompt, the SecureStore read
+and the server's validation all remain.
+
+**Package:** `expo-local-authentication@~57.0.3`, matched to Expo SDK 57. No
+Expo or React Native upgrade.
 
 ## ❓ Open — ask the user, do not guess
 

@@ -1,18 +1,17 @@
 # Authentication & Tenant Context — Frozen Contract
 
-> **Status: FROZEN 2026-08-25. Amended 2026-09-10 by D21–D24.** Agreed before
-> implementation, deliberately, so that every protected route inherits a
-> correct design instead of a fixable one.
+> Agreed before implementation, deliberately, so that every protected route
+> inherits a correct design instead of a fixable one.
 >
 > Changing anything in this file is an architectural decision, not a refactor.
 > Stop and ask.
 >
+> **Status: FROZEN 2026-08-25. Amended 2026-09-10 by D21–D24, and 2026-09-11
+> by D26 plus the refresh/logout/switch specifics marked below.**
+>
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
-> only file allowed to say which parts exist — and much of this contract still
-> does not: login, company selection and switching, refresh rotation and
-> logout are all unbuilt. What the 2026-09-10 amendment describes is
-> implemented as of Registration Increment 1: identity tokens, the three route
-> postures, and registration.
+> only file allowed to say which parts exist. Do not read a section here as
+> evidence that it ships.
 
 ---
 
@@ -170,9 +169,47 @@ the Session row, never in plaintext.
   logged out. Strict rotation without grace is a real failure mode on a lorry.
 - Reuse of a token older than the grace window revokes the session.
 
+**The rotation semantics, frozen 2026-09-11 when refresh was implemented:**
+
+| Presented | Effect |
+|---|---|
+| CURRENT credential | atomic conditional rotation. New secret → current; presented digest → previous; grace deadline → now + 60s. `expiresAt` **unchanged** |
+| PREVIOUS, inside grace | atomic RECOVERY rotation. A fresh current secret only — the previous digest and its deadline are left UNTOUCHED, so a further lost response can be retried with the same secret and repeated retries **cannot extend the window** |
+| PREVIOUS, outside grace | REUSE → the Session is revoked → `401` |
+| anything else | `401`, byte-identical to the above |
+
+**Every write is a conditional `updateMany` whose `where` restates the state
+the caller believed it was acting on**, and whose affected-row count is the
+proof it won. Two simultaneous refreshes of one credential cannot both rotate:
+exactly one matches, and the loser is refused — it can still recover, because
+the credential it holds is now the previous one.
+
+**Rotation NEVER moves `Session.expiresAt`.** The 90-day lifetime is the
+Session's; rotating credentials inside it is not a reason to extend it.
+
+**Reuse detection is ONE GENERATION deep, by construction.** The schema holds a
+single previous digest, so a credential two or more rotations old matches
+nothing and is answered as an unknown credential — it does NOT revoke the
+session, because the server has no record it ever existed. This boundary is not
+a general replay detector and must not be described as one.
+
+**Lookup discipline (F-21, closed 2026-09-11).** A presented digest is resolved
+by TWO unique lookups in a fixed order — current first, previous only if
+current missed — never one filter across both columns. The refresh repository's
+database interface declares only `findUnique` and `updateMany`, so the
+ambiguous `OR` query does not typecheck.
+
 The refresh token lives in the device's secure storage. **The driver's daily
-"login" is a local PIN or biometric unlock, not a server round trip.** Do not
-build an email-and-password screen for every morning.
+"login" is a biometric unlock, not an email-and-password screen.** Do not
+build a credentials form for every morning.
+
+**Reconciled 2026-09-11 (D26).** Earlier wording here said "not a server round
+trip", and that must NOT be read as permission to trust a local unlock. A
+biometric success grants permission to USE the stored refresh credential; the
+Session is then validated by `POST /auth/refresh`, and only the server's answer
+authenticates anyone. What the daily unlock avoids is retyping a password — not
+the round trip. A local PIN was considered and is NOT built; nothing requires
+one.
 
 ---
 
@@ -221,6 +258,35 @@ toward one: it can never reach tenant data, at any point, by any route. The
 tenant boundary is unchanged — *no token reaches tenant data without naming
 and validating a real membership*.
 
+## Logout (2026-09-11)
+
+```
+POST /auth/logout   identity posture, no body
+  ↓
+Session.revokedAt = now   ← conditioned on revokedAt IS NULL, so the FIRST
+                            revocation timestamp is the one kept
+  ↓
+204
+```
+
+The session revoked is the one the token names — there is no body, because a
+logout that could name its own session could log out somebody else's device.
+Revoking an already-revoked session is a success: the caller's goal is already
+true.
+
+**Revocation is per SESSION, never per user.** Logging out one phone leaves
+another phone's session, tokens and refresh credential fully working. The same
+is true of reuse-triggered revocation.
+
+**All three credentials die together**, because `requireAuth`, `requireSession`
+and the refresh boundary all read the Session row on every request: the identity
+token, the tenant token and the refresh secret stop working at once.
+
+**On the device, logout always completes locally.** The server is asked first,
+while the token is still valid, but the local clear happens either way — a
+driver in a yard with no signal must be signed out of the phone immediately. The
+client never claims the server revocation succeeded when it did not.
+
 ## Route postures (D21)
 
 Three, and the default is the most restrictive one.
@@ -256,9 +322,25 @@ Never mint a company-scoped token because the client supplied a plausible
 `companyId`. The authority is the membership row, checked against the
 authenticated user.
 
-**A switch is refused while the driver has an open (draft) shift.** One open shift
-at a time; "which company is this shift for" must never be ambiguous. He finishes
-or discards first.
+**A switch is refused while the driver has an open shift under a DIFFERENT
+membership.** One open shift at a time; "which company is this shift for" must
+never be ambiguous. He finishes or discards first.
+
+*Scope, made exact when this was implemented (2026-09-11).* The refusal is for
+an open shift **outside** the membership being selected. Selecting the company
+the open shift already belongs to is not ambiguous and is allowed — refusing it
+would lock a driver out of their own open shift. The conflict reuses Start
+Shift's `409 SHIFT_ALREADY_OPEN` verbatim and is **opaque**: it never says which
+company the open shift belongs to, so company B cannot learn the driver is on
+shift for company A. The existence query returns a boolean and nothing else —
+it is the one sanctioned cross-tenant read, and it must never grow a sibling
+that returns rows.
+
+*This endpoint serves BOTH first selection and later switching* — one concept,
+one name. Login auto-selects a single active membership without calling it, and
+**login does not apply the open-shift guard**: a login is not a switch, there is
+no prior tenant authority to move away from, and the database enforces one open
+shift per user regardless (D15).
 
 ---
 

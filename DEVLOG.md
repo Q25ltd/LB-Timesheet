@@ -4,6 +4,153 @@
 
 ---
 
+## 2026-09-11 — The complete driver authentication system
+
+Refresh rotation, session restoration, biometric unlock, logout with
+server-side revocation, and the 0/1/2+ membership contract — in one phase,
+because leaving authentication half-built is how a half-built boundary ships.
+**Nothing is committed; the owner tests on a device first, and then a fresh
+security agent audits it.**
+
+**F-21 is closed, and the fix is a TYPE rather than a rule.** The finding was
+that a digest could match one Session's current hash and another's previous,
+making an `OR` lookup return an undefined choice of row. Rather than add a
+table or a constraint, the refresh repository's database interface declares
+`session.findUnique` and `session.updateMany` and nothing else — no
+`findFirst`, no `findMany`, no `$queryRaw` — so the ambiguous query does not
+typecheck. Precedence (current first) lives inside `resolve()`, so no caller
+is handed a "search both" primitive. Schema untouched: still 8 migrations.
+Proven by a crafted two-row collision, and by reversing the precedence, which
+failed exactly the three F-21 cases.
+
+**The adversarial test found a real defect before GREEN.** Rotation writes the
+presented digest into the unique `previousRefreshTokenHash` column, so the
+crafted collision raised P2002 and escaped as a **500** — a different answer
+from every other refresh failure, and therefore an oracle for "something is
+structurally odd about your session". It now fails closed to the canonical
+401. Unreachable in production (it needs a 256-bit collision), which is
+exactly why only a test that builds the state would ever have found it.
+
+**Rotation is conditional, not read-then-write.** Every write is an
+`updateMany` whose `where` restates the state the caller believed it was
+acting on; the affected-row count is the proof it won. Two simultaneous
+refreshes of one credential therefore cannot both rotate — which matters
+because the alternative silently logs the winner out when the loser overwrites
+its brand-new credential. The loser recovers through the grace window.
+
+**The grace window is a lost RESPONSE, not a lost request.** Recovery from a
+previous credential writes a fresh current digest and leaves the previous
+digest and its deadline untouched, so a further lost response can be retried
+with the same secret and repeated retries cannot stretch the window. Reuse
+after the deadline revokes the session. **Detection is one generation deep** —
+the schema holds a single previous digest — and that limit is written down
+rather than glossed.
+
+**Biometrics unlock a credential; they do not authenticate.** D26 records the
+contract: Face ID success permits reading the SecureStore secret, then
+`/auth/refresh` validates the Session, and only the server's answer sets
+`authenticated`. `biometrics.ts` returns a boolean and holds no tokens, so it
+cannot authenticate anyone. Two mutations prove it: making the gate set
+`authenticated` directly, and making it skip `/auth/refresh`, each failed five
+tests.
+
+**The SecureStore trade-off is deliberate and written down.** The refresh
+secret is stored WITHOUT `requireAuthentication`, so this is an
+application-level gate in front of a keychain-protected credential — NOT a
+biometric-bound key. Rejected on measured grounds from the installed
+`expo-secure-store@57.0.3` docs: keys are invalidated when biometrics change
+("impossible to read its value"), so adding a fingerprint would destroy a
+valid session; Android would require auth on every write; and it is
+unsupported in Expo Go. The auditor is told this plainly rather than having to
+find it.
+
+**`restoring` is a routing state, not a spinner.** The entry route holds while
+the credential is redeemed. With a boolean `isAuthenticated` that moment reads
+as "signed out", so the driver is sent to Sign-in and bounced to Today — a
+flash that also teaches them their session did not survive.
+
+**An offline restore KEEPS the credential.** Deleting it would log a driver out
+of a live session for being in a tunnel. A server REFUSAL deletes it, because
+it will never work again.
+
+**Two naming corrections against repository authority.** The prompt asked for
+`POST /auth/select-company`; AUTH.md had already frozen `switch-company` for
+the same concept, so the route, service and client were renamed — one concept,
+one name, and the frozen document wins. And AUTH.md's "not a server round
+trip" wording was reconciled so it can no longer be read as permission to
+trust a local unlock.
+
+**A process error worth recording.** During the mutation probes I reverted
+`identityRepository.ts` with `git checkout --`, on a file carrying uncommitted
+work, and destroyed three methods. Every other probe used a `/tmp` backup.
+Reconstructed from the session's own patches and verified by the full gate
+returning the identical counts. **Never `git checkout` a dirty file; copy it.**
+
+**Also fixed along the way:** `mobile/tsconfig.json` had again been rewritten
+by Expo tooling with `.expo/types/**/*.ts` and `expo-env.d.ts` dropped from
+`include` — the same regression DEVLOG 2026-09-11 records. Restored under owner
+authorization. This is now twice; if it recurs it deserves a finding rather
+than another restore.
+
+**Then the device test, and two more defects.**
+
+**iOS AutoFill never worked because Registration described its email box
+wrongly.** It used `textContentType="emailAddress"` — a CONTACT hint. iOS
+builds a credential from a `username` field next to a `newPassword` field, so
+a password saved from that form had no username paired with it and Login had
+nothing to suggest. Both forms now declare the pair properly, with
+`importantForAutofill="yes"` for Android. No pixel changed: these are input
+hints. 8 tests assert the rendered hints, and they deliberately do NOT claim
+AutoFill works — that is an OS behaviour needing a device.
+
+**A cold-start biometric hazard that only a real phone shows.** Restoration
+starts in a mount effect, which on iOS can fire while the OS still reports the
+app `inactive`. Presenting `LAContext` then is refused and returns
+`system_cancel`, which the module correctly reads as "no" — so the driver sees
+the sign-in form and **no Face ID prompt at all**, with nothing saying why. The
+prompt now waits for `active`, bounded at 3s, then falls back to the password
+form. Deliberately a DENY list (`inactive`, `background`) rather than an allow
+list: waiting unnecessarily costs a spinner, not waiting costs the bug.
+Inferred from platform behaviour, not observed — stated as such.
+
+**The device build never ran.** `expo run:ios --device` crashed on
+`undefined.udid`: both iPhones were offline to Xcode and there are **no iOS
+simulator runtimes installed**, so the picker was empty. Expo's CLI should say
+so instead of crashing. Earlier runs were **Expo Go**, which has no
+`NSFaceIDUsageDescription` — so nothing biometric had ever actually executed.
+Physical validation is now a recorded PRE-RELEASE gate (D25, STATUS.md).
+
+**The tsconfig question is answered, and my earlier framing was wrong.** The
+log printed it live: `TypeScript: The tsconfig.json#include property has been
+updated`. It is **Expo CLI's own synchronisation**, and the two entries it
+drops — `.expo/types/**/*.ts`, `expo-env.d.ts` — name files that do not exist
+and are only generated with `experiments.typedRoutes`. Expo is right; the
+baseline carried two dead entries. Accepted rather than restored a third time,
+and recorded in D25 so nobody opens a finding for it.
+
+**`expo run:ios` prebuilt, which created `mobile/ios/`.** Gitignored along with
+`android/`: they are generated artifacts and `app.json` plus the config plugins
+are the authority (D25, confirmed). Verified the plugin worked — the generated
+`Info.plist` carries `NSFaceIDUsageDescription`. The entitlements file is
+empty, so there is no Associated Domains entitlement and Safari-shared
+credentials cannot be offered; that needs a domain and stays deferred.
+
+**Verification.** Root `npm run check` exit 0 — **177 api unit, 111 mobile
+(8 suites), 146 DB, 8 migrations**. 15 mutation probes, every one load-bearing,
+all reverted byte-identically (SHA-256 verified). `git diff --check` clean.
+
+**Unchanged:** the tenant boundary, `requireAuth`, `authorizeTenant`,
+`TenantContext`, Start Shift, and Registration's owner-approved appearance —
+its 39 tests and all four layout cases stay green, and the shared `authStyles`
+still has no `justifyContent`, which a test pins.
+
+**Still blocked:** public deployment, by F-15 (auth before rate limiting, no
+reviewed `trustProxy`) and F-17 (`tsx` in production). Authentication being
+complete makes F-15 *worse*, not better: login and refresh are now public
+credential endpoints behind one flat 300/min/IP bucket.
+
+---
+
 ## 2026-09-11 — Registration completed on a real phone
 
 The increment below was proven in tests and by curl; this is what it took to
