@@ -32,11 +32,11 @@ export const spacing = {
 export const radius = { field: 12, button: 12, card: 16 } as const;
 
 /**
- * 56pt fields and buttons. Well above the 44pt minimum touch target, because
+ * 52pt fields and buttons. Well above the 44pt minimum touch target, because
  * the reference design's generous sizing is the point of the design — this is
  * a form filled with cold hands before dawn.
  */
-export const sizing = { control: 56, minTouch: 44 } as const;
+export const sizing = { control: 52, minTouch: 44 } as const;
 
 export const typography = {
   title:      { fontSize: 28, fontWeight: "700" as const, color: colors.brandDark },

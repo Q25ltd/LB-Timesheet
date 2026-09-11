@@ -9,7 +9,7 @@
  *   api       the server answered with the project's error envelope
  *   network   the request never got an answer (no signal, server down, timeout)
  */
-import { apiBaseUrl } from "./config";
+import { apiBaseUrl, describeApiResolution } from "./config";
 
 /** The project's one error envelope (CLAUDE.md). */
 interface ApiErrorBody {
@@ -21,7 +21,10 @@ interface ApiErrorBody {
 export type ApiResult<T> =
   | { kind: "ok"; value: T }
   | { kind: "api"; status: number; body: ApiErrorBody }
-  | { kind: "network"; message: string };
+  // `detail` is DEVELOPMENT-ONLY and is null in a production build. A
+  // connection failure while developing is nearly always a wrong address,
+  // and "check your signal" points the reader at the wrong thing entirely.
+  | { kind: "network"; message: string; detail: string | null };
 
 /** How long to wait before calling it a network failure. */
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -51,13 +54,24 @@ function asErrorBody(payload: unknown): ApiErrorBody {
   return body;
 }
 
+/**
+ * What to say, in development only, when a request never reached anywhere.
+ *
+ * Returns null in production: an end user has no use for an internal
+ * hostname, and putting one on screen leaks the developer's LAN layout.
+ */
+function unreachable(url: string): string | null {
+  return __DEV__ ? `Could not reach ${url} (${describeApiResolution()})` : null;
+}
+
 export async function postJson<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+  const url = `${apiBaseUrl()}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
-    response = await fetch(`${apiBaseUrl()}${path}`, {
+    response = await fetch(url, {
       method:  "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body:    JSON.stringify(payload),
@@ -66,7 +80,7 @@ export async function postJson<T>(path: string, payload: unknown): Promise<ApiRe
   } catch (error) {
     // No answer at all. NOT an API error -- the UI must say "connection",
     // never "email already registered", for a request that never arrived.
-    return { kind: "network", message: error instanceof Error ? error.message : "Request failed" };
+    return { kind: "network", message: error instanceof Error ? error.message : "Request failed", detail: unreachable(url) };
   } finally {
     clearTimeout(timeout);
   }

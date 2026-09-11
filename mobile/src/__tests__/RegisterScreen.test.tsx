@@ -9,13 +9,13 @@
  * The backend remains the security authority — these cases prove the CLIENT
  * behaves, not that the server is safe.
  */
-import { render, fireEvent, act } from "@testing-library/react-native";
+import { render, fireEvent, act, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import type { ReactElement } from "react";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
-import { Text } from "react-native";
+import { Text, StyleSheet, Keyboard, Dimensions } from "react-native";
 import type { RegistrationResponse } from "../api/registration";
 
 const SUCCESS: RegistrationResponse = {
@@ -55,6 +55,7 @@ async function fillValidForm(view: View) {
   await fireEvent.changeText(view.getByPlaceholderText("Last name"), "Kuizinas");
   await fireEvent.changeText(view.getByPlaceholderText("Email address"), "driver@example.com");
   await fireEvent.changeText(view.getByPlaceholderText("Password"), "correct-horse-battery");
+  await fireEvent.changeText(view.getByPlaceholderText("Repeat password"), "correct-horse-battery");
 }
 
 const noop = () => { /* navigation is not under test here */ };
@@ -91,6 +92,7 @@ test("the screen collects exactly four fields — no company, no phone, no invit
   expect(view.getByPlaceholderText("Last name")).toBeTruthy();
   expect(view.getByPlaceholderText("Email address")).toBeTruthy();
   expect(view.getByPlaceholderText("Password")).toBeTruthy();
+  expect(view.getByPlaceholderText("Repeat password")).toBeTruthy();
   for (const forbidden of [/company/i, /phone/i, /invite/i, /licence/i, /payroll/i]) {
     expect(view.queryByPlaceholderText(forbidden)).toBeNull();
   }
@@ -119,6 +121,20 @@ test("a short password is refused on the client, before any request", async () =
 
   expect(view.getAllByText("At least 10 characters").length).toBeGreaterThan(0);
   expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+test("the two password fields reveal independently", async () => {
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+  const secureOf = (placeholder: string) =>
+    view.getByPlaceholderText(placeholder).props.secureTextEntry as boolean;
+
+  expect(secureOf("Password")).toBe(true);
+  expect(secureOf("Repeat password")).toBe(true);
+
+  // Revealing one must not reveal the other — they have distinct controls.
+  await fireEvent.press(view.getByTestId("toggle-confirm-password-visibility"));
+  expect(secureOf("Repeat password")).toBe(false);
+  expect(secureOf("Password")).toBe(true);
 });
 
 test("the password can be revealed and hidden", async () => {
@@ -167,10 +183,42 @@ test("a network failure is reported as a connection problem, never as a server a
   await fillValidForm(view);
   await pressSubmit(view);
 
-  expect(view.getByText("No connection. Check your signal and try again.")).toBeTruthy();
+  // The driver-facing sentence is unchanged and must always be present.
+  expect(view.getByText(/No connection\. Check your signal and try again\./)).toBeTruthy();
   // The failure mode this guards: a request that never arrived must not be
   // dressed up as "email already registered".
   expect(view.queryByText(/already registered/i)).toBeNull();
+
+  // Jest runs with __DEV__ true, so the development diagnostic must also be
+  // shown — and must name the address that actually failed. Without this,
+  // the single most common local failure (a phone told to reach `localhost`,
+  // which on a phone is the phone) reads as bad signal and sends the reader
+  // to inspect the network instead of the configuration.
+  expect(view.getByText(/Could not reach http:\/\/\S+\/auth\/register/)).toBeTruthy();
+});
+
+test("the development diagnostic is suppressed in a production build", async () => {
+  // The same failure, with __DEV__ false. The driver sees the plain sentence
+  // and nothing else: an internal hostname on screen is of no use to them and
+  // discloses the developer's or the deployment's network layout.
+  // `__DEV__` is a React Native global, not a DOM one, so it is reached
+  // through a narrow cast rather than by widening globalThis for the suite.
+  const globals = globalThis as unknown as { __DEV__: boolean };
+  const wasDev = globals.__DEV__;
+  globals.__DEV__ = false;
+  jest.spyOn(globalThis, "fetch").mockImplementation(() => Promise.reject(new Error("Network request failed")));
+
+  try {
+    const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+    await fillValidForm(view);
+    await pressSubmit(view);
+
+    expect(view.getByText(/No connection\. Check your signal and try again\./)).toBeTruthy();
+    expect(view.queryByText(/Could not reach/)).toBeNull();
+    expect(view.queryByText(/http:\/\//)).toBeNull();
+  } finally {
+    globals.__DEV__ = wasDev;
+  }
 });
 
 test("the button shows a submitting state and a second tap does not register twice", async () => {
@@ -242,6 +290,7 @@ test("the request body carries exactly the four fields, with the password untrim
   await fireEvent.changeText(view.getByPlaceholderText("Last name"), "  Kuizinas  ");
   await fireEvent.changeText(view.getByPlaceholderText("Email address"), "  Driver@Example.COM  ");
   await fireEvent.changeText(view.getByPlaceholderText("Password"), " padded password ");
+  await fireEvent.changeText(view.getByPlaceholderText("Repeat password"), " padded password ");
   await pressSubmit(view);
 
   expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -250,6 +299,9 @@ test("the request body carries exactly the four fields, with the password untrim
   expect(typeof rawBody).toBe("string");
   const body: unknown = JSON.parse(typeof rawBody === "string" ? rawBody : "{}");
 
+  // `toEqual` on the whole body is the guard that `confirmPassword` never
+  // ships: the DTO is `.strict()`, so a fifth field would be refused by the
+  // server and the driver would see a validation error they cannot act on.
   expect(body).toEqual({
     firstName: "Nerijus",
     lastName:  "Kuizinas",
@@ -258,4 +310,127 @@ test("the request body carries exactly the four fields, with the password untrim
     // NOT trimmed — trimming would change the driver's secret.
     password:  " padded password ",
   });
+  expect(JSON.stringify(body)).not.toContain("confirmPassword");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Layout contract: no scrolling at rest, in either direction
+// ═══════════════════════════════════════════════════════════════════════════
+// The bug this guards is one a driver sees immediately and no unit test
+// caught before: content taller than the screen, so the form drifts under a
+// drag, and a full-bleed image that left a white strip down one edge.
+
+test("at rest the screen does not scroll in either direction, and the hero is shown", async () => {
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+  const scroll = view.getByTestId("register-scroll");
+
+  // Not "usually fits" — scrolling is switched off, so there is nothing to
+  // drag even by a pixel.
+  expect(scroll.props.scrollEnabled).toBe(false);
+  // Bounce would let an edge be dragged past even with scrolling disabled.
+  expect(scroll.props.bounces).toBe(false);
+  expect(scroll.props.alwaysBounceVertical).toBe(false);
+  expect(scroll.props.alwaysBounceHorizontal).toBe(false);
+  // Never horizontal: a horizontally scrolling form is always a layout bug.
+  expect(scroll.props.horizontal).toBeFalsy();
+
+  // `flexGrow: 1` is what makes the content exactly fill the screen rather
+  // than overflow it.
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({ flexGrow: 1 });
+
+  expect(view.getByTestId("brand-hero")).toBeTruthy();
+});
+
+test("when the keyboard opens the hero yields its space and scrolling is enabled", async () => {
+  // A five-field form plus a keyboard does not fit a small phone. The hero
+  // goes first, and scrolling is turned on so the lower fields stay
+  // reachable — unreachable fields are a worse bug than a scroll bar.
+  const listeners: Record<string, () => void> = {};
+  jest.spyOn(Keyboard, "addListener").mockImplementation(((event: string, handler: () => void) => {
+    listeners[event] = handler;
+    return { remove: () => { /* nothing to detach in the stub */ } };
+  }) as unknown as typeof Keyboard.addListener);
+
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+  expect(view.getByTestId("brand-hero")).toBeTruthy();
+
+  const show = listeners["keyboardWillShow"] ?? listeners["keyboardDidShow"];
+  expect(show).toBeDefined();
+  // `act` still flushes the resulting state update; the callback itself is
+  // synchronous, so it is not declared async.
+  await act(() => { show?.(); });
+
+  expect(view.queryByTestId("brand-hero")).toBeNull();
+  expect(view.getByTestId("register-scroll").props.scrollEnabled).toBe(true);
+});
+
+test("on a short screen the hero is dropped rather than squashed, and the form still does not scroll", async () => {
+  // An iPhone SE is 667pt tall and the form alone is ~605pt. A hero squeezed
+  // into what is left renders as a broken-looking band, so it is omitted —
+  // the form fitting without scrolling is what matters.
+  jest.spyOn(Dimensions, "get").mockReturnValue({ width: 375, height: 667, scale: 2, fontScale: 1 });
+
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+
+  expect(view.queryByTestId("brand-hero")).toBeNull();
+  expect(view.getByTestId("register-scroll").props.scrollEnabled).toBe(false);
+  // Every field is still present — nothing was dropped to make room.
+  for (const placeholder of ["First name", "Last name", "Email address", "Password", "Repeat password"]) {
+    expect(view.getByPlaceholderText(placeholder)).toBeTruthy();
+  }
+  expect(view.getByTestId("create-account")).toBeTruthy();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The password rule belongs INSIDE the password field
+// ═══════════════════════════════════════════════════════════════════════════
+// As a sibling line it sat between Password and Repeat password and read as
+// a gap in the form rather than as part of the field it describes.
+
+test("the password rule renders inside the password field, not as a line between the two password inputs", async () => {
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+
+  const passwordField = view.getByTestId("password-field");
+  // Scoped to the bordered container: a match anywhere else on screen — the
+  // old sibling line included — would not satisfy this.
+  expect(within(passwordField).getByText("At least 10 characters")).toBeTruthy();
+
+  // And it is the only one, so it cannot also be rendering below the field.
+  expect(view.getAllByText("At least 10 characters")).toHaveLength(1);
+
+  // The input and the reveal control share that container, so "Show" stays
+  // vertically balanced against both lines rather than against one.
+  expect(within(passwordField).getByPlaceholderText("Password")).toBeTruthy();
+  expect(within(passwordField).getByTestId("toggle-password-visibility")).toBeTruthy();
+
+  // Repeat password is untouched: no helper of its own.
+  expect(within(passwordField).queryByPlaceholderText("Repeat password")).toBeNull();
+});
+
+test("the rule reaches a screen reader through the input's own name, and is not announced twice", async () => {
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+
+  // Folded into the accessible name, so the requirement is heard while
+  // focused on the box it applies to.
+  expect(view.getByPlaceholderText("Password").props.accessibilityLabel)
+    .toBe("Password. At least 10 characters");
+  // The visible copy is hidden from assistive technology to avoid a repeat.
+  expect(within(view.getByTestId("password-field")).getByText("At least 10 characters").props.accessible)
+    .toBe(false);
+});
+
+test("a password error replaces the rule rather than stacking with it", async () => {
+  const fetchSpy = jest.spyOn(globalThis, "fetch");
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+
+  await fillValidForm(view);
+  await fireEvent.changeText(view.getByPlaceholderText("Password"), "short");
+  await fireEvent.changeText(view.getByPlaceholderText("Repeat password"), "short");
+  await pressSubmit(view);
+
+  // The error text IS the rule, so exactly one copy must be on screen — the
+  // inline helper steps aside rather than doubling it up.
+  expect(view.getAllByText("At least 10 characters")).toHaveLength(1);
+  expect(within(view.getByTestId("password-field")).queryByText("At least 10 characters")).toBeNull();
+  expect(fetchSpy).not.toHaveBeenCalled();
 });

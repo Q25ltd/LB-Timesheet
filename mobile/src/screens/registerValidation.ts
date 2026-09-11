@@ -8,11 +8,21 @@
  */
 import { passwordProblem } from "../auth/passwordPolicy";
 
+/**
+ * The form's fields — NOT the request body.
+ *
+ * `confirmPassword` exists only here. It is a typing check for the driver,
+ * never a field the API accepts: the registration DTO is exactly four fields
+ * and is `.strict()`, so sending a fifth is refused (D21). The screen builds
+ * the request explicitly from four values rather than spreading this object,
+ * and a test asserts the body that actually goes over the wire.
+ */
 export interface RegisterFields {
   firstName: string;
   lastName: string;
   email: string;
   password: string;
+  confirmPassword: string;
 }
 
 type FieldName = keyof RegisterFields;
@@ -44,6 +54,15 @@ export function validateRegistration(fields: RegisterFields): FieldErrors {
   // would change the driver's secret between the phone and the server.
   const password = passwordProblem(fields.password);
   if (password !== null) errors.password = password;
+
+  // Only worth asking about once the password itself is usable — telling a
+  // driver their confirmation does not match a password that is too short
+  // gives them two problems to read and one to fix.
+  if (password === null) {
+    if (fields.confirmPassword === "") errors.confirmPassword = "Re-enter your password";
+    // Compared exactly, for the same reason neither side is trimmed.
+    else if (fields.confirmPassword !== fields.password) errors.confirmPassword = "Passwords do not match";
+  }
 
   return errors;
 }

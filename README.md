@@ -42,11 +42,20 @@ npm run dev                   # API on http://localhost:3000/health
 npm start --prefix mobile     # Expo driver app (needs the API running)
 ```
 
-The app finds the API at `http://localhost:3000` on an iOS simulator and
-`http://10.0.2.2:3000` on an Android emulator. On a physical phone neither
-works — set `EXPO_PUBLIC_API_URL` to the Mac's LAN address. Only the public
-API base URL belongs in mobile configuration; never a signing secret or a
-database URL, both of which ship inside the app bundle.
+In development the app derives the API host from the Metro dev server it was
+loaded from — if Metro is on `192.168.0.235:8081`, the API is assumed to be on
+`192.168.0.235:3000`. That works on a physical phone and on both simulators
+with no per-machine configuration, because the device demonstrably reaches
+that host already. Set `EXPO_PUBLIC_API_URL` to override it (and in any build
+that is not served by Metro). Only the public API base URL belongs in mobile
+configuration; never a signing secret or a database URL, both of which ship
+inside the app bundle.
+
+Two things to check first when the app reports "No connection": the API must
+actually be running (`npm run dev`), and **your dev database must be up to
+date** — `npx prisma migrate deploy` from `api/` after any new migration, or
+registration fails on a schema that has no `firstName` column. In development
+the connection error also names the exact URL it tried.
 
 **The schema reaches every database through migrations only** (`api/prisma/migrations`)
 — there is no `db push` script; it does not exist in this repo. `npm run check`'s

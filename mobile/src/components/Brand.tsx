@@ -1,16 +1,9 @@
 /**
- * The LogisticBay Timesheets lockup, and the reserved hero area beneath the
- * form.
- *
- * No logo mark and no photograph ship here. No approved asset exists in this
- * repository, and sourcing one from the internet is not an option — so the
- * wordmark is set in type and the hero is a neutral treatment holding the
- * exact space the approved truck photograph will occupy. Dropping the real
- * asset in later replaces `BrandHero`'s inner view and nothing else.
+ * The LogisticBay Timesheets lockup, and the hero photograph beneath the form.
  */
-import { View, Text, StyleSheet } from "react-native";
-import { colors, spacing, radius } from "../theme/index";
-import { typography } from "../theme/index";
+import { Image, View, Text, StyleSheet } from "react-native";
+import registrationHero from "../../assets/images/registration-truck-sunrise.png";
+import { spacing, typography } from "../theme/index";
 
 export function BrandLockup() {
   return (
@@ -22,41 +15,40 @@ export function BrandLockup() {
 }
 
 /**
- * The lower brand area from the reference design. Fixed height so the page's
- * rhythm does not change when the real image arrives, and `accessible={false}`
- * because it carries no information a screen reader needs.
+ * The full-bleed hero.
+ *
+ * It is rendered as a SIBLING of the padded form, never inside it. The
+ * previous version lived inside the form's horizontally-padded container and
+ * cancelled that padding with `marginHorizontal: -24` — a full-bleed trick
+ * that only works if every ancestor's width is exactly the screen's. It
+ * wasn't, so the image sat short of the right edge and left a white strip.
+ *
+ * Here the parent is already edge-to-edge, so the image simply fills it and
+ * there is no padding to cancel and nothing to get out of step.
+ *
+ * `flexShrink` with `minHeight: 0` is what makes it adapt: on a tall phone it
+ * takes its natural aspect ratio, and on a short one it gives its space to
+ * the form rather than pushing the form off-screen.
  */
 export function BrandHero() {
   return (
     <View style={styles.hero} accessible={false} testID="brand-hero">
-      <View style={styles.heroBand} />
-      <View style={styles.heroRoad} />
+      <Image source={registrationHero} style={styles.heroImage} resizeMode="cover" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  lockup: {
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
+  lockup: { alignItems: "center", gap: spacing.xs },
   hero: {
-    height: 132,
-    marginTop: spacing.xl,
-    borderRadius: radius.card,
+    width: "100%",
+    aspectRatio: 2.25,
+    flexShrink: 1,
+    minHeight: 0,
     overflow: "hidden",
-    backgroundColor: "#E8F0F9",
-    justifyContent: "flex-end",
   },
-  heroBand: {
-    flex: 1,
-    backgroundColor: "#DCE9F6",
-  },
-  heroRoad: {
-    height: 28,
-    backgroundColor: colors.brandDark,
-    opacity: 0.85,
-  },
+  // Absolute fill rather than 100%/100%: when flexShrink squeezes the
+  // container below its aspect ratio, a percentage-sized child can round to
+  // a hairline short of the edge. Pinning all four sides cannot.
+  heroImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
 });
