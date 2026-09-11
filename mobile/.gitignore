@@ -3,3 +3,14 @@ node_modules/
 dist/
 *.log
 expo-env.d.ts
+
+# Native projects are GENERATED, not authored (D25: Expo managed + continuous
+# native generation). `app.json` and its config plugins are the source of
+# truth; `npx expo prebuild` recreates these from it, so committing them would
+# create a second authority that silently drifts from the plugin config —
+# exactly how a plugin change stops taking effect.
+#
+# Created by `expo run:ios` on 2026-09-11, which prebuilds before it builds.
+# Delete and re-prebuild freely; nothing here is hand-edited.
+ios/
+android/

@@ -6,43 +6,33 @@
  * separate, later relationship the driver may never have (D21). The fifth
  * box on screen — confirm password — never leaves the device.
  *
- * LAYOUT CONTRACT
- *
- *   - At rest the whole screen fits, on every phone, with NO scrolling in
- *     either direction. The container is `flexGrow: 1` with scrolling
- *     disabled, so there is nothing to scroll even by a pixel.
- *   - Scrolling is enabled ONLY while the keyboard is up. A five-field form
- *     plus a keyboard genuinely does not fit a small phone, and the
- *     alternative to scrolling there is fields the driver cannot reach.
- *   - Horizontal scrolling is off unconditionally. Nothing is wider than the
- *     screen, and bounce is disabled so an edge cannot be dragged past.
- *   - The hero is a sibling of the padded form, edge to edge, and yields its
- *     space first: it shrinks on a short screen and is removed entirely when
- *     the keyboard is up.
+ * LAYOUT CONTRACT — see `./authLayout`, which this screen and Sign-in SHARE.
+ * The rules are unchanged from the version approved on a physical phone; they
+ * moved out of this file when Login became the second screen to need them, so
+ * that one threshold governs both instead of two literals drifting apart.
  *
  * Three things the reference design shows are deliberately absent: the
  * three-rule password checklist (superseded by D23), and any biometric or
  * "keep me signed in" control (no contract exists for either).
  */
-import { useEffect, useState } from "react";
-import {
-  View, Text, ScrollView, KeyboardAvoidingView, Keyboard, Platform, Pressable, StyleSheet,
-  useWindowDimensions,
-} from "react-native";
+import { useState } from "react";
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandHero, BrandLockup } from "../components/Brand";
 import { Field } from "../components/Field";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { colors, spacing, typography } from "../theme/index";
+import { authScrollProps, authStyles as styles, useAuthLayout } from "./authLayout";
+import { spacing, typography } from "../theme/index";
 import { PASSWORD_RULE_TEXT } from "../auth/passwordPolicy";
-import { EMAIL_IN_USE, registerAccount, type RegistrationResponse } from "../api/registration";
+import type { AuthenticatedAccount } from "../api/account";
+import { EMAIL_IN_USE, registerAccount } from "../api/registration";
 import {
   fieldErrorsFromServer, validateRegistration, type FieldErrors, type RegisterFields,
 } from "./registerValidation";
 
 interface RegisterScreenProps {
   /** Called with the server's response once registration succeeds. */
-  onRegistered: (response: RegistrationResponse) => Promise<void> | void;
+  onRegistered: (account: AuthenticatedAccount) => Promise<void> | void;
   /** Navigate to sign-in. Login is the NEXT increment — see app/(auth)/sign-in. */
   onSignIn: () => void;
 }
@@ -51,43 +41,10 @@ const EMPTY: RegisterFields = {
   firstName: "", lastName: "", email: "", password: "", confirmPassword: "",
 };
 
-/**
- * Below this window height the form alone (~605pt) leaves the hero so little
- * room that it renders as a squashed band — which reads as a broken image
- * rather than as branding. On those screens it is dropped entirely: the form
- * still fits without scrolling, which is what actually matters. An iPhone SE
- * is 667pt; an iPhone 14 is 844pt.
- */
-const MIN_HEIGHT_FOR_HERO = 720;
-
-/**
- * Whether the keyboard is currently covering part of the screen.
- *
- * Drives two things: the hero is dropped to give the form its space back,
- * and scrolling is turned on so every field stays reachable.
- */
-function useKeyboardVisible(): boolean {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    // iOS reports will-show/will-hide, which animate in step with the
-    // keyboard; Android only reports did-show/did-hide.
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const shown  = Keyboard.addListener(showEvent, () => { setVisible(true); });
-    const hidden = Keyboard.addListener(hideEvent, () => { setVisible(false); });
-    return () => { shown.remove(); hidden.remove(); };
-  }, []);
-
-  return visible;
-}
-
 export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) {
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboardVisible();
-  const { height } = useWindowDimensions();
   // The hero is the first thing to go: it is decoration, and the form is not.
-  const showHero = !keyboardVisible && height >= MIN_HEIGHT_FOR_HERO;
+  const { keyboardVisible, showHero } = useAuthLayout();
   const [fields, setFields] = useState<RegisterFields>(EMPTY);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -182,13 +139,7 @@ export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) 
         // keyboard up the form is taller than the space left, and scrolling
         // is the only thing that keeps the lower fields reachable.
         scrollEnabled={keyboardVisible}
-        bounces={false}
-        alwaysBounceVertical={false}
-        alwaysBounceHorizontal={false}
-        showsVerticalScrollIndicator={false}
-        showsHorizontalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        {...authScrollProps}
       >
         <View style={styles.form}>
           <BrandLockup />
@@ -234,8 +185,21 @@ export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) 
             value={fields.email}
             onChangeText={value => { update("email", value); }}
             error={errors.email}
+            // `username`, NOT `emailAddress` — and this is the fix for iOS
+            // AutoFill never offering anything on Login.
+            //
+            // `emailAddress` is a CONTACT hint. iOS will fill an address into
+            // it, but it does not mark the field as the account name of a
+            // credential, so a password saved from this form is saved with no
+            // username to pair it with — and Login then has nothing sensible
+            // to suggest. `username` next to a `newPassword` field is the
+            // pair iOS recognises, saves, and offers back.
+            //
+            // Android still wants the email hint, which is why both are set:
+            // iOS reads `textContentType`, Android reads `autoComplete`.
             autoComplete="email"
-            textContentType="emailAddress"
+            textContentType="username"
+            importantForAutofill="yes"
             keyboardType="email-address"
             autoCapitalize="none"
             returnKeyType="next"
@@ -251,8 +215,11 @@ export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) 
             secure
             revealTestID="toggle-password-visibility"
             controlTestID="password-field"
+            // NEW-credential semantics: this is what makes iOS offer to
+            // generate a strong password and then offer to SAVE the pair.
             autoComplete="new-password"
             textContentType="newPassword"
+            importantForAutofill="yes"
             autoCapitalize="none"
             returnKeyType="next"
             editable={!submitting}
@@ -265,8 +232,13 @@ export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) 
             error={errors.confirmPassword}
             secure
             revealTestID="toggle-confirm-password-visibility"
+            // Also `newPassword`: Apple's guidance for a confirmation field
+            // is the same hint, so the platform fills both halves of a
+            // generated password instead of leaving this one empty. It is
+            // still CLIENT-ONLY and never reaches the API.
             autoComplete="new-password"
             textContentType="newPassword"
+            importantForAutofill="yes"
             autoCapitalize="none"
             returnKeyType="done"
             onSubmitEditing={() => { void submit(); }}
@@ -296,32 +268,3 @@ export function RegisterScreen({ onRegistered, onSignIn }: RegisterScreenProps) 
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.surface },
-  // `flexGrow: 1` is what makes "no scrolling" true rather than merely
-  // usually true: the content is never shorter than the screen, so there is
-  // no slack, and never wider, so there is nothing to pan sideways to.
-  content: { flexGrow: 1 },
-  // The padded column. The hero is its sibling and gets no padding.
-  //
-  // `flex: 1` is what pins the hero to the BOTTOM edge: the form absorbs
-  // whatever vertical slack a tall screen has, instead of the slack landing
-  // below the hero and leaving a strip of background under the photograph.
-  form: { flex: 1, paddingHorizontal: spacing.xl },
-  heading: { marginTop: spacing.lg, marginBottom: spacing.lg },
-  centred: { textAlign: "center" },
-  formError: {
-    backgroundColor: colors.dangerBg,
-    borderRadius: spacing.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: spacing.lg,
-  },
-  link: { color: colors.brandLight, fontWeight: "700", fontSize: 15 },
-});

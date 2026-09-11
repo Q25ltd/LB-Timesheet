@@ -79,7 +79,9 @@ function fixtures(options: { active?: boolean } = {}) {
       findUnique: () => Promise.resolve({
         id: SESSION_ID, userId: USER_ID,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), revokedAt: null,
+        previousRefreshTokenGraceUntil: null,
       }),
+      updateMany: () => Promise.resolve({ count: 0 }),
       create: () => Promise.reject(new Error("session.create must not be reached by a refused request")),
     },
     companyMembership: {
@@ -87,7 +89,8 @@ function fixtures(options: { active?: boolean } = {}) {
         id: MEMBERSHIP_ID, userId: USER_ID, companyId: COMPANY_ID,
         role, active: options.active ?? true,
       }),
-      findMany: () => Promise.resolve([]),
+      findMany:  () => Promise.resolve([]),
+      findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE }) },
     // D22: the two canonical halves. `startContext` derives the snapshot name
@@ -97,9 +100,13 @@ function fixtures(options: { active?: boolean } = {}) {
         id: USER_ID, email: "fixture-driver@example.com",
         firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME,
       }),
+      // Login's credential read. Declared because `AppDatabase` requires it;
+      // no case in this Start Shift file logs in.
+      findFirst:  () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("user.create must not be reached by a refused request")),
     },
     shift: {
+      count:     () => Promise.resolve(0),
       create:    () => Promise.reject(new Error("shift.create must not be reached by a refused request")),
       findFirst: () => Promise.resolve(null),
     },

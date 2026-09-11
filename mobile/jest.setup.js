@@ -30,3 +30,34 @@ beforeEach(() => {
   mockMemory.clear();
   jest.clearAllMocks();
 });
+
+/**
+ * expo-local-authentication is a NATIVE module and cannot run under Jest.
+ * Mocked at the module boundary so every test exercises the app's real
+ * `biometrics.ts` wrapper — the thing whose behaviour matters — against a
+ * controllable stand-in for the platform.
+ *
+ * The defaults describe the COMMON case rather than the convenient one: a
+ * device with no biometric hardware. A test that wants a capable device says
+ * so explicitly, which keeps "what happens on an ordinary phone" the default
+ * everywhere.
+ */
+const mockLocalAuth = {
+  hasHardwareAsync: jest.fn(() => Promise.resolve(false)),
+  isEnrolledAsync: jest.fn(() => Promise.resolve(false)),
+  supportedAuthenticationTypesAsync: jest.fn(() => Promise.resolve([])),
+  authenticateAsync: jest.fn(() => Promise.resolve({ success: false, error: "not_available" })),
+  cancelAuthenticate: jest.fn(() => Promise.resolve()),
+  // The real enum values, so a test cannot pass against an invented number.
+  AuthenticationType: { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 },
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+};
+
+jest.mock("expo-local-authentication", () => mockLocalAuth);
+
+beforeEach(() => {
+  mockLocalAuth.hasHardwareAsync.mockResolvedValue(false);
+  mockLocalAuth.isEnrolledAsync.mockResolvedValue(false);
+  mockLocalAuth.supportedAuthenticationTypesAsync.mockResolvedValue([]);
+  mockLocalAuth.authenticateAsync.mockResolvedValue({ success: false, error: "not_available" });
+});

@@ -5,20 +5,24 @@
 import { router } from "expo-router";
 import { RegisterScreen } from "../../src/screens/RegisterScreen";
 import { useAuth } from "../../src/auth/AuthContext";
-import type { RegistrationResponse } from "../../src/api/registration";
+import type { AuthenticatedAccount } from "../../src/api/account";
 
 export default function RegisterRoute() {
-  const { signInFromRegistration } = useAuth();
+  const { signIn } = useAuth();
 
   return (
     <RegisterScreen
-      onRegistered={async (response: RegistrationResponse) => {
-        await signInFromRegistration(response);
+      onRegistered={async (account: AuthenticatedAccount) => {
+        await signIn(account);
         // `replace`, not `push`: registration is complete and the back
         // gesture must not return a signed-in driver to the sign-up form.
         router.replace("/today");
       }}
-      onSignIn={() => { router.push("/sign-in"); }}
+      // `replace`, not `push`: sign-in is now the signed-out DEFAULT and
+      // registration is reached from it by replacement, so pushing would
+      // stack a second auth screen and leave a back gesture that cycles
+      // between the two.
+      onSignIn={() => { router.replace("/sign-in"); }}
     />
   );
 }

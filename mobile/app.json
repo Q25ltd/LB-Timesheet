@@ -16,6 +16,12 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow LogisticBay Timesheets to use Face ID to sign you in."
+        }
+      ],
       "expo-status-bar"
     ]
   }

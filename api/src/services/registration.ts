@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 import type { JWT } from "@fastify/jwt";
+import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
 import { hashPassword, PasswordPolicy } from "../lib/password.js";
 import {
@@ -69,20 +70,6 @@ export interface RegistrationResult {
  */
 function emailInUse(): AppError {
   return new AppError(409, "Email already registered", "EMAIL_IN_USE");
-}
-
-/**
- * The canonical stored form of an email identity: trimmed and lowercased
- * (D22). Deliberately nothing else — `+`-tags and dots are NOT stripped,
- * because those forms address genuinely different mailboxes and merging them
- * would be a worse bug than the casing one this fixes.
- *
- * This is the convenience, not the guarantee. `User.email` is `citext`, so
- * the DATABASE refuses a case variant even if some future write path forgets
- * to call this (D16).
- */
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 export async function register(

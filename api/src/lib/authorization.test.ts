@@ -235,6 +235,8 @@ interface SessionRow {
   userId: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  /** Read by the refresh boundary; null on every session these files build. */
+  previousRefreshTokenGraceUntil: Date | null;
 }
 
 interface MembershipRow {
@@ -248,11 +250,19 @@ interface MembershipRow {
 interface IdentityReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: {
-    findUnique(args: { where: { id: string } }): Promise<SessionRow | null>;
+    // Broadened for the refresh boundary: a credential is looked up by its
+    // DIGEST, never by session id. Both key shapes, one implementation.
+    findUnique(args: {
+      where: { id?: string; refreshTokenHash?: string; previousRefreshTokenHash?: string };
+    }): Promise<SessionRow | null>;
+    // Rotation and revocation are conditional writes. No case in these files
+    // rotates, so the stub reports "nothing matched".
+    updateMany(): Promise<{ count: number }>;
     create(): Promise<never>;
   };
   companyMembership: {
     findUnique(args: { where: { id: string } }): Promise<MembershipRow | null>;
+    findFirst(): Promise<null>;
     findMany(): Promise<never[]>;
   };
   // Start Shift's reads and the account boundary's reads/writes. Unused here
@@ -260,12 +270,17 @@ interface IdentityReads {
   // them, so the fixture must satisfy them. The writes reject: authorization
   // must not persist anything.
   shift: {
+    // The cross-company open-shift guard's count. Zero: no case here has one.
+    count(): Promise<number>;
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<null> };
   user: {
     findUnique(): Promise<null>;
+    // Login's credential read. Declared because `AppDatabase` requires it;
+    // no case in this file logs in.
+    findFirst(): Promise<null>;
     create(): Promise<never>;
   };
   $transaction(): Promise<never>;
@@ -298,6 +313,7 @@ function activeIdentity(): IdentityReads {
   const session: SessionRow = {
     id: SESSION_ID, userId: USER_ID,
     expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), revokedAt: null,
+    previousRefreshTokenGraceUntil: null,
   };
   const membership: MembershipRow = {
     id: MEMBERSHIP_ID, userId: USER_ID, companyId: COMPANY_ID, role: "driver", active: true,
@@ -306,19 +322,23 @@ function activeIdentity(): IdentityReads {
     $queryRaw: () => Promise.resolve([{ ok: 1 }]),
     session: {
       findUnique: ({ where }) => Promise.resolve(session.id === where.id ? session : null),
+      updateMany: () => Promise.resolve({ count: 0 }),
       create:     () => Promise.reject(new Error("session.create is not part of this test")),
     },
     companyMembership: {
       findUnique: ({ where }) => Promise.resolve(membership.id === where.id ? membership : null),
+      findFirst:  () => Promise.resolve(null),
       findMany:   () => Promise.resolve([]),
     },
     shift: {
+      count:     () => Promise.resolve(0),
       create:    () => Promise.reject(new Error("shift.create is not part of this test")),
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve(null) },
     user: {
       findUnique: () => Promise.resolve(null),
+      findFirst:  () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("user.create is not part of this test")),
     },
     $transaction: () => Promise.reject(new Error("$transaction is not part of this test")),

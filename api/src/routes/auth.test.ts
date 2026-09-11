@@ -115,6 +115,8 @@ interface SessionRow {
   userId: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  /** Read by the refresh boundary; null on every session these files build. */
+  previousRefreshTokenGraceUntil: Date | null;
 }
 
 interface MembershipRow {
@@ -145,21 +147,34 @@ function driverRow(): UserRow {
 interface AuthReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: {
-    findUnique(args: { where: { id: string } }): Promise<SessionRow | null>;
+    // Broadened for the refresh boundary: a credential is looked up by its
+    // DIGEST, never by session id. Both key shapes, one implementation.
+    findUnique(args: {
+      where: { id?: string; refreshTokenHash?: string; previousRefreshTokenHash?: string };
+    }): Promise<SessionRow | null>;
+    // Rotation and revocation are conditional writes. No case in these files
+    // rotates, so the stub reports "nothing matched".
+    updateMany(): Promise<{ count: number }>;
     create(): Promise<never>;
   };
   companyMembership: {
     findUnique(args: { where: { id: string } }): Promise<MembershipRow | null>;
+    findFirst(): Promise<null>;
     findMany(): Promise<never[]>;
   };
   // Keyed by id OR email, because the account boundary looks up both.
   user: {
     findUnique(args: { where: { id?: string; email?: string } }): Promise<UserRow | null>;
+    // Login's credential read. Declared because `AppDatabase` requires it;
+    // no case in THIS file logs in, so it answers "no such account".
+    findFirst(): Promise<null>;
     create(): Promise<never>;
   };
   // Start Shift's reads. `findFirst` returns null so `GET /shifts/current`
   // answers "no open shift" for the cross-posture cases.
   shift: {
+    // The cross-company open-shift guard's count. Zero: no case here has one.
+    count(): Promise<number>;
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
@@ -176,11 +191,13 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
     session: {
       findUnique: ({ where }) =>
         Promise.resolve(session !== null && session.id === where.id ? session : null),
+      updateMany: () => Promise.resolve({ count: 0 }),
       create: () => Promise.reject(new Error("no case in routes/auth.test.ts may reach session persistence")),
     },
     companyMembership: {
       findUnique: ({ where }) =>
         Promise.resolve(membership !== null && membership.id === where.id ? membership : null),
+      findFirst: () => Promise.resolve(null),
       findMany: () => Promise.resolve([]),
     },
     user: {
@@ -188,9 +205,11 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
         Promise.resolve(
           user !== null && (where.id === user.id || where.email === user.email) ? user : null,
         ),
+      findFirst: () => Promise.resolve(null),
       create: () => Promise.reject(new Error("no case in routes/auth.test.ts may reach user persistence")),
     },
     shift: {
+      count:     () => Promise.resolve(0),
       create:    () => Promise.reject(new Error("no case in routes/auth.test.ts may reach shift persistence")),
       findFirst: () => Promise.resolve(null),
     },
@@ -200,7 +219,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
 }
 
 function liveSession(): SessionRow {
-  return { id: SESSION_ID, userId: USER_ID, expiresAt: new Date(Date.now() + 90 * 24 * 60 * MINUTE), revokedAt: null };
+  return { id: SESSION_ID, userId: USER_ID, expiresAt: new Date(Date.now() + 90 * 24 * 60 * MINUTE), revokedAt: null, previousRefreshTokenGraceUntil: null };
 }
 
 function activeMembership(): MembershipRow {

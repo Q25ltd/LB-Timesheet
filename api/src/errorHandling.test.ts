@@ -16,22 +16,29 @@ const db = {
   $queryRaw: (_q: TemplateStringsArray, ..._v: unknown[]): Promise<unknown> => Promise.resolve([{ ok: 1 }]),
   session: {
     findUnique: (): Promise<null> => Promise.resolve(null),
+    updateMany: () => Promise.resolve({ count: 0 }),
     create:     () => Promise.reject(new Error("session.create is not part of this test")),
   },
   companyMembership: {
     findUnique: (): Promise<null> => Promise.resolve(null),
+    // Company selection's read. No case in this file selects a company.
+    findFirst:  (): Promise<null> => Promise.resolve(null),
     findMany:   () => Promise.resolve([]),
   },
   // Start Shift's reads. Not exercised here — these tests never authenticate,
   // and /health is public — but AppDatabase now names them, so the stand-in
   // has to be honest about what the app is able to ask for.
   shift: {
+    count:     () => Promise.resolve(0),
     create:    () => Promise.reject(new Error("shift.create is not part of this test")),
     findFirst: () => Promise.resolve(null),
   },
   company: { findUnique: () => Promise.resolve(null) },
   user: {
     findUnique: () => Promise.resolve(null),
+    // Login's credential read. Declared because `AppDatabase` requires it;
+    // no case in this file logs in.
+    findFirst: () => Promise.resolve(null),
     // The account boundary's write (D21). It REJECTS: no case in this file
     // registers an account, so reaching it would mean the app did something
     // the test never asked for.

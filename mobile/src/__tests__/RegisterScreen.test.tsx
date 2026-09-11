@@ -16,9 +16,9 @@ import type { ReactElement } from "react";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import { Text, StyleSheet, Keyboard, Dimensions } from "react-native";
-import type { RegistrationResponse } from "../api/registration";
+import type { AuthenticatedAccount } from "../api/account";
 
-const SUCCESS: RegistrationResponse = {
+const SUCCESS: AuthenticatedAccount = {
   user: { id: "user_1", firstName: "Nerijus", lastName: "Kuizinas", email: "driver@example.com" },
   identityToken: "identity.token.value",
   refreshToken:  "refresh-secret-value",
@@ -248,10 +248,10 @@ test("a successful registration hands the response on and stores ONLY the refres
 
   // The real provider, so this exercises the app's actual storage path.
   function Probe() {
-    const { account, identityToken, isAuthenticated, signInFromRegistration } = useAuth();
+    const { account, identityToken, isAuthenticated, signIn } = useAuth();
     return (
       <>
-        <RegisterScreen onRegistered={signInFromRegistration} onSignIn={noop} />
+        <RegisterScreen onRegistered={signIn} onSignIn={noop} />
         <Text testID="probe-authenticated">{String(isAuthenticated)}</Text>
         <Text testID="probe-memberships">{String(account?.memberships.length ?? -1)}</Text>
         <Text testID="probe-token">{identityToken ?? "none"}</Text>

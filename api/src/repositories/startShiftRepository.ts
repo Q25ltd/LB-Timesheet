@@ -15,12 +15,13 @@
  * effect of passing a bigger object. `PrismaClient` satisfies them.
  */
 import type { ShiftStatus } from "../generated/enums.js";
+import { OPEN_SHIFT_STATUSES } from "../lib/shiftStatus.js";
 import type { TenantContext } from "../lib/tenantContext.js";
 
 /** The Shift lifecycle states that count as OPEN (D15) — the same split the
  *  one-open-shift partial index keys on. Not exported: the only question a
  *  caller may ask is "is there an open shift", which `findOpen` answers. */
-const OPEN_SHIFT_STATUSES: readonly ShiftStatus[] = ["draft", "active", "finishing"];
+
 
 /** Only the columns Start Shift reads back. Prisma returns the whole row; this
  *  is what is allowed to travel out of the repository. */

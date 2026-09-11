@@ -40,6 +40,28 @@ export interface AccountMembership {
   role: MembershipRole;
 }
 
+/**
+ * The account AND its stored credential, for login and NOTHING else.
+ *
+ * A SEPARATE type from `AccountUser` on purpose. `AccountUser` is the shape
+ * that leaves this boundary — it travels into responses, into `/auth/me` and
+ * into the mobile client — and widening it to carry `passwordHash` would put
+ * the hash one careless spread away from a response body. This record exists
+ * only inside login's service call and is never returned upward: login reads
+ * `passwordHash`, verifies, discards it, and passes `user` on.
+ */
+export interface AccountCredential {
+  user: AccountUser;
+  passwordHash: string;
+}
+
+/** A new device session for an already-authenticated account (AUTH.md). */
+export interface NewSession {
+  userId: string;
+  expiresAt: Date;
+  refreshTokenHash: string;
+}
+
 /** Everything a new account is created from. Already normalised and hashed. */
 export interface NewAccount {
   email: string;
@@ -61,6 +83,15 @@ interface UserRow {
   firstName: string;
   lastName: string;
   email: string;
+}
+
+/**
+ * The same row WITH the credential. Declared separately so the delegate that
+ * returns it is a different, explicitly-named call — the account reads cannot
+ * accidentally start returning a hash because one interface grew a field.
+ */
+interface CredentialRow extends UserRow {
+  passwordHash: string;
 }
 
 interface MembershipRow {
@@ -87,13 +118,25 @@ interface IdentityTransaction {
 export interface IdentityDatabase extends IdentityTransaction {
   user: IdentityTransaction["user"] & {
     findUnique(args: { where: { email: string } | { id: string } }): Promise<UserRow | null>;
+    // Login's read, named separately from the two above because it returns
+    // credential material. One call site, one signature, greppable.
+    findFirst(args: { where: { email: string } }): Promise<CredentialRow | null>;
   };
+  session: IdentityTransaction["session"];
   companyMembership: {
     findMany(args: {
       where: { userId: string; active: boolean };
       include: { company: { select: { name: true } } };
       orderBy: { joinedAt: "asc" };
     }): Promise<MembershipRow[]>;
+    // Company selection's read. The id AND the authenticated user AND
+    // `active` are all part of the same `where`, so there is no window in
+    // which another user's membership has been fetched and is waiting to be
+    // checked — see `findActiveMembership`.
+    findFirst(args: {
+      where: { id: string; userId: string; active: boolean };
+      include: { company: { select: { name: true } } };
+    }): Promise<MembershipRow | null>;
   };
   $transaction<T>(fn: (tx: IdentityTransaction) => Promise<T>): Promise<T>;
 }
@@ -178,6 +221,73 @@ export function identityRepository(db: IdentityDatabase) {
     async findById(userId: string): Promise<AccountUser | null> {
       const row = await db.user.findUnique({ where: { id: userId } });
       return row === null ? null : accountUser(row);
+    },
+
+    /**
+     * The account behind an already-normalised email, WITH its stored hash,
+     * or null. Login's read, and login's only.
+     *
+     * `findFirst` rather than `findUnique` for one reason: `findUnique`'s
+     * generated argument type is shared with the two account reads above, and
+     * this call must return a strictly wider row. The lookup is still against
+     * the single unique `citext` index on `User.email`, so it is a
+     * primary-key-class read and case-insensitivity still comes from the
+     * column type — there is no `mode: "insensitive"` here to forget.
+     *
+     * The hash is rebuilt onto a fresh object with the four account fields,
+     * exactly like `accountUser` — so a future column added to `User` does not
+     * silently start travelling into login's service.
+     */
+    async findCredentialByEmail(email: string): Promise<AccountCredential | null> {
+      const row = await db.user.findFirst({ where: { email } });
+      return row === null ? null : { user: accountUser(row), passwordHash: row.passwordHash };
+    },
+
+    /**
+     * A NEW device session for an account that has just authenticated.
+     *
+     * Separate from `createAccount` because login is not registration: there
+     * is no User to write and therefore no transaction to hold one — a single
+     * insert is already atomic. Every successful login creates a new row;
+     * nothing here revokes, reuses or touches another session, and nothing
+     * here carries company identity, because a Session never does (AUTH.md).
+     */
+    async createSession(session: NewSession): Promise<{ sessionId: string }> {
+      const row = await db.session.create({
+        data: {
+          userId:           session.userId,
+          expiresAt:        session.expiresAt,
+          refreshTokenHash: session.refreshTokenHash,
+        },
+      });
+      return { sessionId: row.id };
+    },
+
+    /**
+     * ONE active membership belonging to the authenticated user, or null.
+     *
+     * The company-selection read. Three conditions in one query — the
+     * requested id, the authenticated user, and `active: true` — so a
+     * membership that exists but belongs to someone else, and one that
+     * belongs to the right user but has been deactivated, are BOTH answered
+     * `null` and become the same generic 403. The caller cannot tell them
+     * apart, and neither can a client (D17).
+     *
+     * `userId` is the AUTHENTICATED user. Nothing here takes it from a
+     * request; the service reads it from the verified `IdentityContext`.
+     */
+    async findActiveMembership(userId: string, membershipId: string): Promise<AccountMembership | null> {
+      const row = await db.companyMembership.findFirst({
+        where:   { id: membershipId, userId, active: true },
+        include: { company: { select: { name: true } } },
+      });
+      if (row === null) return null;
+      return {
+        membershipId: row.id,
+        companyId:    row.companyId,
+        companyName:  row.company.name,
+        role:         row.role,
+      };
     },
 
     /** The driver's ACTIVE memberships. An empty array is a valid answer (D21). */

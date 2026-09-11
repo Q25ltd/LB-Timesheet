@@ -125,6 +125,69 @@ export function mintIdentityToken(jwt: JWT, subject: IdentityTokenSubject): stri
 }
 
 /**
+ * The tenant access token's payload (AUTH.md, D13).
+ *
+ * `companyId` and `membershipId` are MANDATORY and never optional: a token
+ * that sometimes omits them is not a smaller tenant token, it is a different
+ * kind, and it gets a different audience.
+ *
+ * `role` is deliberately absent. Roles change, memberships get disabled,
+ * owners remove drivers — a role baked into a token is authority that
+ * outlives its revocation. `requireAuth` loads the membership row on every
+ * request anyway, so the role is available there, fresh, at zero extra cost.
+ */
+export interface TenantTokenSubject {
+  userId: string;
+  companyId: string;
+  membershipId: string;
+  sessionId: string;
+}
+
+/**
+ * Mint a tenant access token for ONE server-validated active membership.
+ *
+ * The caller must have loaded that membership from the database and confirmed
+ * it belongs to the authenticated user and is active. Nothing here validates
+ * anything: this function signs what it is given, so handing it a
+ * client-supplied `companyId` would mint exactly the token AUTH.md forbids.
+ * There is one production caller per entry point, and each loads the row
+ * itself.
+ *
+ * Same secret, same issuer and the same 15-minute TTL as the identity token —
+ * the audience is the only difference, and it is the whole separation.
+ */
+export function mintTenantToken(jwt: JWT, subject: TenantTokenSubject): string {
+  return jwt.sign(
+    {
+      sub:          subject.userId,
+      companyId:    subject.companyId,
+      membershipId: subject.membershipId,
+      sessionId:    subject.sessionId,
+    },
+    {
+      algorithm: TOKEN_ALGORITHM,
+      iss:       TOKEN_ISSUER,
+      aud:       TENANT_AUDIENCE,
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+    },
+  );
+}
+
+/**
+ * AUTH.md's previous-refresh-token grace window: 60 seconds.
+ *
+ * Its purpose is a lost RESPONSE, not a lost request. A driver on a lorry
+ * rotates successfully, the reply never arrives, and the client retries with
+ * the only credential it still has — the one the server has just superseded.
+ * Without this window that driver is logged out at exactly the wrong moment.
+ *
+ * Stored as an absolute DEADLINE on the Session rather than derived from a
+ * rotation timestamp plus this constant, so changing the window can never
+ * retroactively revive a token that was already dead.
+ */
+export const REFRESH_GRACE_MS = 60 * 1000;
+
+/**
  * A refresh token: 32 random bytes, base64url (AUTH.md). Opaque, NOT a JWT —
  * it carries no claims, so it cannot be read, only looked up.
  */

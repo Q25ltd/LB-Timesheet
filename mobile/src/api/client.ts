@@ -64,7 +64,18 @@ function unreachable(url: string): string | null {
   return __DEV__ ? `Could not reach ${url} (${describeApiResolution()})` : null;
 }
 
-export async function postJson<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+/**
+ * The one place a request is built.
+ *
+ * `token` is the short-lived access token and travels in the Authorization
+ * header — never in the URL, never in the body, never in a query string, so
+ * it cannot end up in a server log line or a proxy's access log. It is
+ * omitted entirely rather than sent empty when absent.
+ */
+async function send<T>(
+  path: string,
+  init: { method: "GET" | "POST"; payload?: unknown; token?: string },
+): Promise<ApiResult<T>> {
   const url = `${apiBaseUrl()}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
@@ -72,10 +83,14 @@ export async function postJson<T>(path: string, payload: unknown): Promise<ApiRe
   let response: Response;
   try {
     response = await fetch(url, {
-      method:  "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body:    JSON.stringify(payload),
-      signal:  controller.signal,
+      method:  init.method,
+      headers: {
+        "content-type": "application/json",
+        accept:         "application/json",
+        ...(init.token === undefined ? {} : { authorization: `Bearer ${init.token}` }),
+      },
+      ...(init.payload === undefined ? {} : { body: JSON.stringify(init.payload) }),
+      signal: controller.signal,
     });
   } catch (error) {
     // No answer at all. NOT an API error -- the UI must say "connection",
@@ -98,7 +113,20 @@ export async function postJson<T>(path: string, payload: unknown): Promise<ApiRe
   return { kind: "ok", value: parsed as T };
 }
 
-// NOTE: no authenticated GET helper yet. `/auth/me` exists on the server
-// and is proven by the API suite, but the app has no caller for it until
-// session restore lands with login — an unused helper is code written and
-// never imported.
+export function postJson<T>(path: string, payload: unknown, token?: string): Promise<ApiResult<T>> {
+  return send<T>(path, token === undefined ? { method: "POST", payload } : { method: "POST", payload, token });
+}
+
+export function getJson<T>(path: string, token: string): Promise<ApiResult<T>> {
+  return send<T>(path, { method: "GET", token });
+}
+
+/**
+ * A POST with no body and no response body — logout.
+ *
+ * `204 No Content` is a success with nothing to parse, which `send` already
+ * handles: an unreadable body is only a problem when the status says failure.
+ */
+export function postEmpty(path: string, token: string): Promise<ApiResult<unknown>> {
+  return send<unknown>(path, { method: "POST", token });
+}

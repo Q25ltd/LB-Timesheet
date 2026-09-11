@@ -10,6 +10,7 @@ import { TENANT_VERIFY_OPTIONS } from "./lib/tokens.js";
 import { authStore, type AuthQueryable } from "./lib/authStore.js";
 import { startShiftRepository, type StartShiftDatabase } from "./repositories/startShiftRepository.js";
 import { identityRepository, type IdentityDatabase } from "./repositories/identityRepository.js";
+import { refreshRepository, type RefreshDatabase } from "./repositories/refreshRepository.js";
 import { registerShiftRoutes } from "./routes/shifts.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 
@@ -29,7 +30,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -125,11 +126,13 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // is built here, from the same database object, so a route never sees Prisma.
   registerShiftRoutes(app, startShiftRepository(prisma));
 
-  // The account routes. `/auth/register` is public because there is no
-  // identity to authenticate yet; `/auth/me` is identity-scoped and reaches
-  // no tenant model. Both are registered after the hook above, so their
-  // posture is applied by it and not by anything inside the route file.
-  registerAuthRoutes(app, identityRepository(prisma));
+  // The account routes — the whole authentication lifecycle. Registered
+  // after the default-deny hook, so every posture is applied by it and not by
+  // anything inside the route file. TWO repositories, deliberately separate:
+  // `identityRepository` owns User/Session creation and membership reads,
+  // `refreshRepository` owns credential resolution and rotation and is the
+  // narrow surface that makes F-21's ambiguous lookup unexpressible.
+  registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma));
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

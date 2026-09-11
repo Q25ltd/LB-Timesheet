@@ -14,12 +14,15 @@ import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { BrandLockup } from "../../src/components/Brand";
+import { BiometricOptIn } from "../../src/components/BiometricOptIn";
 import { useAuth } from "../../src/auth/AuthContext";
 import { colors, spacing, typography } from "../../src/theme/index";
 
 export default function Today() {
   const insets = useSafeAreaInsets();
-  const { account, signOut } = useAuth();
+  const {
+    account, signOut, biometrics, biometricUnlockEnabled, enableBiometricUnlock,
+  } = useAuth();
 
   if (account === null) {
     // Reached only by deep link before a session exists.
@@ -40,6 +43,13 @@ export default function Today() {
       </Text>
       <Text style={[typography.subtitle, styles.subtitle]}>{account.user.email}</Text>
 
+      {/* Offered once, and only where it can work: hardware present, a
+          biometric enrolled, and not already on. Declining is final for this
+          session and costs the driver nothing (D26). */}
+      {biometrics.available && !biometricUnlockEnabled ? (
+        <BiometricOptIn label={biometrics.label} onEnable={enableBiometricUnlock} />
+      ) : null}
+
       <View style={styles.card} testID="company-state">
         <Text style={styles.cardTitle}>
           {hasCompany ? "Your companies" : "No company linked"}
@@ -59,7 +69,10 @@ export default function Today() {
         </Text>
       </View>
 
-      <Pressable onPress={() => { void signOut().then(() => { router.replace("/register"); }); }} accessibilityRole="button" hitSlop={8}>
+      {/* `signOut` revokes the SERVER session first and clears the device
+          either way, so a driver with no signal is still signed out locally.
+          Then SIGN-IN, not registration — they still have an account. */}
+      <Pressable onPress={() => { void signOut().then(() => { router.replace("/sign-in"); }); }} accessibilityRole="button" hitSlop={8}>
         <Text style={styles.link}>Sign out</Text>
       </Pressable>
     </ScrollView>

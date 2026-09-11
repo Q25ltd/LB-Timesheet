@@ -1,11 +1,24 @@
 /**
- * The account routes: register, and read the authenticated account (D21).
+ * The account routes: the complete authentication lifecycle (D21).
  *
- * Two postures, both stated explicitly at the registration site so a reader
- * sees them without knowing the hook's default:
+ * Every posture is stated explicitly at its registration site, so a reader
+ * sees it without having to know the hook's default:
  *
- *   POST /auth/register   public    — there is no identity yet to authenticate
- *   GET  /auth/me         identity  — an account, with or without a company
+ *   POST /auth/register        public    — there is no identity yet
+ *   POST /auth/login           public    — proving identity IS the point
+ *   POST /auth/refresh         public    — the CREDENTIAL authenticates it;
+ *                                          the caller's access token has
+ *                                          expired, which is why it is here
+ *   POST /auth/logout          identity  — revokes the caller's own session
+ *   POST /auth/switch-company  identity  — account-level; yields TENANT
+ *                                          authority from a validated row
+ *   GET  /auth/me              identity  — an account, with or without a company
+ *
+ * `public` on `/auth/refresh` means "no Authorization header is required",
+ * not "unauthenticated": the refresh secret is the credential, and it is
+ * verified against a persisted Session digest before anything is issued. It
+ * cannot be marked `identity` precisely because an identity token is what the
+ * caller no longer has.
  *
  * Neither touches Prisma, neither reads tenant identity out of the payload,
  * and neither decides anything: they parse input into a DTO and hand it, with
@@ -18,6 +31,10 @@ import type { ZodError } from "zod";
 import type { IdentityContext } from "../lib/auth.js";
 import { AppError } from "../lib/errors.js";
 import type { IdentityRepository } from "../repositories/identityRepository.js";
+import type { RefreshRepository } from "../repositories/refreshRepository.js";
+import { SwitchCompanyBody, switchCompany } from "../services/companySwitch.js";
+import { LoginBody, login } from "../services/login.js";
+import { RefreshBody, logout, refresh } from "../services/refresh.js";
 import { RegisterBody, accountView, register } from "../services/registration.js";
 
 /**
@@ -52,7 +69,11 @@ function invalidRequest(error: ZodError): AppError {
   return new AppError(400, "Invalid request", "VALIDATION", details);
 }
 
-export function registerAuthRoutes(app: FastifyInstance, accounts: IdentityRepository): void {
+export function registerAuthRoutes(
+  app: FastifyInstance,
+  accounts: IdentityRepository,
+  sessions: RefreshRepository,
+): void {
   app.post(
     "/auth/register",
     { config: { authPosture: "public" } },
@@ -65,6 +86,69 @@ export function registerAuthRoutes(app: FastifyInstance, accounts: IdentityRepos
       // through one visible parameter.
       const result = await register(parsed.data, accounts, app.jwt);
       return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    "/auth/login",
+    // Public for the same reason registration is: a driver logging in has no
+    // token by definition. A stale identity token the phone still holds in
+    // memory is irrelevant here and is never verified — the body decides.
+    { config: { authPosture: "public" } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const parsed = LoginBody.safeParse(request.body);
+      if (!parsed.success) throw invalidRequest(parsed.error);
+
+      // 200, not 201: authenticating creates a Session, but the resource the
+      // caller asked about — the account — already existed. Registration's
+      // 201 is for the account it creates.
+      const result = await login(parsed.data, accounts, app.jwt);
+      return reply.status(200).send(result);
+    },
+  );
+
+  app.post(
+    "/auth/refresh",
+    // Public in the POSTURE sense only: no access token is required, because
+    // the caller's has expired. The refresh secret in the body is the
+    // credential, and the service verifies its digest against a live Session
+    // before issuing anything.
+    { config: { authPosture: "public" } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const parsed = RefreshBody.safeParse(request.body);
+      if (!parsed.success) throw invalidRequest(parsed.error);
+
+      const result = await refresh(parsed.data, sessions, app.jwt);
+      return reply.status(200).send(result);
+    },
+  );
+
+  app.post(
+    "/auth/logout",
+    // Identity posture: the session being revoked is the one the token names.
+    // There is no body — a logout that could name its own session could log
+    // out somebody else's device.
+    { config: { authPosture: "identity" } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      await logout(identified(request.identity).sessionId, sessions);
+      // 204: the session is gone and there is nothing to describe.
+      return reply.status(204).send();
+    },
+  );
+
+  app.post(
+    "/auth/switch-company",
+    // Identity posture, and that is the interesting part: an ACCOUNT-level
+    // token is what may ASK for tenant authority. The tenant token this
+    // returns is minted from the membership row the server loads, so the
+    // request cannot carry the authority it is requesting.
+    { config: { authPosture: "identity" } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const parsed = SwitchCompanyBody.safeParse(request.body);
+      if (!parsed.success) throw invalidRequest(parsed.error);
+
+      const result = await switchCompany(parsed.data, identified(request.identity), accounts, sessions, app.jwt);
+      return reply.status(200).send(result);
     },
   );
 

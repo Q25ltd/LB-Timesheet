@@ -1,48 +1,46 @@
 /**
- * Sign in — NOT IMPLEMENTED, and visibly so.
+ * The sign-in route. Wiring only: the screen owns the form, the auth provider
+ * owns the session, and this file connects them and navigates.
  *
- * Login is the next increment. This screen exists so the "Already have an
- * account?" link in the reference design has somewhere honest to go during
- * development, and it deliberately has NO email field, NO password field and
- * NO submit control: a form that looks real and silently does nothing is
- * worse than no form, because it teaches a tester that login is broken
- * rather than absent.
+ * The biometric action is passed down ONLY when this device is genuinely
+ * eligible — hardware present and enrolled, the driver opted in, and the last
+ * restore attempt stopped at the biometric gate rather than for some other
+ * reason. Anything less and the control is not rendered: a biometric button
+ * that cannot work is worse than none.
+ *
+ * Note what this file does NOT do: it never inspects a token and never decides
+ * that anyone is authenticated. `unlock()` asks the provider to gate on the OS
+ * and then let the SERVER validate the session (D26).
  */
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { BrandLockup } from "../../src/components/Brand";
-import { colors, spacing, typography } from "../../src/theme/index";
+import { SignInScreen } from "../../src/screens/SignInScreen";
+import { useAuth } from "../../src/auth/AuthContext";
+import type { AuthenticatedAccount } from "../../src/api/account";
 
-export default function SignInPlaceholder() {
-  const insets = useSafeAreaInsets();
+export default function SignInRoute() {
+  const { signIn, unlock, biometrics, biometricUnlockEnabled, restoreOutcome } = useAuth();
+
+  // "biometric-locked" means a credential IS stored and the gate is what
+  // stopped us — so offering to try again is honest. After "expired" the
+  // credential has been deleted and only a password can help; after "offline"
+  // the problem is the network, not the driver's face.
+  const eligible = biometrics.available && biometricUnlockEnabled && restoreOutcome === "biometric-locked";
+
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom }]}>
-      <BrandLockup />
-      <View style={styles.notice} testID="sign-in-not-implemented">
-        <Text style={styles.noticeTitle}>Sign in is not built yet</Text>
-        <Text style={typography.helper}>
-          Registration is the current increment. Signing in with an existing account
-          arrives next — there is no login API to call yet, so nothing here would work.
-        </Text>
-      </View>
-      <Pressable onPress={() => { router.back(); }} accessibilityRole="button" hitSlop={8}>
-        <Text style={styles.link}>Back to create account</Text>
-      </Pressable>
-    </View>
+    <SignInScreen
+      onSignedIn={async (account: AuthenticatedAccount) => {
+        await signIn(account);
+        // `replace`, not `push`: sign-in is complete and the back gesture
+        // must not return a signed-in driver to the credentials form.
+        router.replace("/today");
+      }}
+      onCreateAccount={() => {
+        // `replace`, not `push`: sign-in is the signed-out DEFAULT (see
+        // `app/index.tsx`), so the two auth screens replace one another and
+        // the stack never holds both.
+        router.replace("/register");
+      }}
+      {...(eligible ? { biometricUnlock: { label: biometrics.label, unlock } } : {})}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, paddingHorizontal: spacing.xl, gap: spacing.xl },
-  notice: {
-    backgroundColor: "#FFF6E5",
-    borderColor: "#E4B95B",
-    borderWidth: 1,
-    borderRadius: spacing.md,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
-  noticeTitle: { fontSize: 17, fontWeight: "700", color: "#7A5A12" },
-  link: { color: colors.brandLight, fontWeight: "700", fontSize: 16, textAlign: "center" },
-});

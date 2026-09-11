@@ -9,7 +9,7 @@
  * Nothing in this module logs, and nothing returns the plaintext or the hash
  * to a caller that did not already have it.
  */
-import { hash } from "bcryptjs";
+import { compare, hash } from "bcryptjs";
 import { z } from "zod";
 
 /**
@@ -64,12 +64,93 @@ export const PasswordPolicy = z
     { message: `Password must be at most ${String(PASSWORD_MAX_BYTES)} bytes` },
   );
 
+/**
+ * The password field as a LOGIN request must declare it.
+ *
+ * Deliberately NOT `PasswordPolicy`. A policy governs a NEW credential; a
+ * login checks the credential the driver actually has. Enforcing today's
+ * minimum here would lock every existing account out the day the minimum
+ * changed, and would answer a short password `400` where every other
+ * authentication failure is `401` — a difference an attacker can read.
+ *
+ * What survives is the part that is not policy but arithmetic: bcrypt reads
+ * at most 72 BYTES, so a longer input cannot be anyone's stored credential
+ * and is refused as a malformed request rather than hashed. The character
+ * `.max()` alongside it satisfies check-rules' `zod-max` and cheaply bounds
+ * a public endpoint; the byte check is the load-bearing one.
+ *
+ * Not `.trim()`ed, for the same reason `PasswordPolicy` is not: whitespace is
+ * part of the credential, and trimming it at login would refuse a password
+ * the driver legitimately chose.
+ */
+export const LoginPasswordField = z
+  .string()
+  .min(1)
+  .max(PASSWORD_MAX_BYTES)
+  .refine(
+    value => Buffer.byteLength(value, "utf8") <= PASSWORD_MAX_BYTES,
+    { message: `Password must be at most ${String(PASSWORD_MAX_BYTES)} bytes` },
+  );
+
+/**
+ * A fixed, valid cost-12 bcrypt hash, used ONLY to make the unknown-email
+ * path cost what the wrong-password path costs.
+ *
+ * Measured on Node 22.13 before adoption: bcrypt verification is ~230 ms and
+ * returning early without one is ~0 ms. A login that skips the comparison
+ * when no account exists therefore answers an unknown email roughly 230 ms
+ * faster than a wrong password — an account-enumeration oracle that survives
+ * a byte-identical response body. Verifying against this constant closes it.
+ *
+ * It is a CONSTANT, not a per-request hash: hashing on the fly would cost a
+ * further ~230 ms and make the unknown-email path the SLOWER one, inverting
+ * the oracle instead of removing it.
+ *
+ * The plaintext it was derived from was 32 random bytes, generated once and
+ * discarded — it was never chosen, never stored and never known, so no input
+ * can match this digest and no account can ever carry it.
+ */
+const UNKNOWN_ACCOUNT_HASH = "$2b$12$jj05ATzjNPB4aCy3Kv9UAeGIrqJLB..focy4KxX1866BVZxBP9ULq";
+
 /** Hash a password for storage. The plaintext never leaves this call. */
 export function hashPassword(plaintext: string): Promise<string> {
   return hash(plaintext, PASSWORD_BCRYPT_COST);
 }
 
-// NOTE: there is deliberately no `verifyPassword` here yet. Login is the
-// next increment, and a comparison function with no caller is code written
-// and never imported (CLAUDE.md, "Register what you create"). It belongs in
-// this module when the increment that calls it lands.
+/**
+ * Does this plaintext match the stored hash?
+ *
+ * FAIL-CLOSED on a malformed or unsupported stored hash, and that is not
+ * defensive tidiness — it was measured. `bcryptjs.compare` returns `false`
+ * for an empty string, a non-bcrypt string, a truncated hash and an argon2
+ * hash, but THROWS on an unknown salt revision (`$2z$...`: "Invalid salt
+ * revision"). An escaping throw reaches the global handler as
+ * `500 { "error": "Something went wrong", "code": "INTERNAL" }`, which is a
+ * DIFFERENT answer from the canonical 401 — so a single legacy or corrupted
+ * row would turn this boundary into an oracle for "that account's stored
+ * hash is broken". Catching it makes every stored-hash state answer alike.
+ *
+ * Nothing here logs. A log line at this point is a log line containing the
+ * moment a specific account failed to authenticate, and the error text names
+ * the stored hash's shape.
+ */
+export async function verifyPassword(plaintext: string, storedHash: string): Promise<boolean> {
+  try {
+    return await compare(plaintext, storedHash);
+  } catch {
+    // A hash this build cannot read is not a credential that matches.
+    return false;
+  }
+}
+
+/**
+ * Spend the same verification work as a real account would, and match
+ * nothing. The ONLY caller is login's unknown-email path.
+ *
+ * Returns `Promise<void>` rather than the `false` it always produces: a
+ * boolean invites a caller to branch on it, and there is nothing to branch
+ * on — the answer is already "no account".
+ */
+export async function verifyAgainstUnknownAccount(plaintext: string): Promise<void> {
+  await verifyPassword(plaintext, UNKNOWN_ACCOUNT_HASH);
+}
