@@ -4,6 +4,107 @@
 
 ---
 
+## 2026-09-12 — Governance correction, and the authentication audit closed out
+
+Two things, in order: a rule change about what an agent may leave behind, and
+the narrow remediation the owner authorised from the independent authentication
+audit of `049cc37`. **No production code changed in either.**
+
+**Scope control was being read as permission to ship a known defect.**
+`AGENT_WORKFLOW.md` §3 listed "documentation is stale" and "a security issue
+looks fixable" among the reasons an agent MUST NOT widen scope, and §19 said
+flatly: *"On discovering a potential issue you MUST NOT fix it."* Read together
+with `CLAUDE.md`'s session-end checklist, a future agent that proved a test was
+lying would have been required to report it and walk away. `CLAUDE.md` also
+contradicted itself — "fix the doc in the same session" against "do not modify
+any of them unless the current task explicitly authorises it".
+
+The new **§3.1** resolves it with seven conditions, all of which must hold: the
+cause is understood, the correction is local to what you are already touching,
+no frozen decision moves, no owner choice is needed, no architectural or
+dependency expansion, no unavailable environment, and it can be completely
+verified this session. Then you fix it. If any condition fails — especially "I
+cannot yet prove it is a defect" — you report and STOP. Speculative cleanup,
+repository-wide scanning and "while I am here" improvements stay forbidden, and
+are named as such. The distinguishing question is not *"could this be better?"*
+but *"have I already proven this is wrong, here, in what I am touching?"*
+
+**Deferred now needs a trigger.** §19 requires every `DEFERRED` finding to name
+the lifecycle gate that makes it mandatory. F-15, F-16, F-17 and F-18 were
+reconciled to carry explicit ones. Known, bounded, triggered debt is fine;
+forgotten debt is not, and "maybe later" is not a status.
+
+**F-25 — a test that proved nothing.** `R16` claimed to make
+`session.userId === sub` load-bearing in the identity pipeline. It did not: its
+double returned no row for the foreign user, so with the production check
+deleted the request fell through to `accountView`'s own account-not-found path,
+which throws a byte-identical 401. The assertion passed either way. The double
+now returns a real second account, so deleting the binding makes the request
+**succeed** — which is the actual failure. Proven: R16 alone went red,
+`expected 401, actual 200`; against a real database the same mutation returned
+the victim's email from `/auth/me` and revoked the victim's session via
+`/auth/logout`. Production code untouched and correct throughout — this closed
+a coverage gap of the same class F-24 closed for `requireAuth`.
+
+**F-26 — two conditional predicates nothing was testing.** The service checks
+the grace deadline in JavaScript before calling the repository, and a race
+cannot force the interleaving that would expose a missing atomicity condition,
+so both `rotateFromGrace`'s `graceUntil > now` and `rotateCurrent`'s
+`refreshTokenHash = presentedDigest` could be deleted with the whole suite
+staying green. Both are now proven at the repository level, deterministically,
+by varying only `now` and only the presented digest: `R15` and `C4`. Each was
+shown load-bearing by deleting only its own predicate.
+
+**F-27 — the contract was stronger than the design.** AUTH.md said two
+simultaneous refreshes "cannot both rotate", and `C1` asserted the literal pair
+`[200, 401]`. Measurement says otherwise: when the first rotation commits before
+the second resolves, the second finds the presented digest in the PREVIOUS
+column and legitimately succeeds through grace recovery — the mechanism AUTH.md
+itself provides. `[200, 200]` was observed 4 times in 40 concurrent rounds, and
+is routine at three or more simultaneous requests. So `C1` was asserting a
+timing accident and could fail spuriously.
+
+AUTH.md now states the invariant the design always had: only one request may
+rotate a credential as CURRENT; a concurrent request may legitimately recover;
+concurrency must never produce two usable lineages, a forked Session or a moved
+`expiresAt`. The owner authorised that clarification explicitly — it changed no
+behaviour. Correcting `C1` removed the incidental protection its status
+assertion gave to atomicity, which is exactly why `C4` now covers that
+deterministically under F-26: the invariant is proven at least as strongly as
+before, and no longer by luck (§10).
+
+**A stale schema comment, fixed under the new rule.** `Session` in
+`schema.prisma` still said JWT verification, `requireAuth`, login, refresh
+rotation and `AuthContext` were "all unbuilt". Every one of them ships and
+reads that row on every request. Comment only — no model change, no migration.
+This is the smallest possible example of what §3.1 is for: nobody asked for it,
+it was provably false, and it sat in a file already being worked on. No finding
+ID; findings are not created mechanically.
+
+**Deferred and accepted, deliberately.** F-28 records the measured `bcryptjs`
+exposure — 238 ms per hash on the only event loop, a 25-request anonymous login
+burst degrading `/health` by 94×, and a limiter permitting ~71 s of main-thread
+CPU per 60 s — and gates it at the **PUBLIC DEPLOYMENT GATE** beside F-15.
+Redesigning hashing or rate limiting inside a test-and-docs closeout would have
+been precisely the speculative architecture §25 forbids. F-29 accepts the
+multi-valued JWT audience: forging one needs `JWT_SECRET`, and an attacker
+holding that can already mint anything. F-30 accepts the offline-logout
+residual: the local clear is correct and must stay unconditional, and a retry
+design would have to retain revocation authority on a device whose user just
+asked to be logged out — a real trade-off, not an oversight.
+
+**Not touched, and why.** F-23 (the unanchored `lib/auth` rule exemption) and
+F-22(b) (the `as unknown as TenantContext` double cast) are both real and both
+outside anything this session worked in, and both already record that an owner
+disposition is required. §3.1 does not reach them. They stay as they are, and
+they are reported rather than quietly carried forward.
+
+Gate after the work: **177 API unit · 111 mobile · 148 DB · 8 migrations**, exit
+0. Migrations unchanged, schema semantics unchanged, production authentication
+byte-identical.
+
+---
+
 ## 2026-09-11 — The complete driver authentication system
 
 Refresh rotation, session restoration, biometric unlock, logout with
@@ -37,6 +138,11 @@ acting on; the affected-row count is the proof it won. Two simultaneous
 refreshes of one credential therefore cannot both rotate — which matters
 because the alternative silently logs the winner out when the loser overwrites
 its brand-new credential. The loser recovers through the grace window.
+
+> **Corrected 2026-09-12 (F-27).** "Cannot both rotate" is true only of
+> rotating as CURRENT. A concurrent request whose resolve happens after the
+> first commit legitimately succeeds through grace recovery, so two `200`s are
+> a correct outcome. See the 2026-09-12 entry above and AUTH.md.
 
 **The grace window is a lost RESPONSE, not a lost request.** Recovery from a
 previous credential writes a fresh current digest and leaves the previous

@@ -7,7 +7,10 @@
 > Stop and ask.
 >
 > **Status: FROZEN 2026-08-25. Amended 2026-09-10 by D21–D24, and 2026-09-11
-> by D26 plus the refresh/logout/switch specifics marked below.**
+> by D26 plus the refresh/logout/switch specifics marked below. Clarified
+> 2026-09-12 by owner decision (F-27): the refresh concurrency wording, which
+> an independent audit measured to be stronger than the design it describes.
+> That clarification changed no behaviour.**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -180,9 +183,25 @@ the Session row, never in plaintext.
 
 **Every write is a conditional `updateMany` whose `where` restates the state
 the caller believed it was acting on**, and whose affected-row count is the
-proof it won. Two simultaneous refreshes of one credential cannot both rotate:
-exactly one matches, and the loser is refused — it can still recover, because
-the credential it holds is now the previous one.
+proof it won. Only ONE request may rotate a given credential as **CURRENT**:
+exactly one matches that condition, and a caller acting on a superseded digest
+matches no row at all.
+
+*Clarified 2026-09-12, by owner decision, after an independent audit measured
+the earlier wording to be stronger than this design.* A concurrent request is
+**not** therefore refused. If the first rotation commits before the second
+resolves, the second finds the presented digest in the **previous** column and
+legitimately succeeds through the grace recovery above — the mechanism that
+exists so a lost response is survivable, working exactly as intended. Two
+simultaneous refreshes of one credential may therefore both answer `200`, and
+that is correct behaviour, not a defect.
+
+What concurrency must **never** produce: two independently usable refresh
+lineages · a forked Session · a moved `expiresAt` · an incoherent row. At most
+one issued secret is the live credential; any other is dead the moment it is
+issued, and a caller refused by the race still recovers with the credential it
+holds. This is a clarification of the recovery design already specified above —
+it is not a change to it.
 
 **Rotation NEVER moves `Session.expiresAt`.** The 90-day lifetime is the
 Session's; rotating credentials inside it is not a reason to extend it.

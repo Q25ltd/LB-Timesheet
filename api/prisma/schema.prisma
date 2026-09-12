@@ -128,9 +128,10 @@ model User {
 /// Session in GLOBAL_MODELS for exactly this reason — do not "fix" it by
 /// adding companyId.
 ///
-/// Persistence only. Nothing in this repo reads these columns yet: JWT
-/// verification, requireAuth, login, refresh rotation and AuthContext are all
-/// unbuilt (see STATUS.md).
+/// These columns are load-bearing at runtime: the authentication boundary
+/// reads this row on EVERY protected request, and refresh rotation conditions
+/// its writes on the digest columns below. Do not treat any of them as inert
+/// persistence. STATUS.md owns which parts are built.
 model Session {
   id        String   @id @default(cuid())
   userId    String
