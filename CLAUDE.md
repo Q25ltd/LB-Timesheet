@@ -2,7 +2,7 @@
 
 > Read this file first, every session, no exceptions. Then AGENT_WORKFLOW.md.
 > This file owns the product and the code rules; AGENT_WORKFLOW.md owns the process.
-> Last updated: 2026-08-31
+> Last updated: 2026-09-12
 
 ---
 
@@ -90,7 +90,9 @@ sentence — stop.
 2. **Read DEVLOG.md top entry** — state what was last done and what was left open.
 3. **Check DECISIONS.md** — do not re-litigate settled decisions; do not guess at open ones.
 4. **State what you will do** — and which documentation the work will make
-   stale. Reporting that is not authorisation to change it (AGENT_WORKFLOW.md §18).
+   stale. Reporting that is not authorisation to rewrite unrelated documents;
+   the ones your own change falsifies are reconciled at session end
+   (AGENT_WORKFLOW.md §3.1, §18).
 
 ## Session end — mandatory checklist
 
@@ -98,12 +100,16 @@ Before saying "done":
 
 1. **Report what the work made stale** — in STATUS.md, DEVLOG.md, DECISIONS.md,
    FINDINGS.md or any other document — and exactly what reconciliation each needs.
-2. **Do not modify any of them unless the current task explicitly authorises
-   that documentation change.**
+2. **Reconcile the documents THIS session's authorised change made false.**
+   Leaving the repository asserting something untrue is a defect, not tidiness
+   (AGENT_WORKFLOW.md §3.1).
+3. **Change nothing else.** A document that was already stale when you arrived,
+   or one your work did not falsify, is reported and left alone unless the task
+   authorises it.
 
 Documentation is a repository change and carries no special permission. There
-are no automatic documentation updates. An explicit STOP means no documentation
-changes at all. See AGENT_WORKFLOW.md §18.
+are no automatic documentation updates beyond item 2. An explicit STOP means no
+documentation changes at all. See AGENT_WORKFLOW.md §18.
 
 ---
 
@@ -127,8 +133,10 @@ Sentences like "not yet implemented" or "X does not exist" rot silently. Only
 STATUS.md may describe what is built. Other docs point to it.
 
 ### Docs may be stale — code and schema win
-If a doc contradicts the code, the doc is wrong. Fix the doc in the same session
-and note it in DEVLOG. Never "fix" code to match a stale doc.
+If a doc contradicts the code, the doc is wrong — never "fix" code to match a
+stale doc. A contradiction in what you are already working on is corrected in
+the same session and noted in DEVLOG (AGENT_WORKFLOW.md §3.1); one spotted
+elsewhere is reported, not chased.
 
 ### Nullable fields
 Optional strings are `String?` in the schema — never `String @default("")`.
@@ -234,6 +242,13 @@ stage, which builds a clean database from the real migrations and runs the
 integrity and Company A/B suites. One command; CI runs the same one.
 
 Never `npm audit fix --force` — see DEVLOG 2026-08-25.
+
+### A proven defect in front of you is not "out of scope"
+Scope control stops invented work; it is not permission to ship something you
+have already proven wrong. A real, understood, locally-correctable defect in
+what you are already working on — a lying test, a false comment, a deterministic
+bug — is fixed and proven in the same session. Everything else is reported.
+AGENT_WORKFLOW.md §3.1 owns the exact conditions and the limits.
 
 ### When in doubt, stop and ask
 Before dropping a column, renaming a status string, changing a default,

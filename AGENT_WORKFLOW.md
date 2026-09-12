@@ -94,14 +94,49 @@ checkout. Report the discrepancy.
 The task defines the authorized scope.
 
 You **MUST NOT** widen it because another improvement looks useful, nearby code
-is untidy, documentation is stale, a dependency could be upgraded, another test
-would be interesting, a security issue looks fixable, or refactoring would make
-implementation easier.
+is untidy, a dependency could be upgraded, another test would be interesting, or
+refactoring would make implementation easier.
 
 Work found outside scope is reported (§19), not performed.
 
 `CLAUDE.md`'s feature test decides whether something belongs in this *product*.
 This rule decides whether it belongs in this *task*. Both must pass.
+
+### 3.1 Scope control is not permission to leave a known defect behind
+
+> Owner decision, 2026-09-12. Scope discipline exists to stop **invented** work.
+> It was never a licence to ship something the agent had already proven wrong.
+
+While performing authorized work, if you encounter a **real and proven** defect
+in a file or subsystem you are **already legitimately working in**, you **MUST
+NOT** knowingly leave it behind merely because the task did not name it —
+provided **every** one of these holds:
+
+- the cause is understood, not guessed;
+- the correction is local to what you are already touching;
+- it changes no frozen product, security or architecture decision (§15);
+- it needs no unresolved owner or product choice (§4);
+- it adds no material architectural expansion, dependency or infrastructure;
+- it needs no credential, hardware or environment you do not have;
+- it can be **completely verified in this session** by the normal gate (§12).
+
+Then you fix it, prove it, and report it as part of the session.
+
+Typical cases: a stale or factually wrong comment · a test that claims to
+protect an invariant but does not · a deterministic local bug · a locally
+fixable unsafe condition · documentation this session's own authorized change
+made false (§18) · an internal inconsistency met head-on during the work.
+
+If **any** condition fails — in particular if you cannot yet prove it *is* a
+defect — this rule does not cover it. Report it and **STOP** (§4, §19).
+
+**This is not permission for** speculative cleanup · scanning the repository for
+unrelated imperfections · aesthetic refactoring · formatting campaigns ·
+dependency upgrades · architecture redesign · feature expansion · "while I am
+here" improvements · changing a frozen decision without owner approval.
+
+The distinguishing question is never "could this be better?" It is: **"have I
+already proven this is wrong, here, in what I am touching?"**
 
 ## 4. No silent assumptions
 
@@ -309,11 +344,17 @@ technically possible.
 Documentation is a repository change and carries no special permission.
 
 **Documentation changes require explicit authorization, like any other
-repository change.** If your work makes `STATUS.md`, `DEVLOG.md`,
-`DECISIONS.md`, `FINDINGS.md` or any other document stale, you **MUST** report
-exactly what needs reconciliation, and you **MUST NOT** modify it unless the
-current task authorizes that documentation change. An explicit STOP means no
-documentation changes at all.
+repository change** — with one exception, stated in §3.1 and repeated here
+because this is where it gets looked up: documentation **this session's own
+authorized change made false** is reconciled as part of closing that work.
+Leaving the repository asserting something untrue is a defect, not tidiness.
+That covers the documents your change actually falsified, and nothing else.
+
+Everything else still requires authorization. Documentation that was already
+stale when you arrived, a document your change did not falsify, and any rewrite
+of a settled decision are **reported** (§19), not edited. You **MUST** report
+exactly what needs reconciliation either way. An explicit STOP means no
+documentation changes at all, that exception included.
 
 There are no automatic documentation updates and no automatic docs-only commits.
 
@@ -332,12 +373,35 @@ rewritten.
 
 ## 19. Findings
 
-On discovering a potential issue you **MUST NOT** fix it. Report: finding ·
+On discovering a potential issue **outside the work you are already performing,
+or one you cannot yet prove**, you **MUST NOT** fix it. Report: finding ·
 severity and impact · evidence · reproduction where appropriate · options ·
 recommendation. Then wait.
 
+A **proven** defect inside work you are already legitimately performing is
+governed by §3.1: fix it, prove it, report it. Reporting is not a way to hand
+forward a defect you could have closed in the session that found it.
+
 `FINDINGS.md` owns every finding ID and its status. You **MUST NOT** invent,
 assign or reuse a finding ID. Planned implementation work is not a finding.
+
+### Deferred is not "maybe later"
+
+A finding recorded as `DEFERRED` **MUST** carry, where applicable:
+
+- why it is not being fixed now;
+- the current risk of leaving it;
+- the condition that makes fixing it mandatory;
+- the **lifecycle gate** at which it must be resolved — for example
+  **PUBLIC DEPLOYMENT GATE** · **RELEASE / APP STORE GATE** ·
+  **BEFORE SUBMISSION IMPLEMENTATION** · **BEFORE COMPANY ONBOARDING**.
+
+A limitation that is intentional and will not be fixed is `ACCEPTED` with its
+reason, not `DEFERRED`. Deferral without a trigger is not a status; it is a
+forgotten defect wearing one.
+
+Known, bounded, recorded and triggered debt is permissible. Unknown or forgotten
+debt is not. `FINDINGS.md` owns the vocabulary and the per-finding record.
 
 ---
 
