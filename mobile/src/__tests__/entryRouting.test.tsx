@@ -10,10 +10,13 @@
  * `isAuthenticated` during render. Each case below mounts a FRESH
  * `AuthProvider` — whose initial state is `account: null` — and renders
  * `Index` as the first and only screen. That is exactly the cold-start
- * condition: no prior screen, no history, no stored state (session
- * restoration does not exist yet, so a process start is always signed out).
+ * condition: no prior screen, no history, and no stored credential — the
+ * SecureStore double is cleared before every test (`jest.setup.js`), so the
+ * provider's startup restore finds nothing to redeem and settles signed out.
  * The first case asserts the fresh-provider precondition explicitly, so the
  * others cannot pass by accident on a provider that was already populated.
+ * Restoration itself IS built, and `sessionRestore.test.tsx` owns it — these
+ * cases are about the routing decision, not about restoring a session.
  *
  * `expo-router` is mocked at the module boundary — it needs a real navigation
  * tree and native context that Jest has none of. `Redirect` is replaced by
@@ -104,8 +107,8 @@ afterEach(() => { jest.restoreAllMocks(); });
 
 test("a fresh AuthProvider is unauthenticated — the precondition every cold-start case below depends on", async () => {
   // Asserted separately so the redirect cases cannot pass against a provider
-  // that happened to be populated. Session restore does not exist, so this is
-  // the real state of every process start.
+  // that happened to be populated. With no credential in the SecureStore
+  // double, this is the real state of a process start.
   function Probe() {
     const { isAuthenticated, account, identityToken } = useAuth();
     return (

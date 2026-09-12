@@ -10,7 +10,14 @@ import { colors, radius, sizing, typography } from "../theme/index";
 
 interface PrimaryButtonProps {
   label: string;
-  onPress: () => void;
+  /**
+   * Omitted only by an action that is genuinely not available yet — Home's
+   * Start Shift, which is rendered `disabled` while the flow behind it is
+   * unbuilt. Passing an empty function instead would make a press look
+   * handled, and a control that answers a press by doing nothing teaches a
+   * driver the app is broken.
+   */
+  onPress?: () => void;
   disabled?: boolean;
   submitting?: boolean;
   testID?: string;

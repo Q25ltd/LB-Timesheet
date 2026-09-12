@@ -650,6 +650,40 @@ and the server's validation all remain.
 **Package:** `expo-local-authentication@~57.0.3`, matched to Expo SDK 57. No
 Expo or React Native upgrade.
 
+### D27 — A personal/independent shift is local-device data; a company shift is server-backed (2026-09-12)
+
+Owner decision. It was agreed earlier and was missing from repository
+authority; recorded here so nothing has to infer it. **Nothing of it is
+implemented** — see STATUS.md.
+
+D21 already settles that a driver account exists without a company. This
+settles what such a driver's own work *is*, and it is two separate things that
+must not be blurred into one:
+
+| | Company shift | Personal / independent shift |
+|---|---|---|
+| Backed by | the server | the device, in V1 |
+| Identity | a real `CompanyMembership` | none — the driver alone |
+| Company authority | the company's, and authoritative | none exists |
+| Submitted to a company | yes | **never** |
+
+**A personal shift invents no tenant.** No placeholder `Company` row, no
+placeholder `CompanyMembership`, and no "personal company" standing in for the
+absence of one — the same prohibition D21 states for registration, for the same
+reason: a fake tenant is indistinguishable from a real one once it is in the
+database, and every tenant-scoping guarantee in this product assumes a
+membership means an employer.
+
+**A personal shift is never submitted or shared with a company**, and **never
+converts into a company shift automatically.** The driver cannot rename a
+company either: where a company exists, its identity is the company's.
+
+*What this decision deliberately does NOT do.* It chooses no storage
+technology, no schema, no sync, no backup and no reconciliation between local
+personal state and the server's one-open-shift invariant (D15) — that last one
+is a real open question and will be decided when personal shifts are built,
+not assumed here. D25 still governs: **no SQLite yet.**
+
 ## ❓ Open — ask the user, do not guess
 
 ### O1 — Retention period and cancellation

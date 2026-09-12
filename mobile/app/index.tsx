@@ -16,14 +16,17 @@
  * also teaches them their session did not survive. Holding here removes it,
  * and the hold is bounded by the API client's own request timeout.
  *
+ * This route guards `/` only. Every screen inside the authenticated group is
+ * guarded by `app/(app)/_layout.tsx`, which applies the same three branches so
+ * a deep link cannot reach an authenticated screen around this file.
+ *
  * Note what is NOT here: no branch on whether the driver has a company. Zero
  * memberships is a fully authenticated state and routes exactly like any
  * other (D21).
  */
 import { Redirect } from "expo-router";
-import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
+import { Restoring } from "../src/components/Restoring";
 import { useAuth } from "../src/auth/AuthContext";
-import { colors, spacing, typography } from "../src/theme/index";
 
 export default function Index() {
   const { status } = useAuth();
@@ -31,26 +34,3 @@ export default function Index() {
   if (status === "restoring") return <Restoring />;
   return <Redirect href={status === "authenticated" ? "/today" : "/sign-in"} />;
 }
-
-/**
- * Deliberately plain. It is on screen for one round trip, and a branded
- * splash that appears for 200ms and vanishes reads as a glitch.
- */
-function Restoring() {
-  return (
-    <View style={styles.screen} testID="auth-restoring">
-      <ActivityIndicator color={colors.brandDark} />
-      <Text style={typography.helper}>Signing you in…</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    backgroundColor: colors.background,
-  },
-});
