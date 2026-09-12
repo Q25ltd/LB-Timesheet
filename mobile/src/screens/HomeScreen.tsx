@@ -40,9 +40,10 @@
 import { View, Text, Image, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandLockup } from "../components/Brand";
+import { TabIcon } from "../components/TabIcon";
 import { BiometricOptIn } from "../components/BiometricOptIn";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { HOME_CARD_IMAGE, HOME_CARD_IMAGE_ASPECT } from "./homeCardImage";
+import { HOME_CARD_IMAGE } from "./homeCardImage";
 import { formatHomeDate, salutationFor } from "./homeGreeting";
 import type { AccountUser } from "../api/account";
 import type { BiometricCapability } from "../auth/biometrics";
@@ -130,19 +131,32 @@ export function HomeScreen({
       <Text style={styles.date} testID="today-date">{formatHomeDate(now)}</Text>
 
       <View style={styles.shiftCard} testID="shift-card">
-        {/* Decoration only — no text sits on it, so nothing depends on where
-            the crop lands. The source and its crop ratio both live in
-            `homeCardImage.ts`, which is what makes the pending replacement an
-            asset swap rather than a layout change. */}
-        <View style={styles.shiftImage} accessible={false} testID="shift-card-image">
-          <Image source={HOME_CARD_IMAGE} style={styles.shiftImageFill} resizeMode="cover" />
-        </View>
+        {/* The photograph is the card's BACKGROUND, not a band above it: the
+            approved design puts the copy on top of it, with the truck entering
+            from the right. The asset carries its own left-to-right fade to
+            transparency, so the copy side is the card's own surface colour and
+            nothing is layered over the text to keep it legible. See
+            `homeCardImage.ts` for how the fade is produced and why it lives in
+            the asset rather than in a gradient dependency. */}
+        <Image
+          source={HOME_CARD_IMAGE}
+          style={styles.shiftImage}
+          resizeMode="cover"
+          accessible={false}
+          testID="shift-card-image"
+        />
 
         <View style={styles.shiftBody}>
-          <Text style={styles.shiftTitle}>Ready to start your day?</Text>
-          <Text style={styles.shiftCopy}>
-            Booking on, truck and trailer checks, and your daily timesheet all begin here.
-          </Text>
+          <View style={styles.shiftIcon}>
+            <TabIcon name="clock" color={colors.brandDark} size={26} />
+          </View>
+
+          {/* Held to the quiet side of the image. The fade reaches full
+              opacity around the truck's nose, so the copy never crosses it. */}
+          <View style={styles.shiftText}>
+            <Text style={styles.shiftTitle}>Ready to start your day?</Text>
+            <Text style={styles.shiftCopy}>Checks, hours and your timesheet start here.</Text>
+          </View>
 
           <View style={styles.shiftAction}>
             <PrimaryButton label="Start Shift" disabled testID="start-shift" />
@@ -211,13 +225,24 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: spacing.lg,
   },
-  // Ratio, not height: the band scales with the phone's width, cannot squash
-  // on a narrow screen, and a replacement image of any landscape proportion
-  // lands in the same box.
-  shiftImage: { width: "100%", aspectRatio: HOME_CARD_IMAGE_ASPECT },
-  shiftImageFill: { width: "100%", height: "100%" },
-  shiftBody: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.lg },
-  shiftTitle: { fontSize: 19, fontWeight: "700", color: colors.brandDark },
+  // Absolutely filling the card rather than sitting above it: the card's
+  // height comes from its CONTENT, and the image covers whatever that is. No
+  // aspect ratio to keep in step with the copy.
+  shiftImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
+  shiftBody: { padding: spacing.lg },
+  shiftIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.sm,
+  },
+  // A share of the width, not a fixed one, so the copy holds the same
+  // proportion of the card on every phone.
+  shiftText: { width: "56%" },
+  shiftTitle: { fontSize: 19, fontWeight: "700", color: colors.brandDark, lineHeight: 24 },
   shiftCopy: { ...typography.helper, fontSize: 14, lineHeight: 19, marginTop: spacing.xs },
   shiftAction: { marginTop: spacing.lg },
 

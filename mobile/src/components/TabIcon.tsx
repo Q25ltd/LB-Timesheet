@@ -16,7 +16,7 @@
 import { View, StyleSheet } from "react-native";
 import { colors } from "../theme/index";
 
-export type TabIconName = "home" | "document" | "chart" | "gear";
+export type TabIconName = "home" | "document" | "chart" | "gear" | "clock";
 
 interface TabIconProps {
   name: TabIconName;
@@ -33,6 +33,7 @@ export function TabIcon({ name, color, size = DEFAULT_SIZE }: TabIconProps) {
       {name === "document" ? <DocumentGlyph color={color} size={size} /> : null}
       {name === "chart" ? <ChartGlyph color={color} size={size} /> : null}
       {name === "gear" ? <GearGlyph color={color} size={size} /> : null}
+      {name === "clock" ? <ClockGlyph color={color} size={size} /> : null}
     </View>
   );
 }
@@ -145,6 +146,41 @@ function GearGlyph({ color, size }: { color: string; size: number }) {
           backgroundColor: colors.surface,
         }}
       />
+    </View>
+  );
+}
+
+/** A ring with an hour and a minute hand. */
+function ClockGlyph({ color, size }: { color: string; size: number }) {
+  const unit = size / 24;
+  // Each hand pivots about the face's centre: the bar's BOTTOM sits there, and
+  // `transformOrigin` rotates it around that point rather than its own middle.
+  const hand = (length: number, degrees: number) => ({
+    position: "absolute" as const,
+    bottom: "50%" as const,
+    width: 2 * unit,
+    height: length * unit,
+    backgroundColor: color,
+    borderRadius: unit,
+    transformOrigin: "bottom center" as const,
+    transform: [{ rotate: `${String(degrees)}deg` }],
+  });
+  return (
+    <View style={styles.centred}>
+      <View
+        style={{
+          width: 20 * unit,
+          height: 20 * unit,
+          borderRadius: 10 * unit,
+          borderWidth: 2 * unit,
+          borderColor: color,
+        }}
+      />
+      {/* Ten past ten: both hands ABOVE the centre line, which is why clock
+          faces are conventionally drawn at this time. Hands near-opposite
+          would render as a single diagonal stroke and read as a slash. */}
+      <View style={hand(6, -60)} />
+      <View style={hand(7.5, 60)} />
     </View>
   );
 }
