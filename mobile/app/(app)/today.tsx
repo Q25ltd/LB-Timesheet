@@ -1,11 +1,11 @@
 /**
  * The Home route. Wiring only: the screen owns the rendering, the auth
  * provider owns the session, and this file connects them and navigates —
- * the same shape both auth routes have.
+ * the same shape every other route has.
  *
- * It no longer carries an "account is null" placeholder. `(app)/_layout.tsx`
- * now holds while the session is restoring and redirects a signed-out driver
- * to sign-in, so this route is only ever reached with a live session.
+ * It carries no "account is null" placeholder. `(app)/_layout.tsx` holds while
+ * the session is restoring and redirects a signed-out driver to sign-in, so
+ * this route is only ever reached with a live session.
  */
 import { router } from "expo-router";
 import { HomeScreen } from "../../src/screens/HomeScreen";
@@ -13,7 +13,7 @@ import { useAuth } from "../../src/auth/AuthContext";
 
 export default function TodayRoute() {
   const {
-    account, signOut, biometrics, biometricUnlockEnabled, enableBiometricUnlock,
+    account, biometrics, biometricUnlockEnabled, enableBiometricUnlock,
   } = useAuth();
 
   // The gate renders this route only when the provider is `authenticated`, and
@@ -29,10 +29,9 @@ export default function TodayRoute() {
       biometrics={biometrics}
       biometricUnlockEnabled={biometricUnlockEnabled}
       onEnableBiometrics={enableBiometricUnlock}
-      // `signOut` revokes the SERVER session first and clears the device
-      // either way, so a driver with no signal is still signed out locally.
-      // Then SIGN-IN, not registration — they still have an account.
-      onSignOut={() => { void signOut().then(() => { router.replace("/sign-in"); }); }}
+      // Sign out moved to Settings, which the badge opens. `navigate` rather
+      // than `replace`: these are sibling tabs, not a stack to rewrite.
+      onOpenAccount={() => { router.navigate("/settings"); }}
     />
   );
 }

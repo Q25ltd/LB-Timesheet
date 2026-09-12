@@ -9,10 +9,11 @@
  * signed anyone in and never navigated — a dead end with no way forward and no
  * way back.
  *
- * The fix is structural rather than per-screen on purpose: every future screen
- * added under `(app)` inherits this gate without its author remembering
- * anything, which is the same polarity the API's default-deny route hook has
- * (F-10, D16 — prevention over instruction).
+ * The fix is structural rather than per-screen on purpose: the gate sits ABOVE
+ * the tab navigator, so all four destinations are covered by one check and a
+ * screen added later inherits it without its author remembering anything —
+ * the same polarity the API's default-deny route hook has (F-10, D16 —
+ * prevention over instruction).
  *
  * WHY `restoring` GETS ITS OWN CASE. A refresh credential is redeemed over the
  * network at startup. Treating that moment as "not authenticated" would send a
@@ -38,7 +39,13 @@ jest.mock("expo-router", () => {
     // duplicate.
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
-    Stack: () => react.createElement(rn.Text, { testID: "app-stack" }, "stack"),
+    // The tab navigator needs a real navigation tree Jest has none of, so it
+    // is a marker. Its PRESENCE is the question every case here asks: did the
+    // authenticated shell mount, or did it not?
+    Tabs: Object.assign(
+      () => react.createElement(rn.Text, { testID: "app-tabs" }, "tabs"),
+      { Screen: (_props: { name: string }) => null },
+    ),
   };
 });
 
@@ -94,7 +101,7 @@ test("UNAUTHENTICATED: a direct hit on an authenticated route redirects to sign-
   await waitFor(() => { expect(view.queryByTestId("redirect")).not.toBeNull(); });
   expect(String(view.getByTestId("redirect").props.children)).toBe("/sign-in");
   // And crucially the authenticated tree is NOT rendered behind the redirect.
-  expect(view.queryByTestId("app-stack")).toBeNull();
+  expect(view.queryByTestId("app-tabs")).toBeNull();
 });
 
 test("UNAUTHENTICATED: the driver is never left on a placeholder that cannot proceed", async () => {
@@ -119,16 +126,16 @@ test("RESTORING: the gate HOLDS — it does not redirect a driver whose session 
   // No redirect AND no authenticated tree: the gate has not decided yet, and
   // deciding early in either direction is the bug.
   expect(view.queryByTestId("redirect")).toBeNull();
-  expect(view.queryByTestId("app-stack")).toBeNull();
+  expect(view.queryByTestId("app-tabs")).toBeNull();
 });
 
-test("AUTHENTICATED: a restored session renders the authenticated routes, with no redirect", async () => {
+test("AUTHENTICATED: a restored session renders the authenticated tab shell, with no redirect", async () => {
   await SecureStore.setItemAsync(REFRESH_KEY, STORED_SECRET);
   happyNetwork();
 
   const view = await wrap(<AppLayout />);
 
-  await waitFor(() => { expect(view.queryByTestId("app-stack")).not.toBeNull(); });
+  await waitFor(() => { expect(view.queryByTestId("app-tabs")).not.toBeNull(); });
   expect(view.queryByTestId("redirect")).toBeNull();
   expect(view.queryByTestId("auth-restoring")).toBeNull();
 });
@@ -147,5 +154,5 @@ test("a REFUSED credential ends at sign-in rather than inside the authenticated 
 
   await waitFor(() => { expect(view.queryByTestId("redirect")).not.toBeNull(); });
   expect(String(view.getByTestId("redirect").props.children)).toBe("/sign-in");
-  expect(view.queryByTestId("app-stack")).toBeNull();
+  expect(view.queryByTestId("app-tabs")).toBeNull();
 });

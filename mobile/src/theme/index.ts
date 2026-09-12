@@ -13,6 +13,8 @@ export const colors = {
   /** Secondary branding — the "TIMESHEETS" lockup, accents, links. */
   brandLight:  "#2E8BE0",
   surface:     "#FFFFFF",
+  /** The tinted surface behind a highlighted card and the empty-state icons. */
+  surfaceAccent: "#E8F1FC",
   background:  "#F5F8FC",
   border:      "#D4DEEA",
   borderFocus: "#2E8BE0",

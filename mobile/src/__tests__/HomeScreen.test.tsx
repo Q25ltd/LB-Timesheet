@@ -21,16 +21,15 @@
  * asserting "no company appears" against an account that HAS one is the only
  * version of that test that can fail.
  */
-import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
+import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import * as SecureStore from "expo-secure-store";
 import type { ReactElement } from "react";
 import { Text, Pressable } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
 import Today from "../../app/(app)/today";
 
-const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn() };
+const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
 jest.mock("expo-router", () => {
   const react = jest.requireActual<typeof import("react")>("react");
@@ -41,14 +40,13 @@ jest.mock("expo-router", () => {
       replace: (href: string): void => { mockRouter.replace(href); },
       push:    (href: string): void => { mockRouter.push(href); },
       back:    (): void => { mockRouter.back(); },
+      navigate: (href: string): void => { mockRouter.navigate(href); },
     },
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
     Stack: () => react.createElement(rn.Text, { testID: "app-stack" }, "stack"),
   };
 });
-
-const REFRESH_KEY = "logisticbay.refreshToken";
 
 /** Two DIFFERENT drivers. One hard-coded name cannot satisfy both. */
 const NERIJUS: AuthenticatedAccount = {
@@ -125,17 +123,6 @@ function text(view: View, testID: string): string {
   return String(view.getByTestId(testID).props.children);
 }
 
-/**
- * The URL a recorded `fetch` call carried.
- *
- * `fetch`'s first parameter is `RequestInfo | URL`, so stringifying it
- * directly can produce "[object Object]". Narrowed once here — the app only
- * ever passes strings — so the assertion reads a real value or an empty one,
- * never a coerced object. Same helper as `sessionRestore.test.tsx`.
- */
-function callUrl(call: [unknown, RequestInit | undefined] | undefined): string {
-  return typeof call?.[0] === "string" ? call[0] : "";
-}
 
 /**
  * The ENTIRE rendered tree as one lower-cased string — copy, testIDs and
@@ -175,14 +162,16 @@ test("the identity badge shows the driver's own initials, from first AND last na
   expect(text(second, "identity-badge")).toBe("AO");
 });
 
-test("the identity badge is NOT a control — it advertises no navigation it cannot do", async () => {
+test("the identity badge opens Settings — a real destination, not a menu", async () => {
   const view = await homeSignedInAs(NERIJUS);
   const badge = view.getByTestId("identity-badge-container");
 
-  // No press handler and no button role: there is nowhere for it to go yet,
-  // and a badge that looks tappable teaches a driver the app is broken.
-  expect(badge.props.onPress).toBeUndefined();
-  expect(badge.props.accessibilityRole).not.toBe("button");
+  // It became a control only because Settings now exists. It is a button and
+  // says so; it is not a dropdown, and it offers no choices that are not there.
+  expect(badge.props.accessibilityRole).toBe("button");
+
+  await act(async () => { await fireEvent.press(badge); });
+  expect(mockRouter.navigate).toHaveBeenCalledWith("/settings");
 });
 
 test("the greeting carries one salutation, and it is one of exactly three", async () => {
@@ -215,14 +204,30 @@ test("Home does NOT claim there is no active shift — it cannot prove that", as
   expect(rendered).not.toContain("active shift");
   // Nor the opposite claim, which would be equally invented.
   expect(rendered).not.toContain("shift in progress");
+
+  // And no explanatory caption under the button either (owner decision): the
+  // disabled control is sufficient while the workflow is being built, and a
+  // line of apology under every unfinished action does not scale.
+  expect(rendered).not.toContain("not available yet");
 });
 
-test("Home fabricates no timesheet history, no status and no mileage", async () => {
+test("the Recent Timesheets region renders its FRAME and no row data whatsoever", async () => {
+  const view = await homeSignedInAs(NERIJUS);
+
+  // The section exists, because the approved composition calls for it.
+  const section = within(view.getByTestId("recent-timesheets"));
+  expect(view.getByTestId("recent-timesheets-empty")).toBeTruthy();
+
+  // And it contains no NUMBER of any kind — a specimen row would need a date,
+  // a time or a distance, and this is the assertion it could not survive.
+  expect(section.queryAllByText(/\d/)).toEqual([]);
+});
+
+test("Home fabricates no timesheet status, no mileage and no drill-in", async () => {
   const view = await homeSignedInAs(NERIJUS);
   const rendered = allText(view);
 
   expect(rendered).not.toContain("submitted");
-  expect(rendered).not.toContain("recent timesheets");
   expect(rendered).not.toContain("miles");
   expect(rendered).not.toContain("view all");
 });
@@ -243,17 +248,33 @@ test("Home adds no bottom navigation to destinations that do not exist", async (
   const view = await homeSignedInAs(NERIJUS);
   const rendered = allText(view);
 
-  // Not "timesheets": that word is the product's own wordmark, rendered by
-  // BrandLockup, so it proves nothing about navigation. These three have no
-  // legitimate reason to appear on Home at all.
+  // Home does not draw navigation — the `(app)` shell owns the tab bar, so a
+  // second one rendered by the screen would mean two bars on one page.
+  expect(view.queryByTestId("app-tab-bar")).toBeNull();
   expect(rendered).not.toContain("my records");
-  expect(rendered).not.toContain("settings");
-  expect(rendered).not.toContain("view all");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // C. Start Shift — real, prominent, and honestly disabled
 // ═══════════════════════════════════════════════════════════════════════════
+
+test("Home uses the APPROVED brand lockup, and carries no second logo", async () => {
+  const view = await homeSignedInAs(NERIJUS);
+
+  // The lockup Login and Registration use, reused verbatim. A drawn truck mark
+  // was tried beside it and removed — on device it read as two blue blocks,
+  // and a second logo implementation is what must not exist.
+  expect(view.getByText("LogisticBay")).toBeTruthy();
+  expect(view.getByText("TIMESHEETS")).toBeTruthy();
+});
+
+test("the shift card reserves its image region — the pending asset is a SWAP, not a redesign", async () => {
+  const view = await homeSignedInAs(NERIJUS);
+
+  // The region exists and is sized by the card, so replacing the file behind
+  // `homeCardImage.ts` changes no layout and no test.
+  expect(view.getByTestId("shift-card-image")).toBeTruthy();
+});
 
 test("Start Shift is present and DISABLED, with its disabled state exposed", async () => {
   const view = await homeSignedInAs(NERIJUS);
@@ -285,31 +306,12 @@ test("pressing Start Shift does nothing at all — no navigation, no request", a
 // D. Behaviour that already existed on Today, and must survive
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("sign out revokes the session server-side, clears the device, and returns to sign-in", async () => {
-  const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(() =>
-    Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(null) } as Response));
-
+test("Home no longer carries a Sign out control — Settings owns it, and only one screen may", async () => {
   const view = await homeSignedInAs(NERIJUS);
-  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBe(NERIJUS.refreshToken);
 
-  await act(async () => { await fireEvent.press(view.getByTestId("sign-out")); });
-
-  await waitFor(() => { expect(mockRouter.replace).toHaveBeenCalledWith("/sign-in"); });
-  const urls = (fetchSpy.mock.calls as unknown as ([unknown, RequestInit | undefined] | undefined)[])
-    .map(callUrl);
-  expect(urls.some(url => url.includes("/auth/logout"))).toBe(true);
-  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBeNull();
-});
-
-test("sign out with NO NETWORK still clears the device and returns to sign-in", async () => {
-  // A driver who taps sign out in a yard must be signed out of the phone.
-  const view = await homeSignedInAs(NERIJUS);
-  jest.spyOn(global, "fetch").mockImplementation(() => Promise.reject(new Error("Network request failed")));
-
-  await act(async () => { await fireEvent.press(view.getByTestId("sign-out")); });
-
-  await waitFor(() => { expect(mockRouter.replace).toHaveBeenCalledWith("/sign-in"); });
-  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBeNull();
+  // Two sign-out controls would be worse than either one. The behaviour did
+  // not change; it moved, and `landingScreens.test.tsx` proves it there.
+  expect(view.queryByTestId("sign-out")).toBeNull();
 });
 
 test("the biometric offer appears only on a device that can actually do it", async () => {
