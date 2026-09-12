@@ -373,38 +373,83 @@ test("R13. a malformed or empty credential is refused by the DTO, before any loo
 // C1-C3. Concurrency — the reason rotation is a conditional write
 // ═════════════════════════════════════════════════════════════════════════════
 
-test("C1. two SIMULTANEOUS refreshes of the same credential: exactly one wins, and no credential is lost", async () => {
+test("C1. two SIMULTANEOUS refreshes of the same credential leave exactly ONE usable lineage", async () => {
   // The failure this guards: read-then-write would let both mint, both write,
-  // and the second overwrite the first — so the winner's client holds a
-  // secret the database has already replaced and is silently logged out.
+  // and the second overwrite the first — so a client would hold a secret the
+  // database had already replaced and be silently logged out.
+  //
+  // WHAT THIS CASE MAY NOT ASSERT (F-27). It once required the literal pair
+  // `[200, 401]`. That is stronger than the architecture actually promises and
+  // was measured to be false: when the first request COMMITS before the second
+  // resolves, the second finds the presented digest in the PREVIOUS column and
+  // legitimately succeeds through grace recovery — the very mechanism AUTH.md
+  // provides so a lost response is survivable. Two 200s are therefore a
+  // correct outcome, not a defect, and a test asserting otherwise is asserting
+  // an implementation timing accident.
+  //
+  // The real invariant, and what is asserted below: at most one request may
+  // rotate the presented credential as CURRENT, the Session must not fork, and
+  // there must never be two independently usable refresh lineages.
   const driver = await registeredDriver();
+  const lifetimeBefore = (await sessionById(driver.sessionId)).expiresAt.getTime();
 
-  const [a, b] = await Promise.all([postRefresh(driver.refreshToken), postRefresh(driver.refreshToken)]);
+  const answers = await Promise.all([postRefresh(driver.refreshToken), postRefresh(driver.refreshToken)]);
 
-  const statuses = [a.statusCode, b.statusCode].sort((x, y) => x - y);
-  assert.deepEqual(statuses, [200, 401], `exactly one may rotate — got ${String(a.statusCode)} and ${String(b.statusCode)}`);
-
-  const winner = a.statusCode === 200 ? a : b;
-  const issued = stringField(winner.body, "refreshToken");
+  const succeeded = answers.filter(answer => answer.statusCode === 200);
+  assert.ok(succeeded.length >= 1, `at least one concurrent refresh must succeed — got ${answers.map(a => String(a.statusCode)).join(", ")}`);
+  for (const refused of answers.filter(answer => answer.statusCode !== 200)) {
+    assert.equal(refused.statusCode, 401, "a refused concurrent refresh must be the canonical 401");
+    assert.deepEqual(refused.body, CANONICAL_401, "and must disclose nothing about why it lost");
+  }
 
   const session = await sessionById(driver.sessionId);
-  assert.equal(session.refreshTokenHash, digest(issued), "the database holds exactly the winner's secret");
-  assert.equal(session.previousRefreshTokenHash, digest(driver.refreshToken), "and the presented one as the grace anchor");
 
-  // The winner's secret works — proof nothing overwrote it.
-  const again = await postRefresh(issued);
-  assert.equal(again.statusCode, 200, `the winner's secret must be usable — got ${again.raw}`);
+  // ONE usable lineage. Every other issued secret must be dead on arrival.
+  const issued = succeeded.map(answer => stringField(answer.body, "refreshToken"));
+  const usable = issued.filter(secret => digest(secret) === session.refreshTokenHash);
+  assert.equal(usable.length, 1, `exactly ONE issued secret may be the current credential — ${String(issued.length)} were issued`);
+
+  // The Session must not have forked: every token names the same session.
+  for (const answer of succeeded) {
+    assert.equal(
+      claimsOf(stringField(answer.body, "identityToken")).sessionId, driver.sessionId,
+      "every concurrently issued identity token must name the SAME session",
+    );
+  }
+
+  assert.equal(session.previousRefreshTokenHash, digest(driver.refreshToken), "the presented credential stays the grace anchor");
+  assert.equal(session.revokedAt, null, "concurrency is not reuse — the session must not be revoked");
+  assert.equal(session.expiresAt.getTime(), lifetimeBefore, "and the absolute lifetime must not move");
+
+  // The superseded secrets cannot be redeemed, and asking does not revoke.
+  for (const dead of issued.filter(secret => digest(secret) !== session.refreshTokenHash)) {
+    const refused = await postRefresh(dead);
+    assert.equal(refused.statusCode, 401, "a superseded issued secret must not be redeemable");
+  }
+  assert.equal((await sessionById(driver.sessionId)).revokedAt, null, "and redeeming one must not revoke the session");
+
+  // The one live secret works — proof nothing overwrote it.
+  const again = await postRefresh(usable[0] ?? "");
+  assert.equal(again.statusCode, 200, `the surviving secret must be usable — got ${again.raw}`);
 });
 
-test("C2. the loser of a race can still recover through the grace window", async () => {
-  // Why the loser's 401 is acceptable rather than a lost session: the
-  // credential it holds is now the PREVIOUS one, inside its window.
+test("C2. a request refused by the race is NOT logged out — its credential still recovers", async () => {
+  // Why a concurrent 401 is survivable rather than a lost session: the
+  // credential that client still holds is now the PREVIOUS one, inside its
+  // window. This holds whatever the interleaving produced above, which is why
+  // this case no longer asserts that exactly one request lost.
   const driver = await registeredDriver();
-  const [a, b] = await Promise.all([postRefresh(driver.refreshToken), postRefresh(driver.refreshToken)]);
-  assert.ok((a.statusCode === 401) !== (b.statusCode === 401), "exactly one must have lost");
+  const answers = await Promise.all([postRefresh(driver.refreshToken), postRefresh(driver.refreshToken)]);
+  assert.ok(answers.some(answer => answer.statusCode === 200), "at least one concurrent refresh must succeed");
 
   const recovery = await postRefresh(driver.refreshToken);
-  assert.equal(recovery.statusCode, 200, `the loser's credential must still recover — got ${recovery.raw}`);
+  assert.equal(recovery.statusCode, 200, `the presented credential must still recover — got ${recovery.raw}`);
+
+  const session = await sessionById(driver.sessionId);
+  assert.equal(
+    session.refreshTokenHash, digest(stringField(recovery.body, "refreshToken")),
+    "and the recovered secret becomes the one live credential",
+  );
 });
 
 test("C3. a CURRENT and a PREVIOUS request racing leave one coherent lineage", async () => {
@@ -433,6 +478,57 @@ test("C3. a CURRENT and a PREVIOUS request racing leave one coherent lineage", a
   assert.equal(stillValid.length, 1, `exactly ONE issued secret may be the current credential — ${String(live.length)} succeeded`);
   assert.ok(session.revokedAt === null, "and the race must not have revoked the session");
   assert.notEqual(session.previousRefreshTokenHash, session.refreshTokenHash, "the row's own distinctness invariant holds");
+});
+
+test("C4. rotateCurrent applies ONLY to the digest the caller presented — the conditional write, proven deterministically", async () => {
+  // WHY THIS IS NOT A RACE (F-26). C1 asserts the state a race leaves behind,
+  // but a race cannot prove WHY that state is safe: the interleaving is not
+  // ours to choose, and the one that would expose a missing condition occurs
+  // only under a timing no test can force. Removing the condition therefore
+  // left every concurrency case green.
+  //
+  // Atomicity is a property of the WRITE, so it is proven here directly, with
+  // no concurrency at all. The guarantee: `rotateCurrent`'s `where` restates
+  // the digest the caller believed was current, so a caller acting on a
+  // superseded digest matches NO row — which is what makes it impossible for
+  // two callers to rotate the same credential as CURRENT.
+  const driver = await registeredDriver();
+  const first = await postRefresh(driver.refreshToken);
+  assert.equal(first.statusCode, 200, `setup rotation must succeed — got ${first.raw}`);
+
+  const live = stringField(first.body, "refreshToken");
+  const { refreshRepository } = await import("../../repositories/refreshRepository.js");
+  const sessions = refreshRepository(prisma);
+  const now = new Date();
+  const appliedDigest = digest(`${TAG}-conditional-applied`);
+  const staleDigest   = digest(`${TAG}-conditional-stale`);
+
+  // POSITIVE CONTROL: the digest that IS current rotates, so the refusal
+  // below is attributable to the condition and not to an impossible call.
+  const applied = await sessions.rotateCurrent({
+    sessionId:       driver.sessionId,
+    presentedDigest: digest(live),
+    nextDigest:      appliedDigest,
+    graceUntil:      new Date(now.getTime() + 60_000),
+    now,
+  });
+  assert.equal(applied, true, "the digest that is current must rotate");
+
+  // The SAME call again, still naming the digest it believed was current.
+  // Only the row has moved on; every argument but `nextDigest` is identical.
+  const stale = await sessions.rotateCurrent({
+    sessionId:       driver.sessionId,
+    presentedDigest: digest(live),
+    nextDigest:      staleDigest,
+    graceUntil:      new Date(now.getTime() + 60_000),
+    now,
+  });
+  assert.equal(stale, false, "a caller acting on a SUPERSEDED digest must match no row");
+
+  const afterState = await sessionById(driver.sessionId);
+  assert.equal(afterState.refreshTokenHash, appliedDigest, "the refused write applied nothing");
+  assert.notEqual(afterState.refreshTokenHash, staleDigest, "and the stale caller's digest was never written");
+  assert.equal(afterState.revokedAt, null, "a refused conditional write is not a reuse, so nothing is revoked");
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -549,4 +645,71 @@ test("R14. refresh issues no tenant token, even for a driver who holds an active
   assert.equal(field(result.body, "tenantToken"), undefined, "refresh must not mint a tenant token");
   assert.ok(!result.raw.includes(TENANT_AUDIENCE), "and nothing in the body may carry the tenant audience");
   assert.ok(!result.raw.includes(company.id), "nor disclose a company identifier");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// R15. The grace deadline is a DATABASE predicate, not only a clock check
+// ═════════════════════════════════════════════════════════════════════════════
+
+test("R15. the grace deadline is enforced by the atomic DB predicate, not only by the service's clock check", async () => {
+  // WHY THIS CASE EXISTS AT THE REPOSITORY LEVEL (F-26).
+  //
+  // `refresh()` compares `graceUntil` against `now` in JavaScript and revokes
+  // before it ever calls the repository, so EVERY route-level expired-window
+  // case — R9 included — is answered by that check. The `where` clause's own
+  // `previousRefreshTokenGraceUntil: { gt: now }` is therefore never the thing
+  // under test through the HTTP surface, and deleting it left the whole suite
+  // green.
+  //
+  // That predicate is the TOCTOU guard: the service reads the deadline and
+  // then writes, and a credential whose window closes between those two
+  // moments must not rotate. Calling the repository directly, with `now` as
+  // the only variable, is the one way to reach the write with an expired
+  // deadline and prove the database refuses it.
+  const driver = await registeredDriver();
+  await postRefresh(driver.refreshToken);   // driver.refreshToken is now PREVIOUS
+
+  const state = await sessionById(driver.sessionId);
+  assert.ok(state.previousRefreshTokenGraceUntil !== null, "the rotation must have set a grace deadline");
+  const deadline = state.previousRefreshTokenGraceUntil;
+
+  const { refreshRepository } = await import("../../repositories/refreshRepository.js");
+  const sessions = refreshRepository(prisma);
+  const presentedDigest = digest(driver.refreshToken);
+  const insideDigest    = digest(`${TAG}-inside-window`);
+  const outsideDigest   = digest(`${TAG}-outside-window`);
+
+  // POSITIVE CONTROL FIRST, so the refusal below is attributable to the
+  // deadline rather than to a call that could never have applied.
+  const inside = await sessions.rotateFromGrace({
+    sessionId: driver.sessionId,
+    presentedDigest,
+    nextDigest: insideDigest,
+    now:        new Date(deadline.getTime() - 1000),
+  });
+  assert.equal(inside, true, "one second inside the window the recovery rotation must apply");
+
+  // `now` is the ONLY thing that differs. At the deadline the predicate is
+  // `graceUntil > now`, which is false, so the write must match no row.
+  const outside = await sessions.rotateFromGrace({
+    sessionId: driver.sessionId,
+    presentedDigest,
+    nextDigest: outsideDigest,
+    now:        new Date(deadline.getTime()),
+  });
+  assert.equal(outside, false, "at the deadline the DATABASE must refuse the recovery rotation");
+
+  const afterState = await sessionById(driver.sessionId);
+  assert.equal(
+    afterState.refreshTokenHash, insideDigest,
+    "the refused write applied NOTHING — the current digest is still the one the accepted call wrote",
+  );
+  assert.notEqual(
+    afterState.refreshTokenHash, outsideDigest,
+    "and the expired call's digest was never written",
+  );
+  assert.equal(
+    afterState.previousRefreshTokenGraceUntil?.getTime(), deadline.getTime(),
+    "a refused recovery cannot move the deadline either",
+  );
 });

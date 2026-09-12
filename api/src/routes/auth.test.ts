@@ -144,6 +144,24 @@ function driverRow(): UserRow {
   };
 }
 
+/**
+ * A SECOND, genuinely existing account — the one R16 must be able to disclose
+ * if the session-ownership binding ever disappears (F-25).
+ *
+ * Without this row the foreign-session case proves nothing: `accountView`
+ * answers its own byte-identical 401 when the account cannot be loaded, so
+ * R16's assertion was satisfied whether or not `requireSession` still enforced
+ * `session.userId === sub`. A real row is what makes the binding load-bearing.
+ */
+function otherUserRow(): UserRow {
+  return {
+    id:        OTHER_USER,
+    firstName: "Someone",
+    lastName:  "Else",
+    email:     "someone.else@example.com",
+  };
+}
+
 interface AuthReads {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: {
@@ -520,10 +538,19 @@ test("R16. an identity token whose session belongs to a different user is refuse
 
   // Present, unrevoked, unexpired, named exactly by the token — and someone
   // else's. `session.userId === sub` is the only check this identity fails.
+  //
+  // The foreign account MUST exist in the double, and that is the whole point
+  // of this case (F-25). With no such row the request still ended in a 401 —
+  // but `accountView`'s own "account is gone" 401, which is byte-identical and
+  // fires whether or not the binding is still there. With a real row, deleting
+  // the binding makes this request SUCCEED and hand back somebody else's
+  // account, which is precisely the failure the binding exists to prevent.
   const othersSession: SessionRow = { ...liveSession(), userId: OTHER_USER };
-  const result = await get("/auth/me", zeroMembershipReads(othersSession), token);
+  const result = await get("/auth/me", reads(othersSession, null, otherUserRow()), token);
 
   assert.equal(result.statusCode, 401, "a session belonging to another user must not authenticate the token's subject");
+  // Exact body, so a disclosed foreign account cannot satisfy this case: the
+  // canonical envelope carries no user, no email and no membership.
   assert.deepEqual(result.body, CANONICAL_401);
 });
 
