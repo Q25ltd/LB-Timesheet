@@ -210,6 +210,19 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
         scrollEnabled={keyboardVisible}
         {...authScrollProps}
       >
+        {/* OUTSIDE the centred container, so the lockup sits at the top of the
+            white area exactly as it does on Registration.
+
+            It used to be the first child of the centred form, which pushed it
+            down by half the block's free space. Hoisting it here is also why
+            nothing else moves: the form keeps `flex: 1`, so it now occupies
+            the white area MINUS the lockup, and centring its remaining
+            content inside that smaller area puts every one of those elements
+            at the same absolute position as before. Only the lockup moves. */}
+        <View style={signInStyles.lockupAtTop}>
+          <BrandLockup />
+        </View>
+
         <View
           testID="sign-in-form"
           // Centred ONLY when there is genuine slack to share — see the note
@@ -217,8 +230,6 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
           // entry is `null`, so the style resolves to exactly Registration's.
           style={[styles.form, keyboardVisible ? null : signInStyles.centredInWhiteArea]}
         >
-          <BrandLockup />
-
           <View style={styles.heading}>
             <Text style={[typography.title, styles.centred]}>Welcome back</Text>
             <Text style={[typography.subtitle, styles.centred]}>Sign in to your account</Text>
@@ -326,6 +337,13 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
  */
 const signInStyles = StyleSheet.create({
   centredInWhiteArea: { justifyContent: "center" },
+  /**
+   * The brand lockup's own wrapper, carrying the ONE thing it loses by moving
+   * out of the form: that container's horizontal padding. Nothing else — no
+   * height, no margin, no offset — so the lockup lands wherever the scroll
+   * content's `paddingTop` puts it, which is exactly where Registration's is.
+   */
+  lockupAtTop: { paddingHorizontal: spacing.xl },
   /**
    * The secondary action, from the same theme as everything else: the control
    * height the design uses, the field's radius and border colour, the brand's

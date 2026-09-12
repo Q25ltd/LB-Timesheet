@@ -12,7 +12,7 @@
  * The backend remains the security authority — these cases prove the CLIENT
  * behaves, not that the server is safe.
  */
-import { render, fireEvent, act } from "@testing-library/react-native";
+import { render, fireEvent, act, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import type { ReactElement } from "react";
@@ -361,6 +361,30 @@ test("the Login content block is VERTICALLY CENTRED in the white area above the 
   expect(form).not.toHaveProperty("minHeight");
   expect(form).not.toHaveProperty("marginTop");
   expect(form).not.toHaveProperty("transform");
+});
+
+test("the brand lockup sits at the TOP of the white area, as it does on Registration", async () => {
+  // The owner's correction. The lockup used to be the first child of the
+  // CENTRED container, which pushed it down by half the block's free space;
+  // Registration's sits at the top of a top-aligned form. Asserted as the
+  // structural fact responsible — the lockup is OUTSIDE the centred container
+  // — rather than as a screen coordinate.
+  const view = await wrap(<SignInScreen onSignedIn={noop} onCreateAccount={noop} />);
+
+  // It renders...
+  expect(view.getByText("LogisticBay")).toBeTruthy();
+  expect(view.getByText("TIMESHEETS")).toBeTruthy();
+  // ...and NOT inside the container that centres everything else.
+  const centred = within(view.getByTestId("sign-in-form"));
+  expect(centred.queryByText("LogisticBay")).toBeNull();
+  expect(centred.queryByText("TIMESHEETS")).toBeNull();
+
+  // Everything the centring still owns is untouched.
+  expect(centred.getByText("Welcome back")).toBeTruthy();
+  expect(centred.getByPlaceholderText("Email address")).toBeTruthy();
+  expect(centred.getByPlaceholderText("Password")).toBeTruthy();
+  expect(centred.getByTestId("sign-in")).toBeTruthy();
+  expect(resolvedStyle(view, "sign-in-form")).toMatchObject({ flex: 1, justifyContent: "center" });
 });
 
 test("REGISTRATION is NOT centred — the centring rule is Login-specific and did not leak into the shared layout", async () => {
