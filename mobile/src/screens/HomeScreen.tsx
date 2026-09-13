@@ -94,23 +94,27 @@ export function HomeScreen({
     >
       <View style={styles.header}>
         {/* The lockup the owner approved on a physical phone for Login and
-            Registration, reused verbatim. A drawn truck mark was tried beside
-            it and removed: at this size it read as two blue blocks, and a
-            second logo implementation is exactly what must not exist. */}
+            Registration, reused verbatim and centred on the CONTENT width. */}
         <BrandLockup />
-        {/* The badge is now a real control, because Settings exists for it to
-            open. It is a button and says so; it is not a menu, and it does not
-            pretend to offer choices that are not there. */}
-        <Pressable
-          testID="identity-badge-container"
-          onPress={onOpenAccount}
-          accessibilityRole="button"
-          accessibilityLabel={`Account and settings for ${user.firstName} ${user.lastName}`}
-          hitSlop={8}
-          style={({ pressed }) => [styles.badge, pressed ? styles.badgePressed : null]}
-        >
-          <Text style={styles.badgeText} testID="identity-badge">{initialsOf(user)}</Text>
-        </Pressable>
+
+        {/* Overlaid rather than laid out beside the lockup. In a flex row the
+            badge's width would push the brand left by half of it, so the brand
+            would be centred in the space BESIDE the badge rather than on the
+            screen. Taken out of flow, it costs the brand no width at all, and
+            the two cannot collide: the lockup is ~160pt wide and the badge 44pt
+            at the right margin, which stays clear even on a 320pt phone. */}
+        <View style={styles.badgeSlot} pointerEvents="box-none">
+          <Pressable
+            testID="identity-badge-container"
+            onPress={onOpenAccount}
+            accessibilityRole="button"
+            accessibilityLabel={`Account and settings for ${user.firstName} ${user.lastName}`}
+            hitSlop={8}
+            style={({ pressed }) => [styles.badge, pressed ? styles.badgePressed : null]}
+          >
+            <Text style={styles.badgeText} testID="identity-badge">{initialsOf(user)}</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Two lines, as the approved design has them, but one phrase to a
@@ -193,11 +197,22 @@ const styles = StyleSheet.create({
   // the device.
   content: { flexGrow: 1, paddingHorizontal: spacing.xl },
 
+  // Three groups with matching gaps between them — brand, then the greeting
+  // block, then the primary action — so the top of the screen reads as
+  // deliberate rather than as a stack of left-aligned lines.
   header: {
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.lg,
+    justifyContent: "center",
+    marginBottom: spacing.xl,
+  },
+  // Fills the header's height so the badge sits on the lockup's optical
+  // middle without being told a pixel offset.
+  badgeSlot: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
   },
   badge: {
     width: 44,
@@ -210,13 +225,17 @@ const styles = StyleSheet.create({
   badgePressed: { backgroundColor: colors.border },
   badgeText: { fontSize: 15, fontWeight: "700", color: colors.brandDark, letterSpacing: 0.5 },
 
-  // The greeting is a welcome, not a banner: this is the screen a driver opens
-  // at 5am to start work, so the name is clearly the heading and then gets out
-  // of the way. Two lines, tight leading, and the date directly under it.
-  greeting: { gap: 0 },
-  salutation: { ...typography.subtitle, fontSize: 16 },
-  name: { ...typography.title, fontSize: 27, lineHeight: 33 },
-  date: { ...typography.subtitle, fontSize: 14, marginTop: 2, marginBottom: spacing.lg },
+  greeting: { alignItems: "center", gap: 0 },
+  salutation: { ...typography.subtitle, fontSize: 16, textAlign: "center" },
+  name: { ...typography.title, fontSize: 27, lineHeight: 33, textAlign: "center" },
+  // Tight to the name it belongs with, then the full group gap before the card.
+  date: {
+    ...typography.subtitle,
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: spacing.xs,
+    marginBottom: spacing.xl,
+  },
 
   shiftCard: {
     backgroundColor: colors.surfaceAccent,
