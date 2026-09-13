@@ -49,6 +49,11 @@ export default function AppLayout() {
       {APP_TABS.map(tab => (
         <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.label }} />
       ))}
+      {/* The Start Shift workflow lives under this gate so it is protected by
+          the same check as the tabs, but `href: null` keeps it out of the bar:
+          it is something the driver DOES, launched from Home, not a place the
+          app keeps. */}
+      <Tabs.Screen name="start-shift" options={{ href: null }} />
     </Tabs>
   );
 }

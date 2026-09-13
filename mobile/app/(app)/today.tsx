@@ -32,6 +32,9 @@ export default function TodayRoute() {
       // Sign out moved to Settings, which the badge opens. `navigate` rather
       // than `replace`: these are sibling tabs, not a stack to rewrite.
       onOpenAccount={() => { router.navigate("/settings"); }}
+      // A workflow, not a tab: `navigate` pushes it over the shell and Back
+      // returns here.
+      onStartShift={() => { router.navigate("/start-shift"); }}
     />
   );
 }

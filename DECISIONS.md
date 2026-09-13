@@ -684,6 +684,44 @@ personal state and the server's one-open-shift invariant (D15) — that last one
 is a real open question and will be decided when personal shifts are built,
 not assumed here. D25 still governs: **no SQLite yet.**
 
+### D28 — The working timesheet is local first; a company is a destination, not an owner (2026-09-13)
+
+Owner decision, taken as Start Shift implementation began. It **supersedes the
+assumption** — never written down, but built into the server-first Start Shift
+foundation — that pressing Start Shift immediately creates a company-owned
+Shift on the server.
+
+**The day is the driver's while it is being worked.** The phone holds the
+working timesheet: start, vehicles, checks, changes, mileage, fuel, defects,
+finish, corrections. None of that requires connectivity, and none of it belongs
+to a company yet. This is the same local-first position D27 takes for a
+personal shift, extended to every shift.
+
+**A company is chosen as an intended DESTINATION.** At Start Shift the driver
+picks Personal or one active membership. That choice:
+
+- mints no tenant token and calls no `POST /auth/switch-company`;
+- creates no server Shift and calls no `POST /shifts/start`;
+- tells the company nothing and grants it nothing;
+- is correctable later, so it is not an immutable ownership field.
+
+**Personal is the default, always.** Not "unless the driver holds one
+membership", not "unless they chose a company yesterday", not "unless a tenant
+token happens to exist". Working for yourself costs zero taps; working for a
+company costs one.
+
+**Sharing is a separate, explicit act.** When the driver later chooses to SEND a
+finished timesheet, the server validates the membership, decides the company's
+destination, stores the company-facing snapshot, generates the PDF and handles
+delivery. **The phone is never the authority for a company's destination
+address** — it neither holds one nor displays one.
+
+*Consequence for existing code.* `POST /shifts/start` and `GET /shifts/current`
+still exist and are unchanged; they belong to the earlier server-first model and
+are **deliberately not connected** to the mobile flow. How they fit this model is
+an open architecture question for a later increment, not something to settle by
+quietly wiring them up. STATUS.md owns what is built.
+
 ## ❓ Open — ask the user, do not guess
 
 ### O1 — Retention period and cancellation

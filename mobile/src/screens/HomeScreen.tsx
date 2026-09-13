@@ -32,10 +32,10 @@
  * whose existence must not be advertised to each other (D12, CLAUDE.md's
  * privacy boundary).
  *
- * THE START SHIFT BUTTON IS REAL AND DISABLED. It carries no handler at all —
- * not an empty one — because a control that responds to a press by doing
- * nothing teaches a driver the app is broken. The same button is what the next
- * increment switches on.
+ * THE START SHIFT BUTTON IS LIVE. It opens the workflow in one tap — no
+ * context picker, no confirmation dialog, and no request. Choosing who the day
+ * is worked for happens ON that screen, and choosing a company there is a local
+ * intention rather than an act of authority.
  */
 import { View, Text, Image, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -57,6 +57,8 @@ interface HomeScreenProps {
   onEnableBiometrics: () => Promise<boolean>;
   /** Opens Settings — the identity badge's one real destination. */
   onOpenAccount: () => void;
+  /** Opens the Start Shift workflow. One tap: no picker, no dialog. */
+  onStartShift: () => void;
 }
 
 /**
@@ -75,7 +77,7 @@ function initialsOf(user: AccountUser): string {
 }
 
 export function HomeScreen({
-  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount,
+  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
 
@@ -163,7 +165,7 @@ export function HomeScreen({
           </View>
 
           <View style={styles.shiftAction}>
-            <PrimaryButton label="Start Shift" disabled testID="start-shift" />
+            <PrimaryButton label="Start Shift" onPress={onStartShift} testID="start-shift" />
           </View>
         </View>
       </View>

@@ -276,7 +276,7 @@ test("the shift card reserves its image region — the pending asset is a SWAP, 
   expect(view.getByTestId("shift-card-image")).toBeTruthy();
 });
 
-test("Start Shift is present and DISABLED, with its disabled state exposed", async () => {
+test("Start Shift is present and ENABLED — the workflow behind it now exists", async () => {
   const view = await homeSignedInAs(NERIJUS);
   const button = view.getByTestId("start-shift");
 
@@ -285,20 +285,20 @@ test("Start Shift is present and DISABLED, with its disabled state exposed", asy
   // `accessibilityState` is the whole contract here, and it is asserted rather
   // than a host `disabled` prop because React Native's `Pressable` does not
   // forward one — it expresses the state exactly this way, which is also what
-  // a screen reader announces. `busy: false` is asserted alongside because
-  // PrimaryButton draws "disabled" and "submitting" differently on purpose,
-  // and this button is the first, not the second.
-  expect(button.props.accessibilityState).toMatchObject({ disabled: true, busy: false });
+  // a screen reader announces. Until the workflow existed this button was
+  // deliberately disabled; `startShiftStep1.test.tsx` owns what it now opens.
+  expect(button.props.accessibilityState).toMatchObject({ disabled: false, busy: false });
 });
 
-test("pressing Start Shift does nothing at all — no navigation, no request", async () => {
+test("pressing Start Shift opens the workflow and sends NOTHING", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
   const view = await homeSignedInAs(NERIJUS);
 
   await act(async () => { await fireEvent.press(view.getByTestId("start-shift")); });
 
-  expect(mockRouter.replace).not.toHaveBeenCalled();
-  expect(mockRouter.push).not.toHaveBeenCalled();
+  expect(mockRouter.navigate).toHaveBeenCalledWith("/start-shift");
+  // Home still asks the server nothing, and neither does opening the workflow:
+  // the day is created locally and shared explicitly later.
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
