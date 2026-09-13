@@ -427,6 +427,55 @@ test("pressing Start Shift repeatedly creates exactly ONE shift", async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// The keyboard must not sit on top of the field being typed into
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHAT THESE CASES CAN AND CANNOT PROVE. Jest has no keyboard and no
+// geometry, so none of this measures whether a field is visible — that was
+// verified in real pixels on a physical iPhone, and is the actual evidence.
+// What is worth guarding here is the STRUCTURE that produces the behaviour:
+// the props are easy to drop in a later edit, and dropping them silently
+// reintroduces a defect nobody notices until a driver is standing in a yard
+// unable to see what they are typing.
+
+test("the form declares the keyboard-safe scrolling contract", async () => {
+  const view = await openStartShift();
+  const scroll = view.getByTestId("start-shift-scroll").props;
+
+  // iOS insets the scroll content by the keyboard's height and brings the
+  // focused field into view. This is the prop that stops the keyboard
+  // covering Number plate and Start mileage.
+  expect(scroll.automaticallyAdjustKeyboardInsets).toBe(true);
+  // Dragging the form dismisses the keyboard — the platform convention, and
+  // the same one the Login and Registration screens use.
+  expect(scroll.keyboardDismissMode).toBe("on-drag");
+  // A tap that no control handles closes the keyboard rather than being
+  // swallowed, so the first tap on a choice row still selects it.
+  expect(scroll.keyboardShouldPersistTaps).toBe("handled");
+});
+
+test("the form stays scrollable, which is what makes the shrunken viewport usable", async () => {
+  const view = await openStartShift();
+  await press(view, "vehicle-yes");
+
+  // Never disabled: with the keyboard up the visible area is short, and
+  // scrolling is the only way the lower fields and Start Shift stay reachable.
+  expect(view.getByTestId("start-shift-scroll").props.scrollEnabled).not.toBe(false);
+});
+
+test("each field keeps the keyboard a driver needs for it", async () => {
+  const view = await openStartShift();
+  await press(view, "vehicle-yes");
+
+  // A plate is text — international registrations contain letters.
+  expect(view.getByTestId("number-plate").props.keyboardType).toBeUndefined();
+  // Mileage is digits, so the numeric pad opens rather than a full keyboard.
+  expect(view.getByTestId("start-mileage").props.keyboardType).toBe("number-pad");
+  expect(view.getByTestId("start-time-hours").props.keyboardType).toBe("number-pad");
+  expect(view.getByTestId("start-time-minutes").props.keyboardType).toBe("number-pad");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Offline, and the handoff
 // ═══════════════════════════════════════════════════════════════════════════
 

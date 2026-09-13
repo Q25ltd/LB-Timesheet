@@ -122,11 +122,27 @@ export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScr
   return (
     <View style={styles.screen}>
       <ScrollView
+        testID="start-shift-scroll"
         style={styles.screen}
         contentContainerStyle={[
           styles.content,
           { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xxl },
         ]}
+        // THE KEYBOARD MUST NOT SIT ON THE FIELD BEING TYPED INTO. Number
+        // plate and Start mileage are near the bottom of a long form, so
+        // without this the keyboard covers them and the driver types blind.
+        //
+        // iOS insets the scroll content by the keyboard's height and brings
+        // the focused field into view; Android's window is already resized
+        // (`adjustResize`), so the same scroll view shrinks there by itself.
+        // One prop, no measured heights, no device-specific offsets, and no
+        // permanent padding that would leave a hole when the keyboard is down.
+        automaticallyAdjustKeyboardInsets
+        // Dragging the form puts the keyboard away — the platform convention,
+        // and the one Login and Registration already use.
+        keyboardDismissMode="on-drag"
+        // A tap no control handles closes the keyboard instead of being
+        // swallowed, so the first tap on a choice row still selects it.
         keyboardShouldPersistTaps="handled"
       >
         <Pressable
