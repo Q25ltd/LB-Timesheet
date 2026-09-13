@@ -722,6 +722,40 @@ are **deliberately not connected** to the mobile flow. How they fit this model i
 an open architecture question for a later increment, not something to settle by
 quietly wiring them up. STATUS.md owns what is built.
 
+### D29 — Start Shift is minimal, a vehicle is optional, and the day is created locally (2026-09-13)
+
+Owner decision, settled while Start Shift was built. It follows D28's
+local-first position and fixes the shape of the first screen a driver uses
+every morning.
+
+**Start Shift asks four things and stops:** who the day is worked for, the
+start time, whether there is a vehicle, and — only if there is — its class,
+number plate and start mileage. Nothing else. No trailer, no checks, no
+defects, no fuel, no AdBlue, no notes, no signature.
+
+**A VEHICLE IS OPTIONAL, and this is a domain rule rather than a
+convenience.** A driver books on at 06:00 and may not be handed a truck until
+08:00. That is one working day beginning at 06:00 — not a day that has not
+started, and not a day with a placeholder vehicle. So:
+
+- a Shift may be ACTIVE with no vehicle, and that is a complete state;
+- **"shift started" is NOT a synonym for "vehicle checked"**;
+- checks belong to a VEHICLE, not to the shift, and are reached from the
+  Active Shift flow once there is a vehicle to check;
+- the answer is "Not yet", never "No" — a vehicle may still arrive today.
+
+**The day is created LOCALLY and offline.** Pressing Start Shift writes a
+local record; it makes no request, and a dead network cannot prevent a driver
+beginning work. One open shift at a time, and starting is idempotent: a double
+press or a relaunch mid-shift returns the day already open rather than
+creating or overwriting one.
+
+**Server synchronisation is NOT part of this.** `POST /shifts/start` still
+exists, is unchanged, and remains deliberately unconnected — how the local
+record reaches a company is the submission increment's problem, and D28 already
+says that happens only when the driver explicitly sends it. STATUS.md owns what
+is built.
+
 ## ❓ Open — ask the user, do not guess
 
 ### O1 — Retention period and cancellation

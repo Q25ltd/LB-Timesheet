@@ -330,29 +330,42 @@ test("the tenant token is untouched by a company choice", async () => {
 // The shell of the form, and nothing of step two
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("Continue exists and is DISABLED — the next stage is not built", async () => {
+test("the action is Start Shift, and it is unavailable until the form is complete", async () => {
   const view = await signedIn(<StartShift />, [NORTHGATE]);
 
-  expect(view.getByTestId("start-shift-continue").props.accessibilityState)
+  // Choosing who the day is for is not, by itself, enough to begin it — the
+  // vehicle question must be answered too. Step 2's suite owns the rest of the
+  // validation; this pins that selection alone never starts a shift.
+  expect(view.getByTestId("start-shift-submit").props.accessibilityState)
     .toMatchObject({ disabled: true, busy: false });
+
+  await act(async () => {
+    await fireEvent.press(view.getByTestId(`working-for-${NORTHGATE.membershipId}`));
+  });
+
+  expect(view.getByTestId("start-shift-submit").props.accessibilityState)
+    .toMatchObject({ disabled: true });
 });
 
-test("Continue goes nowhere, because there is nowhere honest to go", async () => {
+test("pressing the disabled action does nothing — no navigation, no request", async () => {
+  const fetchSpy = jest.spyOn(global, "fetch");
   const view = await signedIn(<StartShift />, [NORTHGATE]);
 
-  await act(async () => { await fireEvent.press(view.getByTestId("start-shift-continue")); });
+  await act(async () => { await fireEvent.press(view.getByTestId("start-shift-submit")); });
 
   expect(mockRouter.navigate).not.toHaveBeenCalled();
-  expect(mockRouter.push).not.toHaveBeenCalled();
+  expect(mockRouter.replace).not.toHaveBeenCalled();
+  expect(fetchSpy).not.toHaveBeenCalled();
 });
 
-test("no step-two field appears yet — not a time, a vehicle, a trailer or a check", async () => {
+test("Start Shift still asks for nothing beyond the day's start — no trailer, no checks", async () => {
   const view = await signedIn(<StartShift />, [NORTHGATE]);
   const rendered = allText(view);
 
+  // These belong to the Active Shift flow and to later increments. Step 2
+  // added a start time and an optional vehicle; it added none of these.
   for (const absent of [
-    "start time", "odometer", "mileage", "registration", "number plate",
-    "trailer", "class 1", "class 2", "adblue", "defect", "check",
+    "trailer", "check", "defect", "adblue", "fuel", "signature", "note", "finish",
   ]) {
     expect(rendered).not.toContain(absent);
   }
