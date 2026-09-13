@@ -61,7 +61,7 @@
  * below has to move, and no combined "vehicle & trailer checks" control is
  * introduced here, because that workflow is never going to exist.
  */
-import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, Alert, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -105,10 +105,41 @@ function assetWords(vehicleClass: VehicleClass | null) {
   };
 }
 
-export function ActiveShiftScreen({ shift }: { shift: LocalShift }) {
+interface ActiveShiftScreenProps {
+  shift: LocalShift;
+  /** Abandon the day. Called ONLY after the driver confirms. */
+  onDiscard: () => void;
+}
+
+export function ActiveShiftScreen({ shift, onDiscard }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
+  const startedAt = startedTime(shift.startedAt);
+
+  /**
+   * DISCARD ASKS BEFORE IT ACTS, and this is the whole safety of the feature.
+   *
+   * It is the only irreversible thing in the app: the shift is local, nothing
+   * has been sent anywhere (D28), so there is no copy to recover it from. A
+   * driver in a cab with cold hands must not be able to delete a working day
+   * with one press, so the control raises this and does nothing else.
+   *
+   * The question names the shift by its start time rather than saying "this
+   * shift", so someone who opened the app confused about which day they are
+   * looking at is told. The destructive button is marked as such, leaving the
+   * platform to render it as the dangerous choice and Keep as the safe one.
+   */
+  function askToDiscard() {
+    Alert.alert(
+      "Discard this shift?",
+      `The shift you started at ${startedAt} will be deleted from this phone. This cannot be undone.`,
+      [
+        { text: "Keep shift", style: "cancel" },
+        { text: "Discard",    style: "destructive", onPress: onDiscard },
+      ],
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -120,7 +151,26 @@ export function ActiveShiftScreen({ shift }: { shift: LocalShift }) {
           { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.xxl },
         ]}
       >
-        <Text style={styles.title} testID="screen-title" accessibilityRole="header">Active Shift</Text>
+        {/* Discard sits up here, as far from Finish Shift as the screen
+            allows. They are the two ways a day ends and they must never be
+            neighbours: one files the driver's work, the other destroys it,
+            and a cold thumb reaching for the bottom of the screen should not
+            be able to find the wrong one. Quiet by design — findable when
+            wanted, never competing with the work. */}
+        <View style={styles.header}>
+          <Text style={styles.title} testID="screen-title" accessibilityRole="header">Active Shift</Text>
+          <Pressable
+            testID="discard-shift"
+            onPress={askToDiscard}
+            accessibilityRole="button"
+            accessibilityLabel="Discard shift"
+            accessibilityHint="Asks you to confirm before deleting this shift"
+            hitSlop={10}
+            style={({ pressed }) => [styles.discard, pressed ? styles.discardPressed : null]}
+          >
+            <Text style={styles.discardLabel}>Discard</Text>
+          </Pressable>
+        </View>
 
         {/* The header's whole job: the day is running, since when, and for
             whom. Two facts side by side rather than a stack of labelled rows —
@@ -134,7 +184,7 @@ export function ActiveShiftScreen({ shift }: { shift: LocalShift }) {
           </View>
 
           <View style={styles.statusFacts}>
-            <Fact label="Started" value={startedTime(shift.startedAt)} testID="shift-started-at" />
+            <Fact label="Started" value={startedAt} testID="shift-started-at" />
             <Fact
               label="Working for"
               value={shift.workingFor.kind === "personal" ? "Personal" : shift.workingFor.companyName}
@@ -306,7 +356,24 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, paddingHorizontal: spacing.xl },
 
-  title: { ...typography.title, marginBottom: spacing.lg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  title: { ...typography.title, flexShrink: 1 },
+  // Its own touch target, pulled flush with the content margin so the label
+  // lines up with the card edges below rather than floating inside padding.
+  discard: {
+    minHeight: sizing.minTouch,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    marginRight: -spacing.sm,
+  },
+  discardPressed: { opacity: 0.5 },
+  discardLabel: { fontSize: 15, fontWeight: "700", color: colors.textMuted },
 
   status: {
     backgroundColor: colors.surfaceAccent,

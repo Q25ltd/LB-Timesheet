@@ -24,10 +24,31 @@
  * assert the ABSENCE of things, scanning the whole rendered text rather than
  * one node, and they fail the moment a plausible-looking value appears.
  */
-import { render } from "@testing-library/react-native";
+import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { Alert } from "react-native";
 import { ActiveShiftScreen } from "../screens/ActiveShiftScreen";
+import ActiveShiftRoute from "../../app/(app)/active-shift";
+import { clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
 import type { LocalShift, LocalVehicle, VehicleClass, WorkingContext } from "../shift/localShift";
+
+const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
+
+jest.mock("expo-router", () => {
+  const react = jest.requireActual<typeof import("react")>("react");
+  const rn = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    __esModule: true,
+    router: {
+      replace: (href: string): void => { mockRouter.replace(href); },
+      push:    (href: string): void => { mockRouter.push(href); },
+      back:    (): void => { mockRouter.back(); },
+      navigate: (href: string): void => { mockRouter.navigate(href); },
+    },
+    Redirect: ({ href }: { href: string }) =>
+      react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+  };
+});
 
 const METRICS = {
   frame:  { x: 0, y: 0, width: 390, height: 844 },
@@ -58,10 +79,10 @@ function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
 
 type View = Awaited<ReturnType<typeof render>>;
 
-function show(shift: LocalShift): Promise<View> {
+function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promise<View> {
   return render(
     <SafeAreaProvider initialMetrics={METRICS}>
-      <ActiveShiftScreen shift={shift} />
+      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} />
     </SafeAreaProvider>,
   );
 }
@@ -84,6 +105,30 @@ function renderedText(view: View): string {
   };
   walk(view.toJSON());
   return collected.join(" ");
+}
+
+/**
+ * Press a control and prove NOTHING happened.
+ *
+ * `props.onPress` cannot carry this: `Pressable` does not forward it to the
+ * host node, so `expect(props.onPress).toBeUndefined()` passes even for a
+ * fully wired control and proves nothing at all. Only consequences can be
+ * asserted — no confirmation raised, no request made, no navigation.
+ */
+async function pressingDoesNothing(view: View, testID: string): Promise<void> {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const fetchSpy = jest.spyOn(global, "fetch");
+  mockRouter.replace.mockClear();
+  mockRouter.push.mockClear();
+
+  await fireEvent.press(view.getByTestId(testID));
+
+  expect(alert).not.toHaveBeenCalled();
+  expect(fetchSpy).not.toHaveBeenCalled();
+  expect(mockRouter.replace).not.toHaveBeenCalled();
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  alert.mockRestore();
+  fetchSpy.mockRestore();
 }
 
 function isDisabled(view: View, testID: string): boolean {
@@ -167,7 +212,7 @@ test("the no-vehicle state offers Add Vehicle — and it does nothing yet", asyn
 
   expect(view.getByTestId("add-vehicle")).toBeTruthy();
   expect(isDisabled(view, "add-vehicle")).toBe(true);
-  expect(view.getByTestId("add-vehicle").props.onPress).toBeUndefined();
+  await pressingDoesNothing(view, "add-vehicle");
 });
 
 test("Add Vehicle belongs to the no-vehicle state ALONE", async () => {
@@ -241,7 +286,7 @@ test("Vehicle Checks is present for a vehicle, and is not wired", async () => {
   const view = await show(shiftWith({ vehicle: LORRY }));
 
   expect(isDisabled(view, "vehicle-checks")).toBe(true);
-  expect(view.getByTestId("vehicle-checks").props.onPress).toBeUndefined();
+  await pressingDoesNothing(view, "vehicle-checks");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -293,9 +338,7 @@ test.each([
 
   expect(control.props.accessibilityLabel).toBe(label);
   expect(isDisabled(view, testID)).toBe(true);
-  // No handler at all, rather than one that swallows the press: a control that
-  // answers a tap by doing nothing teaches a driver the app is broken.
-  expect(control.props.onPress).toBeUndefined();
+  await pressingDoesNothing(view, testID);
 });
 
 test("Fuel, AdBlue and Finish Shift are offered with or without a vehicle", async () => {
@@ -314,11 +357,20 @@ test("no fuel or AdBlue TOTALS are shown, because no entry has ever been made", 
   }
 });
 
-test("Discard Shift is NOT rendered — it is a later increment, not a disabled stub", async () => {
+test("Discard is the ONE real action here — everything else is still a stub", async () => {
   const view = await show(shiftWith({ vehicle: LORRY }));
 
-  expect(renderedText(view)).not.toContain("Discard");
-  expect(view.queryByTestId("discard-shift")).toBeNull();
+  // This replaces the Step 3A contract that Discard must be absent. It was
+  // absent because it did nothing, and a control that does nothing is worse
+  // than none; it is here now because it does something, and because a driver
+  // who books on by mistake has no other way out of the day.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  await fireEvent.press(view.getByTestId("discard-shift"));
+  expect(alert).toHaveBeenCalled();
+  alert.mockRestore();
+  // The rest of the workspace is unchanged — still rendered, still inert.
+  expect(isDisabled(view, "finish-shift")).toBe(true);
+  expect(isDisabled(view, "vehicle-checks")).toBe(true);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -382,4 +434,186 @@ test.each<[VehicleClass, string]>([
 
   expect(view.getByTestId("vehicle-class-value").props.children).toBe(label);
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("AB24 XYZ");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Discard Shift — abandoning a day that should never have started
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// THE ONLY IRREVERSIBLE THING IN THE APP. A driver who books on by mistake at
+// 05:00 — wrong company, wrong day, thumb on the wrong button — is otherwise
+// stuck with that day forever, because a shift cannot be finished yet either.
+// So discard exists. But it destroys the record outright, and the record is
+// the driver's own working time, so the cases below are as much about what it
+// REFUSES to do on one tap as about what it does on two.
+//
+// It is deliberately NOT beside Finish Shift. "End my real day" and "destroy
+// my day" must not be neighbours a cold thumb can confuse.
+
+/**
+ * The buttons of the confirmation the control raised.
+ *
+ * Typed off `Alert.alert`'s own signature rather than cast to a hand-written
+ * shape, so a change to the platform's button type shows up here as a type
+ * error instead of being papered over.
+ */
+type AlertSpy = jest.SpyInstance<void, Parameters<typeof Alert.alert>>;
+
+function confirmButton(spy: AlertSpy) {
+  return spy.mock.calls[0]?.[2]?.find(button => button.style === "destructive");
+}
+
+function cancelButton(spy: AlertSpy) {
+  return spy.mock.calls[0]?.[2]?.find(button => button.style === "cancel");
+}
+
+test("the discard action is reachable while a shift is open", async () => {
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  expect(view.getByTestId("discard-shift")).toBeTruthy();
+  // Quiet, and nowhere near the end-of-day action.
+  expect(isDisabled(view, "discard-shift")).toBe(false);
+});
+
+test("it is offered whether or not a vehicle was ever taken", async () => {
+  const withVehicle = await show(shiftWith({ vehicle: LORRY }));
+  const without     = await show(shiftWith());
+
+  expect(withVehicle.getByTestId("discard-shift")).toBeTruthy();
+  expect(without.getByTestId("discard-shift")).toBeTruthy();
+});
+
+test("ONE TAP DISCARDS NOTHING — it asks first", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const onDiscard = jest.fn();
+  const view = await show(shiftWith({ vehicle: LORRY }), onDiscard);
+
+  await fireEvent.press(view.getByTestId("discard-shift"));
+
+  // The load-bearing case. Losing a working day to a single stray press in a
+  // cab is exactly the accident this feature is supposed to undo.
+  expect(onDiscard).not.toHaveBeenCalled();
+  expect(alert).toHaveBeenCalled();
+  alert.mockRestore();
+});
+
+test("the question names what is lost and says it cannot be undone", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  await fireEvent.press(view.getByTestId("discard-shift"));
+
+  const [title, message] = alert.mock.calls[0] ?? [];
+  expect(String(title)).toContain("Discard");
+  // No euphemism: the driver is told the day goes, and that it is final.
+  expect(String(message)).toMatch(/cannot be undone|can't be undone/i);
+  alert.mockRestore();
+});
+
+test("the confirmation offers a way OUT, and cancelling discards nothing", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const onDiscard = jest.fn();
+  const view = await show(shiftWith({ vehicle: LORRY }), onDiscard);
+
+  await fireEvent.press(view.getByTestId("discard-shift"));
+  const cancel = cancelButton(alert);
+
+  expect(cancel).toBeDefined();
+  cancel?.onPress?.();
+  expect(onDiscard).not.toHaveBeenCalled();
+  alert.mockRestore();
+});
+
+test("confirming — and only confirming — discards the day", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const onDiscard = jest.fn();
+  const view = await show(shiftWith({ vehicle: LORRY }), onDiscard);
+
+  await fireEvent.press(view.getByTestId("discard-shift"));
+  const confirm = confirmButton(alert);
+
+  // Marked destructive so the platform renders it as the dangerous choice,
+  // rather than as the comfortable default.
+  expect(confirm).toBeDefined();
+  confirm?.onPress?.();
+  expect(onDiscard).toHaveBeenCalledTimes(1);
+  alert.mockRestore();
+});
+
+test("discarding asks no server for permission", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  const fetchSpy = jest.spyOn(global, "fetch");
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  await fireEvent.press(view.getByTestId("discard-shift"));
+  confirmButton(alert)?.onPress?.();
+
+  // The day was never sent anywhere (D28), so there is nothing to withdraw.
+  expect(fetchSpy).not.toHaveBeenCalled();
+  fetchSpy.mockRestore();
+  alert.mockRestore();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The route: what actually happens to the stored day
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("the Active Shift route", () => {
+  beforeEach(async () => {
+    await clearOpenShift();
+    mockRouter.replace.mockClear();
+  });
+
+  async function openRoute() {
+    const view = await render(
+      <SafeAreaProvider initialMetrics={METRICS}>
+        <ActiveShiftRoute />
+      </SafeAreaProvider>,
+    );
+    await waitFor(() => { expect(view.queryByTestId("discard-shift")).not.toBeNull(); });
+    return view;
+  }
+
+  test("a confirmed discard REMOVES the stored shift and leaves the workspace", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+
+    const view = await openRoute();
+    await fireEvent.press(view.getByTestId("discard-shift"));
+    confirmButton(alert)?.onPress?.();
+
+    await waitFor(async () => { expect(await readOpenShift()).toBeNull(); });
+    await waitFor(() => { expect(mockRouter.replace).toHaveBeenCalledWith("/today"); });
+    alert.mockRestore();
+  });
+
+  test("a CANCELLED discard leaves the day exactly as it was", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    const started = await startLocalShift({ workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
+
+    const view = await openRoute();
+    await fireEvent.press(view.getByTestId("discard-shift"));
+    cancelButton(alert)?.onPress?.();
+
+    expect(await readOpenShift()).toEqual(started);
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    alert.mockRestore();
+  });
+
+  test("after discarding, Start Shift is free to begin a NEW day", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    const first = await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: null });
+
+    const view = await openRoute();
+    await fireEvent.press(view.getByTestId("discard-shift"));
+    confirmButton(alert)?.onPress?.();
+    await waitFor(async () => { expect(await readOpenShift()).toBeNull(); });
+
+    // The one-open-shift rule blocked this before the discard; it must not
+    // keep blocking it afterwards, or discard has fixed nothing.
+    const second = await startLocalShift({ workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
+    expect(second.id).not.toBe(first.id);
+    expect(second.vehicle).toEqual(LORRY);
+    alert.mockRestore();
+  });
 });

@@ -7,10 +7,11 @@
  * reaching this route directly after a relaunch recovers the day.
  */
 import { useEffect, useState } from "react";
-import { Redirect } from "expo-router";
+import { Alert } from "react-native";
+import { Redirect, router } from "expo-router";
 import { ActiveShiftScreen } from "../../src/screens/ActiveShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
 
 export default function ActiveShiftRoute() {
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
@@ -27,5 +28,28 @@ export default function ActiveShiftRoute() {
   // No open shift — nothing to be active about. Back to the tabs.
   if (shift === null) return <Redirect href="/today" />;
 
-  return <ActiveShiftScreen shift={shift} />;
+  return <ActiveShiftScreen shift={shift} onDiscard={discard} />;
+}
+
+/**
+ * Throw the day away, once the driver has confirmed it on the screen.
+ *
+ * The record is local and was never sent anywhere (D28), so this asks no
+ * server for permission and there is nothing to withdraw — the file goes and
+ * the driver is returned to the tabs, where Start Shift can begin a new day
+ * because the one-open-shift rule no longer has anything to hold.
+ *
+ * NAVIGATION WAITS FOR THE DELETE. Leaving first and deleting afterwards
+ * would send a driver to Home while the shift was still open, and the next
+ * press of Start Shift would walk them straight back into the day they just
+ * discarded. If the delete fails the shift is untouched and they are told,
+ * rather than being moved somewhere that implies it worked.
+ */
+function discard(): void {
+  void clearOpenShift().then(
+    () => { router.replace("/today"); },
+    () => {
+      Alert.alert("Couldn't discard the shift", "Nothing was changed. Please try again.");
+    },
+  );
 }
