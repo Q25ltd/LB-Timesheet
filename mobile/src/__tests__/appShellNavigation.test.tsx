@@ -24,10 +24,10 @@ import { AppTabBar } from "../navigation/AppTabBar";
 // STATIC imports, one per declared destination. A tab whose route file is
 // missing then fails to COMPILE rather than shipping as a blank page, which is
 // a stronger guarantee than any assertion below could give.
-import TodayRoute from "../../app/(app)/today";
-import TimesheetsRoute from "../../app/(app)/timesheets";
-import RecordsRoute from "../../app/(app)/records";
-import SettingsRoute from "../../app/(app)/settings";
+import TodayRoute from "../../app/(app)/(tabs)/today";
+import TimesheetsRoute from "../../app/(app)/(tabs)/timesheets";
+import RecordsRoute from "../../app/(app)/(tabs)/records";
+import SettingsRoute from "../../app/(app)/(tabs)/settings";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -46,9 +46,10 @@ jest.mock("expo-router", () => {
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
     Stack: () => react.createElement(rn.Text, { testID: "app-stack" }, "stack"),
     // The navigator needs a real navigation tree Jest has none of, so it is
-    // replaced by a marker. Its PRESENCE is what the gate cases assert — that
-    // the shell mounted, or did not. Which destinations it contains is proven
-    // separately, from `APP_TABS` and the route imports above.
+    // replaced by a marker. Which destinations it contains is proven from
+    // `APP_TABS` and the route imports above; the tree's SHAPE — what is a tab
+    // and what is a Stack sibling — is proven in
+    // `appNavigationStructure.test.tsx`.
     Tabs: Object.assign(
       () => react.createElement(rn.Text, { testID: "app-tabs" }, "tabs"),
       { Screen: (_props: { name: string }) => null },

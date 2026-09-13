@@ -21,9 +21,9 @@ import type { ReactElement } from "react";
 import { Text, Pressable } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
-import Timesheets from "../../app/(app)/timesheets";
-import Records from "../../app/(app)/records";
-import Settings from "../../app/(app)/settings";
+import Timesheets from "../../app/(app)/(tabs)/timesheets";
+import Records from "../../app/(app)/(tabs)/records";
+import Settings from "../../app/(app)/(tabs)/settings";
 import manifest from "../../package.json";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn() };

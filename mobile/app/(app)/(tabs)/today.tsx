@@ -8,8 +8,8 @@
  * this route is only ever reached with a live session.
  */
 import { router } from "expo-router";
-import { HomeScreen } from "../../src/screens/HomeScreen";
-import { useAuth } from "../../src/auth/AuthContext";
+import { HomeScreen } from "../../../src/screens/HomeScreen";
+import { useAuth } from "../../../src/auth/AuthContext";
 
 export default function TodayRoute() {
   const {

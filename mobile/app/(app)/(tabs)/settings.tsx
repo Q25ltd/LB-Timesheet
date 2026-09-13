@@ -6,8 +6,8 @@
  * became reachable, not where they were built.
  */
 import { router } from "expo-router";
-import { SettingsScreen } from "../../src/screens/SettingsScreen";
-import { useAuth } from "../../src/auth/AuthContext";
+import { SettingsScreen } from "../../../src/screens/SettingsScreen";
+import { useAuth } from "../../../src/auth/AuthContext";
 
 export default function SettingsRoute() {
   const {

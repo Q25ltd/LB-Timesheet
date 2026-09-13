@@ -27,7 +27,7 @@ import type { ReactElement } from "react";
 import { Text, Pressable } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
-import Today from "../../app/(app)/today";
+import Today from "../../app/(app)/(tabs)/today";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 

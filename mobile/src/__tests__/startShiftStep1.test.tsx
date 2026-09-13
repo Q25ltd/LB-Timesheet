@@ -31,7 +31,7 @@ import { Text, Pressable } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AccountMembership, AuthenticatedAccount } from "../api/account";
 import { APP_TABS } from "../navigation/tabs";
-import Today from "../../app/(app)/today";
+import Today from "../../app/(app)/(tabs)/today";
 import StartShift from "../../app/(app)/start-shift";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };

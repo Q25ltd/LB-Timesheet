@@ -1,32 +1,35 @@
 /**
- * The authenticated route group: its gate, and its navigation shell.
+ * The authenticated area: its gate, and the stack everything authenticated
+ * sits in.
  *
- * THE GATE IS UNCHANGED and still wraps everything. `app/index.tsx` decides
- * the signed-out default for `/`, but it guards `/` alone; the app declares
- * `"scheme": "lbtimesheets"` (app.json), so a deep link could otherwise mount
- * an authenticated screen directly. Because the check lives here, above the
- * navigator, it covers every tab at once — no screen implements its own, and
- * a screen added later inherits it without its author remembering. Same
+ * THE GATE IS UNCHANGED and still wraps everything below it. `app/index.tsx`
+ * decides the signed-out default for `/`, but it guards `/` alone; the app
+ * declares `"scheme": "lbtimesheets"` (app.json), so a deep link could
+ * otherwise mount an authenticated screen directly. Because the check lives
+ * here, above the navigators, it covers the tabs and the workflow at once — no
+ * screen implements its own, and a screen added later inherits it. Same
  * polarity as the API's default-deny route hook (F-10, D16): forgetting fails
  * CLOSED.
  *
  *   restoring        HOLD. A refresh credential may be mid-redemption, which
  *                    is a network round trip. Calling that "not signed in"
  *                    would bounce a signed-in driver through the password form.
- *   authenticated    render the tab shell.
+ *   authenticated    render the stack.
  *   unauthenticated  REDIRECT. Never a placeholder — a signed-out driver must
  *                    land somewhere they can act.
  *
- * The navigator is only reached in the third case, so an unauthenticated
- * request never mounts a tab at all.
+ * WHY A STACK, with the tabs nested inside it. The four everyday destinations
+ * are a place the app keeps; Start Shift is something the driver DOES. As a
+ * sibling of the whole `(tabs)` group rather than a member of it, the workflow
+ * is genuinely outside the tab navigator and shows no tab bar — so a driver
+ * halfway through a shift form cannot leave it by tapping Timesheets.
  *
- * `APP_TABS` supplies the destinations, and `AppTabBar` draws them: routing
- * stays the navigator's and the design stays ours.
+ * That is a structural guarantee, not a styling one: nothing here hides a bar,
+ * checks a route name, or renders conditionally. `appNavigationStructure.test.tsx`
+ * asserts the shape, so moving Start Shift back among the tabs turns it red.
  */
-import { Redirect, Tabs } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import { Restoring } from "../../src/components/Restoring";
-import { AppTabBar } from "../../src/navigation/AppTabBar";
-import { APP_TABS } from "../../src/navigation/tabs";
 import { useAuth } from "../../src/auth/AuthContext";
 import { colors } from "../../src/theme/index";
 
@@ -37,23 +40,9 @@ export default function AppLayout() {
   if (status !== "authenticated") return <Redirect href="/sign-in" />;
 
   return (
-    <Tabs
-      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.background } }}
-      tabBar={props => (
-        <AppTabBar
-          activeRouteName={props.state.routes[props.state.index]?.name ?? ""}
-          onSelect={routeName => { props.navigation.navigate(routeName); }}
-        />
-      )}
-    >
-      {APP_TABS.map(tab => (
-        <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.label }} />
-      ))}
-      {/* The Start Shift workflow lives under this gate so it is protected by
-          the same check as the tabs, but `href: null` keeps it out of the bar:
-          it is something the driver DOES, launched from Home, not a place the
-          app keeps. */}
-      <Tabs.Screen name="start-shift" options={{ href: null }} />
-    </Tabs>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="start-shift" />
+    </Stack>
   );
 }
