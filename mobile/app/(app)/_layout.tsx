@@ -44,6 +44,7 @@ export default function AppLayout() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="start-shift" />
       <Stack.Screen name="active-shift" />
+      <Stack.Screen name="add-vehicle" />
     </Stack>
   );
 }

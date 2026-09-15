@@ -15,9 +15,9 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  * The owner asked to approve the whole composition before any operational
- * action is wired, so the actions are RENDERED and DISABLED: Vehicle Checks,
- * Add Vehicle, Change Vehicle/Unit, Fuel, AdBlue and Finish Shift. None of
- * them has an `onPress`. A control that answers a press by doing nothing
+ * action is wired, so the unbuilt actions are RENDERED and DISABLED: Vehicle
+ * Checks, Change Vehicle/Unit, Fuel, AdBlue and Finish Shift. None of them has
+ * an `onPress`. Two are live: Discard Shift, and Add Vehicle. A control that answers a press by doing nothing
  * teaches a driver the app is broken, so each carries the platform's disabled
  * affordance and tells assistive technology the same thing the pixels do.
  *
@@ -109,9 +109,11 @@ interface ActiveShiftScreenProps {
   shift: LocalShift;
   /** Abandon the day. Called ONLY after the driver confirms. */
   onDiscard: () => void;
+  /** Open the flow that puts a first vehicle into a day that has none. */
+  onAddVehicle: () => void;
 }
 
-export function ActiveShiftScreen({ shift, onDiscard }: ActiveShiftScreenProps) {
+export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
@@ -196,7 +198,7 @@ export function ActiveShiftScreen({ shift, onDiscard }: ActiveShiftScreenProps) 
         <Text style={styles.sectionLabel} testID="current-asset-label">{words.section}</Text>
         <View style={styles.card}>
           {vehicle === null
-            ? <NoVehicle />
+            ? <NoVehicle onAddVehicle={onAddVehicle} />
             : <CurrentVehicle vehicle={vehicle} changeLabel={words.change} />}
         </View>
 
@@ -223,13 +225,13 @@ export function ActiveShiftScreen({ shift, onDiscard }: ActiveShiftScreenProps) 
 }
 
 /** A shift running without a vehicle is a complete state, not a half-start (D29). */
-function NoVehicle() {
+function NoVehicle({ onAddVehicle }: { onAddVehicle: () => void }) {
   return (
     <View style={styles.cardBody} testID="no-vehicle">
       <Text style={styles.absent}>No active vehicle</Text>
       {/* The obvious next thing to do, said by being the only filled control
           on the screen rather than by a sentence explaining itself. */}
-      <PrimaryButton label="Add Vehicle" disabled testID="add-vehicle" />
+      <PrimaryButton label="Add Vehicle" onPress={onAddVehicle} testID="add-vehicle" />
     </View>
   );
 }

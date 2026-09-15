@@ -31,6 +31,12 @@
  * NOT persisted here: anything the requirements have not asked for. There is
  * no trailer, no check, no defect, no fuel and no note field waiting for a
  * later step to fill in (CLAUDE.md — never invent a field nothing writes).
+ *
+ * ONE VEHICLE, for now. A day holds the vehicle it is using; a later increment
+ * lets a driver change it and keeps the earlier ones. Nothing here builds that
+ * history in advance — but every stored vehicle records when its use began,
+ * in one field whatever route it arrived by, because that is the one fact the
+ * later history needs that cannot be recovered afterwards.
  */
 import { File, Paths } from "expo-file-system";
 
@@ -48,12 +54,35 @@ export const VEHICLE_CLASSES: readonly { id: VehicleClass; label: string }[] = [
   { id: "van",    label: "Van" },
 ] as const;
 
-export interface LocalVehicle {
+/** What a driver enters about a vehicle — the same three things wherever it is entered. */
+export interface VehicleDetails {
   vehicleClass: VehicleClass;
   /** Trimmed and upper-cased. Never format-validated — plates are international. */
   numberPlate: string;
   /** Whole miles, zero or more. Never defaulted or invented. */
   startMileage: number;
+}
+
+export interface LocalVehicle extends VehicleDetails {
+  /**
+   * When this vehicle's use in the day BEGAN. One meaning, whichever way the
+   * vehicle arrived:
+   *
+   *   given at Start Shift   the shift's declared `startedAt` — the same
+   *                          instant, because the vehicle began with the day
+   *   added from Active Shift the moment the driver added it
+   *
+   * Named for `ShiftSegment.startedAt`, which is the same concept on the
+   * server: a submitted day becomes segments, a segment requires its start,
+   * and for a vehicle taken mid-shift that moment cannot be reconstructed
+   * afterwards. How it maps onto a segment is the submission's decision.
+   */
+  startedAt: string;
+}
+
+/** Trimmed and upper-cased — how a plate is stored and shown, wherever it is typed. */
+export function normalisePlate(raw: string): string {
+  return raw.trim().toUpperCase();
 }
 
 export interface LocalShift {
@@ -79,7 +108,8 @@ export interface LocalShift {
 export interface StartLocalShiftInput {
   workingFor: WorkingContext;
   startedAt: Date;
-  vehicle: LocalVehicle | null;
+  /** As entered. Its use is recorded as starting at `startedAt` above. */
+  vehicle: VehicleDetails | null;
 }
 
 /** Exported so a test can assert the record reaches a real file. */
@@ -118,7 +148,7 @@ function asLocalShift(value: unknown): LocalShift | null {
   const context = asWorkingContext(workingFor);
   if (context === null) return null;
 
-  const asVehicle = vehicle === null ? null : asLocalVehicle(vehicle);
+  const asVehicle = vehicle === null ? null : asLocalVehicle(vehicle, startedAt);
   if (vehicle !== null && asVehicle === null) return null;
 
   return { id, workingFor: context, startedAt, vehicle: asVehicle, status: "open", createdAt };
@@ -138,17 +168,29 @@ function asWorkingContext(value: unknown): WorkingContext | null {
   return { kind: "company", membershipId, companyId, companyName };
 }
 
-function asLocalVehicle(value: unknown): LocalVehicle | null {
+/**
+ * `shiftStartedAt` supplies the vehicle's start ONLY when the stored vehicle
+ * has none. Builds before Add Vehicle wrote Start Shift vehicles without one,
+ * and a phone may hold such a day now; rejecting it would make the day vanish.
+ * The derivation is exact rather than a guess — until Add Vehicle existed,
+ * Start Shift was the only way a day got a vehicle, and a Start Shift vehicle's
+ * use began at the shift's start. A value that is PRESENT but not a real time
+ * is not that case, and is refused like any other malformed field.
+ */
+function asLocalVehicle(value: unknown, shiftStartedAt: string): LocalVehicle | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
 
-  const { vehicleClass, numberPlate, startMileage } = record;
+  const { vehicleClass, numberPlate, startMileage, startedAt } = record;
   const known = VEHICLE_CLASSES.some(option => option.id === vehicleClass);
   if (!known || typeof vehicleClass !== "string") return null;
   if (typeof numberPlate !== "string" || numberPlate === "") return null;
   if (typeof startMileage !== "number" || !Number.isFinite(startMileage) || startMileage < 0) return null;
 
-  return { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage };
+  const vehicle = { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage };
+  if (startedAt === undefined) return { ...vehicle, startedAt: shiftStartedAt };
+  if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
+  return { ...vehicle, startedAt };
 }
 
 /** The shift this device has open, or null. Never throws. */
@@ -167,21 +209,23 @@ export async function readOpenShift(): Promise<LocalShift | null> {
 }
 
 /**
- * One start at a time.
+ * One change to the open shift at a time.
  *
  * Read-then-write is not atomic, and two presses landing together would both
- * read "nothing open" and both write — leaving two ids for one working day.
- * A driver double-tapping a big button at 5am is not an edge case, so starts
- * are queued behind one another and the second one finds what the first wrote.
+ * read the same state and both write — two ids for one working day, or two
+ * vehicles arriving into a day that should hold one. A driver double-tapping
+ * a big button at 5am is not an edge case, so every write — starting a day,
+ * adding a vehicle — queues behind the last, and each finds what the one
+ * before it wrote.
  *
  * Failures do not poison the queue: the chain continues on either outcome, and
  * the caller still sees its own rejection.
  */
-let starting: Promise<unknown> = Promise.resolve();
+let writing: Promise<unknown> = Promise.resolve();
 
 function queued<T>(work: () => Promise<T>): Promise<T> {
-  const result = starting.then(work, work);
-  starting = result.then(() => undefined, () => undefined);
+  const result = writing.then(work, work);
+  writing = result.then(() => undefined, () => undefined);
   return result;
 }
 
@@ -198,11 +242,18 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
   const alreadyOpen = await readOpenShift();
   if (alreadyOpen !== null) return alreadyOpen;
 
+  const startedAt = input.startedAt.toISOString();
   const shift: LocalShift = {
     id:         newShiftId(),
     workingFor: input.workingFor,
-    startedAt:  input.startedAt.toISOString(),
-    vehicle:    input.vehicle,
+    startedAt,
+    // A vehicle given at the start began with the day: the same instant.
+    vehicle:    input.vehicle === null ? null : {
+      vehicleClass: input.vehicle.vehicleClass,
+      numberPlate:  input.vehicle.numberPlate,
+      startMileage: input.vehicle.startMileage,
+      startedAt,
+    },
     status:     "open",
     createdAt:  new Date().toISOString(),
   };
@@ -211,6 +262,65 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
   file.create({ overwrite: true });
   file.write(JSON.stringify(shift));
   return shift;
+}
+
+export interface AddVehicleInput {
+  vehicle: VehicleDetails;
+  /**
+   * When its use began: the moment the driver added it. Passed in, so it is
+   * the press rather than the write.
+   */
+  startedAt: Date;
+}
+
+/**
+ * Put the first vehicle into a day that started without one.
+ *
+ * Resolves to the open shift as it now stands, or `null` when there is no
+ * open shift to add to — it never creates one.
+ *
+ * ADD IS NOT CHANGE. A day that already has a vehicle is returned untouched:
+ * replacing a vehicle means an end mileage for the old one, which belongs to
+ * the Change flow, and a stray or repeated Add must never quietly do it. That
+ * is also what makes a double press harmless — the second finds the vehicle
+ * the first wrote and does nothing.
+ *
+ * Only the vehicle changes. The id, the declared start, who the day is for,
+ * the status and the creation time are carried across as they were.
+ *
+ * Never rejects for want of a network, because it never uses one. It DOES
+ * reject a vehicle that is not valid, rather than writing it: the reader
+ * treats a malformed vehicle as no open shift at all, so writing one would
+ * make the driver's day disappear.
+ */
+export function addVehicleToOpenShift(input: AddVehicleInput): Promise<LocalShift | null> {
+  return queued(() => addIfNoVehicle(input));
+}
+
+async function addIfNoVehicle({ vehicle, startedAt }: AddVehicleInput): Promise<LocalShift | null> {
+  const numberPlate = normalisePlate(vehicle.numberPlate);
+  const known = VEHICLE_CLASSES.some(option => option.id === vehicle.vehicleClass);
+  if (!known || numberPlate === "" || !Number.isSafeInteger(vehicle.startMileage) || vehicle.startMileage < 0
+    || Number.isNaN(startedAt.getTime())) {
+    throw new Error("Refusing to store an invalid vehicle");
+  }
+
+  const open = await readOpenShift();
+  if (open === null) return null;
+  if (open.vehicle !== null) return open;
+
+  const updated: LocalShift = {
+    ...open,
+    vehicle: {
+      vehicleClass: vehicle.vehicleClass,
+      numberPlate,
+      startMileage: vehicle.startMileage,
+      startedAt: startedAt.toISOString(),
+    },
+  };
+  const file = openShiftFile();
+  file.write(JSON.stringify(updated));
+  return updated;
 }
 
 /** Forget the open shift. The end of a day, and the reset a test needs. */

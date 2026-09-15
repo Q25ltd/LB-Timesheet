@@ -137,6 +137,18 @@ test("the authenticated area is a STACK, with the tabs and Start Shift as siblin
   expect(registered.stack).toContain("start-shift");
 });
 
+test("Active Shift and Add Vehicle are workflow screens BESIDE the tabs, never tabs", async () => {
+  await authenticated(<AppLayout />);
+  registered.tabs = [];
+  await authenticated(<TabsLayout />);
+
+  // A driver mid-flow on Add Vehicle must not be able to wander off through
+  // the bar, for the same reason as Start Shift.
+  expect(registered.stack).toEqual(expect.arrayContaining(["active-shift", "add-vehicle"]));
+  expect(registered.tabs).not.toContain("active-shift");
+  expect(registered.tabs).not.toContain("add-vehicle");
+});
+
 test("the authenticated area does NOT mount the tab navigator directly", async () => {
   const view = await authenticated(<AppLayout />);
 

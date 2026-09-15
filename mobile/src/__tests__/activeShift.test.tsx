@@ -47,6 +47,8 @@ jest.mock("expo-router", () => {
     },
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // The route re-reads the day on focus; in a test, mounting is the focus.
+    useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });
 
@@ -63,7 +65,10 @@ const NORTHGATE: WorkingContext = {
   companyName: "Northgate Logistics",
 };
 
-const LORRY: LocalVehicle = { vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203 };
+const LORRY: LocalVehicle = {
+  vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203,
+  startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
+};
 
 function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
   return {
@@ -82,7 +87,7 @@ type View = Awaited<ReturnType<typeof render>>;
 function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promise<View> {
   return render(
     <SafeAreaProvider initialMetrics={METRICS}>
-      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} />
+      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined} />
     </SafeAreaProvider>,
   );
 }
@@ -207,12 +212,13 @@ test("a shift with no vehicle says so, plainly", async () => {
   expect(view.queryByTestId("active-vehicle")).toBeNull();
 });
 
-test("the no-vehicle state offers Add Vehicle — and it does nothing yet", async () => {
+test("the no-vehicle state offers Add Vehicle, and it is LIVE", async () => {
+  // This replaces the Step 3A contract that Add Vehicle does nothing. The flow
+  // it opens, and what it stores, are proven in `addVehicle.test.tsx`.
   const view = await show(shiftWith());
 
   expect(view.getByTestId("add-vehicle")).toBeTruthy();
-  expect(isDisabled(view, "add-vehicle")).toBe(true);
-  await pressingDoesNothing(view, "add-vehicle");
+  expect(isDisabled(view, "add-vehicle")).toBe(false);
 });
 
 test("Add Vehicle belongs to the no-vehicle state ALONE", async () => {
@@ -245,7 +251,7 @@ test("class, plate and start mileage all come from the shift", async () => {
 test("the plate is shown VERBATIM — never reformatted into a UK shape", async () => {
   // Plates are international. A Lithuanian one must survive intact.
   const view = await show(shiftWith({
-    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640 },
+    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, startedAt: LORRY.startedAt },
   }));
 
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("KAT 123");
@@ -357,7 +363,7 @@ test("no fuel or AdBlue TOTALS are shown, because no entry has ever been made", 
   }
 });
 
-test("Discard is the ONE real action here — everything else is still a stub", async () => {
+test("Discard is live, and the unbuilt actions are still stubs", async () => {
   const view = await show(shiftWith({ vehicle: LORRY }));
 
   // This replaces the Step 3A contract that Discard must be absent. It was
@@ -611,9 +617,10 @@ describe("the Active Shift route", () => {
 
     // The one-open-shift rule blocked this before the discard; it must not
     // keep blocking it afterwards, or discard has fixed nothing.
-    const second = await startLocalShift({ workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
+    const secondStart = new Date();
+    const second = await startLocalShift({ workingFor: NORTHGATE, startedAt: secondStart, vehicle: LORRY });
     expect(second.id).not.toBe(first.id);
-    expect(second.vehicle).toEqual(LORRY);
+    expect(second.vehicle).toMatchObject({ numberPlate: LORRY.numberPlate, startedAt: secondStart.toISOString() });
     alert.mockRestore();
   });
 });

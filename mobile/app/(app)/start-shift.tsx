@@ -15,7 +15,7 @@ import { router } from "expo-router";
 import { StartShiftScreen } from "../../src/screens/StartShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
-import { readOpenShift, startLocalShift, type LocalVehicle, type WorkingContext } from "../../src/shift/localShift";
+import { readOpenShift, startLocalShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
 
 export default function StartShiftRoute() {
   const { account } = useAuth();
@@ -43,7 +43,7 @@ export default function StartShiftRoute() {
       // ACTIVE memberships, as the authenticated account reports them.
       memberships={account.memberships}
       onBack={() => { router.back(); }}
-      onStart={(input: { workingFor: WorkingContext; startedAt: Date; vehicle: LocalVehicle | null }) => {
+      onStart={(input: { workingFor: WorkingContext; startedAt: Date; vehicle: VehicleDetails | null }) => {
         // Local only: this cannot fail for want of a network, and it cannot
         // create a second day. `replace`, not `navigate` — the form must not
         // be behind the back gesture once the shift is running.

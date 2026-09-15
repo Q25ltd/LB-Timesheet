@@ -5,10 +5,15 @@
  * should not wander out of it by tapping Timesheets. It reads the open shift
  * from the local store, which is the same read a cold start performs, so
  * reaching this route directly after a relaunch recovers the day.
+ *
+ * READ ON EVERY FOCUS, not once. Add Vehicle opens on top of this screen and
+ * writes into the same day; when the driver comes back, the day on the phone
+ * has changed and this screen, still mounted underneath, must show it at once
+ * rather than the no-vehicle state it was left in.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert } from "react-native";
-import { Redirect, router } from "expo-router";
+import { Redirect, router, useFocusEffect } from "expo-router";
 import { ActiveShiftScreen } from "../../src/screens/ActiveShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
@@ -16,11 +21,11 @@ import { clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/
 export default function ActiveShiftRoute() {
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     void readOpenShift().then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []);
+  }, []));
 
   // Reading a file is fast, but it is not synchronous: holding avoids a frame
   // that claims there is no shift before anyone has looked.
@@ -28,7 +33,13 @@ export default function ActiveShiftRoute() {
   // No open shift — nothing to be active about. Back to the tabs.
   if (shift === null) return <Redirect href="/today" />;
 
-  return <ActiveShiftScreen shift={shift} onDiscard={discard} />;
+  return (
+    <ActiveShiftScreen
+      shift={shift}
+      onDiscard={discard}
+      onAddVehicle={() => { router.push("/add-vehicle"); }}
+    />
+  );
 }
 
 /**
