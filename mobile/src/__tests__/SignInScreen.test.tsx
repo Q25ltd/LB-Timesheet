@@ -23,6 +23,7 @@ import { RegisterScreen } from "../screens/RegisterScreen";
 import { MIN_HEIGHT_FOR_HERO, authStyles } from "../screens/authLayout";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
+import brandLogo from "../../assets/images/lblogo.png";
 
 const EMAIL    = "driver@example.com";
 const PASSWORD = "correct-horse-battery";
@@ -371,12 +372,12 @@ test("the brand lockup sits at the TOP of the white area, as it does on Registra
   // — rather than as a screen coordinate.
   const view = await wrap(<SignInScreen onSignedIn={noop} onCreateAccount={noop} />);
 
-  // It renders...
-  expect(view.getByText("LogisticBay")).toBeTruthy();
+  // It renders — the approved mark, then the product name...
+  expect(view.getByTestId("brand-logo").props.source).toEqual(brandLogo);
   expect(view.getByText("TIMESHEETS")).toBeTruthy();
   // ...and NOT inside the container that centres everything else.
   const centred = within(view.getByTestId("sign-in-form"));
-  expect(centred.queryByText("LogisticBay")).toBeNull();
+  expect(centred.queryByTestId("brand-logo")).toBeNull();
   expect(centred.queryByText("TIMESHEETS")).toBeNull();
 
   // Everything the centring still owns is untouched.

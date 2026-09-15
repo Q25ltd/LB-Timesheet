@@ -17,6 +17,7 @@ import { RegisterScreen } from "../screens/RegisterScreen";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import { Text, StyleSheet, Keyboard, Dimensions } from "react-native";
 import type { AuthenticatedAccount } from "../api/account";
+import brandLogo from "../../assets/images/lblogo.png";
 
 const SUCCESS: AuthenticatedAccount = {
   user: { id: "user_1", firstName: "Nerijus", lastName: "Kuizinas", email: "driver@example.com" },
@@ -339,6 +340,18 @@ test("at rest the screen does not scroll in either direction, and the hero is sh
   expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({ flexGrow: 1 });
 
   expect(view.getByTestId("brand-hero")).toBeTruthy();
+});
+
+test("Registration carries the approved LogisticBay mark once, and no text wordmark beside it", async () => {
+  const view = await wrap(<RegisterScreen onRegistered={noop} onSignIn={noop} />);
+
+  expect(view.getAllByTestId("brand-logo")).toHaveLength(1);
+  expect(view.getByTestId("brand-logo").props.source).toEqual(brandLogo);
+  // The image already says LogisticBay; the old text wordmark must not
+  // survive alongside it.
+  expect(view.queryByText("LogisticBay")).toBeNull();
+  // The account form it sits above is untouched.
+  expect(view.getByText("Create your account")).toBeTruthy();
 });
 
 test("when the keyboard opens the hero yields its space and scrolling is enabled", async () => {

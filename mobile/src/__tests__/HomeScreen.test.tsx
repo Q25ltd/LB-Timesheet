@@ -28,6 +28,7 @@ import { Text, Pressable } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
 import Today from "../../app/(app)/(tabs)/today";
+import brandLogo from "../../assets/images/lblogo.png";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -264,7 +265,14 @@ test("Home uses the APPROVED brand lockup, and carries no second logo", async ()
   // The lockup Login and Registration use, reused verbatim. A drawn truck mark
   // was tried beside it and removed — on device it read as two blue blocks,
   // and a second logo implementation is what must not exist.
-  expect(view.getByText("LogisticBay")).toBeTruthy();
+  expect(view.getAllByTestId("brand-logo")).toHaveLength(1);
+  // The APPROVED file, not a stand-in — compared by module, so a swapped
+  // asset fails here rather than in a screenshot nobody takes.
+  expect(view.getByTestId("brand-logo").props.source).toEqual(brandLogo);
+  expect(view.getByTestId("brand-logo").props.accessibilityLabel).toBe("LogisticBay");
+  // The mark already SAYS LogisticBay. A text wordmark beside it would be the
+  // same name twice — two logos by another route.
+  expect(view.queryByText("LogisticBay")).toBeNull();
   expect(view.getByText("TIMESHEETS")).toBeTruthy();
 });
 

@@ -95,16 +95,21 @@ export function HomeScreen({
       ]}
     >
       <View style={styles.header}>
-        {/* The lockup the owner approved on a physical phone for Login and
-            Registration, reused verbatim and centred on the CONTENT width. */}
-        <BrandLockup />
+        {/* The lockup Login and Registration use, reused verbatim and centred
+            on the CONTENT width. Its slot gives up the badge's width on BOTH
+            sides: reserving it on the right alone would centre the logo in the
+            space beside the badge rather than on the screen. The logo shrinks
+            to fit what is left, so on any phone width it stops short of the
+            badge instead of relying on the logo happening to be narrow. */}
+        <View style={styles.brandSlot}>
+          <BrandLockup />
+        </View>
 
         {/* Overlaid rather than laid out beside the lockup. In a flex row the
             badge's width would push the brand left by half of it, so the brand
             would be centred in the space BESIDE the badge rather than on the
-            screen. Taken out of flow, it costs the brand no width at all, and
-            the two cannot collide: the lockup is ~160pt wide and the badge 44pt
-            at the right margin, which stays clear even on a 320pt phone. */}
+            screen. Taken out of flow, it costs the brand no width; the brand
+            slot above is what keeps the two apart. */}
         <View style={styles.badgeSlot} pointerEvents="box-none">
           <Pressable
             testID="identity-badge-container"
@@ -207,6 +212,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: spacing.xl,
   },
+  // The badge (44pt) plus a gap, given up on each side.
+  brandSlot: { alignSelf: "stretch", paddingHorizontal: 44 + spacing.sm },
   // Fills the header's height so the badge sits on the lockup's optical
   // middle without being told a pixel offset.
   badgeSlot: {
