@@ -68,6 +68,7 @@ const NORTHGATE: WorkingContext = {
 const LORRY: LocalVehicle = {
   vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203,
   startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
+  checks: [],
 };
 
 function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
@@ -87,7 +88,7 @@ type View = Awaited<ReturnType<typeof render>>;
 function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promise<View> {
   return render(
     <SafeAreaProvider initialMetrics={METRICS}>
-      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined} />
+      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined} onVehicleChecks={() => undefined} />
     </SafeAreaProvider>,
   );
 }
@@ -251,7 +252,7 @@ test("class, plate and start mileage all come from the shift", async () => {
 test("the plate is shown VERBATIM — never reformatted into a UK shape", async () => {
   // Plates are international. A Lithuanian one must survive intact.
   const view = await show(shiftWith({
-    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, startedAt: LORRY.startedAt },
+    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, startedAt: LORRY.startedAt, checks: [] },
   }));
 
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("KAT 123");
@@ -288,11 +289,12 @@ test("nothing on the screen claims a vehicle has PASSED a check", async () => {
   expect(text).toContain("Not completed");
 });
 
-test("Vehicle Checks is present for a vehicle, and is not wired", async () => {
+test("Vehicle Checks is present for a vehicle, and is LIVE", async () => {
+  // Replaces the Step 3A contract that it does nothing. What it opens, and
+  // the states this row shows, are proven in `vehicleCheck.test.tsx`.
   const view = await show(shiftWith({ vehicle: LORRY }));
 
-  expect(isDisabled(view, "vehicle-checks")).toBe(true);
-  await pressingDoesNothing(view, "vehicle-checks");
+  expect(isDisabled(view, "vehicle-checks")).toBe(false);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -333,7 +335,6 @@ test("there is no COMBINED vehicle-and-trailer check workflow", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test.each([
-  ["vehicle-checks",  "Vehicle Checks"],
   ["change-vehicle",  "Change Vehicle"],
   ["fuel",            "Fuel"],
   ["adblue",          "AdBlue"],
@@ -376,7 +377,7 @@ test("Discard is live, and the unbuilt actions are still stubs", async () => {
   alert.mockRestore();
   // The rest of the workspace is unchanged — still rendered, still inert.
   expect(isDisabled(view, "finish-shift")).toBe(true);
-  expect(isDisabled(view, "vehicle-checks")).toBe(true);
+  expect(isDisabled(view, "fuel")).toBe(true);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

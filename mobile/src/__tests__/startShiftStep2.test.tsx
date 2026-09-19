@@ -388,7 +388,7 @@ test("Yes creates an open shift carrying exactly the vehicle entered", async () 
   const started = await readOpenShift();
   // Its use began when the day did, so it carries the shift's own start.
   expect(started?.vehicle).toEqual({
-    vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184203, startedAt: started?.startedAt,
+    vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184203, startedAt: started?.startedAt, checks: [],
   });
   expect(started?.workingFor).toMatchObject({ kind: "company", membershipId: "mem_1" });
 });

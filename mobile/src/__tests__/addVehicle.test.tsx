@@ -334,7 +334,7 @@ function noVehicleShift(): LocalShift {
 test("Add Vehicle on a no-vehicle Active Shift opens the flow", async () => {
   const onAddVehicle = jest.fn();
   const view = await wrap(
-    <ActiveShiftScreen shift={noVehicleShift()} onDiscard={() => undefined} onAddVehicle={onAddVehicle} />,
+    <ActiveShiftScreen shift={noVehicleShift()} onDiscard={() => undefined} onAddVehicle={onAddVehicle} onVehicleChecks={() => undefined} />,
   );
 
   expect(enabled(view, "add-vehicle")).toBe(true);

@@ -14,15 +14,19 @@
  * It is a HOLD, never a destination: whatever renders it must redirect once
  * the provider settles. A placeholder with no exit is the defect the `(app)`
  * gate was added to remove.
+ *
+ * `message` defaults to the sign-in wording. A screen that is holding for
+ * something else — reading the phone's own data — says so instead: it must
+ * never claim a sign-in is happening when none is.
  */
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { colors, spacing, typography } from "../theme/index";
 
-export function Restoring() {
+export function Restoring({ message = "Signing you in…" }: { message?: string }) {
   return (
     <View style={styles.screen} testID="auth-restoring">
       <ActivityIndicator color={colors.brandDark} />
-      <Text style={typography.helper}>Signing you in…</Text>
+      <Text style={typography.helper}>{message}</Text>
     </View>
   );
 }

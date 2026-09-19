@@ -29,8 +29,9 @@
  * checks, defects — that is the moment to revisit it, with data in hand.
  *
  * NOT persisted here: anything the requirements have not asked for. There is
- * no trailer, no check, no defect, no fuel and no note field waiting for a
- * later step to fill in (CLAUDE.md — never invent a field nothing writes).
+ * no trailer, no fuel and no note field waiting for a later step to fill in
+ * (CLAUDE.md — never invent a field nothing writes). Vehicle checks and their
+ * defects ARE stored, inside the vehicle they check — see `vehicleCheck.ts`.
  *
  * ONE VEHICLE, for now. A day holds the vehicle it is using; a later increment
  * lets a driver change it and keeps the earlier ones. Nothing here builds that
@@ -39,6 +40,16 @@
  * later history needs that cannot be recovered afterwards.
  */
 import { File, Paths } from "expo-file-system";
+import { checklistFor, checklistItems } from "./checklists";
+import {
+  CHECK_RESULT,
+  CHECK_STATUS,
+  DEFECT_NOTE_MAX_LENGTH,
+  asVehicleCheck,
+  type CheckAnswer,
+  type CheckItem,
+  type VehicleCheck,
+} from "./vehicleCheck";
 
 /** Who the day is being worked for. A local INTENTION, never authority (D28). */
 export type WorkingContext =
@@ -78,6 +89,12 @@ export interface LocalVehicle extends VehicleDetails {
    * afterwards. How it maps onto a segment is the submission's decision.
    */
   startedAt: string;
+  /**
+   * The walkaround checks performed on THIS use of the vehicle, oldest first.
+   * Empty until the driver answers a first item. See `vehicleCheck.ts` for why
+   * they live here rather than keyed by number plate.
+   */
+  checks: VehicleCheck[];
 }
 
 /** Trimmed and upper-cased — how a plate is stored and shown, wherever it is typed. */
@@ -119,7 +136,11 @@ function openShiftFile(): File {
   return new File(Paths.document, OPEN_SHIFT_FILE);
 }
 
-function newShiftId(): string {
+/**
+ * A fresh local identity — for a day, or a check within it. UUID-shaped so it
+ * can travel to the server unchanged; see `LocalShift.id` on its source.
+ */
+export function newLocalId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, placeholder => {
     const random = Math.floor(Math.random() * 16);
     const value = placeholder === "x" ? random : (random & 0x3) | 0x8;
@@ -188,9 +209,64 @@ function asLocalVehicle(value: unknown, shiftStartedAt: string): LocalVehicle | 
   if (typeof startMileage !== "number" || !Number.isFinite(startMileage) || startMileage < 0) return null;
 
   const vehicle = { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage };
-  if (startedAt === undefined) return { ...vehicle, startedAt: shiftStartedAt };
-  if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
-  return { ...vehicle, startedAt };
+  let usageStartedAt: string;
+  if (startedAt === undefined) usageStartedAt = shiftStartedAt;
+  else if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
+  else usageStartedAt = startedAt;
+
+  return { ...vehicle, startedAt: usageStartedAt, checks: readChecks(record["checks"], vehicle.vehicleClass) };
+}
+
+/**
+ * The vehicle's checks, keeping only those that can be read as what they are.
+ *
+ * A DRAFT holds only the rows the driver CHANGED from the checklist's
+ * defaults, so it is read against the version it was written for: its items
+ * must be items of that checklist. A COMPLETED check holds every row with its
+ * own label and result and is read as it stands, whatever the checklist says
+ * now — a finished record is evidence, and a later change to a default must
+ * never reinterpret it.
+ *
+ * ABSENT means none — every build before Vehicle Checks stored vehicles
+ * without the field, and no check was ever made on them.
+ *
+ * A check that cannot be read is DROPPED, not repaired and not allowed to
+ * take the day with it. The safe direction is unambiguous: a lost check reads
+ * as "Not completed" and the driver checks again; a guessed one could read as
+ * a vehicle that passed. And unlike a broken vehicle, a broken check is no
+ * reason to report that the driver has no open day at all — that would let a
+ * new day overwrite this one, start time and all.
+ *
+ * Readable means: structurally a check (`asVehicleCheck`) for THIS vehicle's
+ * checklist. A draft must be for the current version, every item a real item
+ * of it; a completed check must carry rows of its own — all of them, if it
+ * claims the current version. A second check with an id already seen is
+ * dropped too.
+ */
+function readChecks(value: unknown, vehicleClass: VehicleClass): VehicleCheck[] {
+  if (!Array.isArray(value)) return [];
+  const checklist = checklistFor(vehicleClass);
+  const keys = new Set(checklistItems(checklist).map(entry => entry.key));
+  const ids = new Set<string>();
+  const checks: VehicleCheck[] = [];
+  for (const raw of value) {
+    const check = asVehicleCheck(raw);
+    if (check === null || ids.has(check.id)) continue;
+    if (check.checklist !== checklist.id) continue;
+    if (check.status === CHECK_STATUS.completed) {
+      // Self-describing: every row, with the label and result recorded then.
+      if (check.items.length === 0) continue;
+      if (check.checklistVersion === checklist.version && check.items.length !== keys.size) continue;
+    } else {
+      // Overrides, which only mean anything against the version they were
+      // written for.
+      if (check.checklistVersion !== checklist.version) continue;
+      if (!check.items.every(entry => keys.has(entry.key))) continue;
+    }
+    ids.add(check.id);
+    checks.push(check);
+  }
+  return checks;
 }
 
 /** The shift this device has open, or null. Never throws. */
@@ -244,7 +320,7 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
 
   const startedAt = input.startedAt.toISOString();
   const shift: LocalShift = {
-    id:         newShiftId(),
+    id:         newLocalId(),
     workingFor: input.workingFor,
     startedAt,
     // A vehicle given at the start began with the day: the same instant.
@@ -253,6 +329,7 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
       numberPlate:  input.vehicle.numberPlate,
       startMileage: input.vehicle.startMileage,
       startedAt,
+      checks:       [],
     },
     status:     "open",
     createdAt:  new Date().toISOString(),
@@ -316,11 +393,138 @@ async function addIfNoVehicle({ vehicle, startedAt }: AddVehicleInput): Promise<
       numberPlate,
       startMileage: vehicle.startMileage,
       startedAt: startedAt.toISOString(),
+      checks: [],
     },
   };
   const file = openShiftFile();
   file.write(JSON.stringify(updated));
   return updated;
+}
+
+export interface VehicleCheckWrite {
+  /** The day the check belongs to. */
+  shiftId: string;
+  /** The vehicle use being checked, by its `startedAt`. */
+  vehicleStartedAt: string;
+  checkId: string;
+  /** When the driver began this check. Kept from the first write onwards. */
+  startedAt: Date;
+  answers: readonly CheckAnswer[];
+}
+
+/**
+ * Save a check in progress. Called as the driver answers, so nothing given is
+ * lost to a closed app, a flat battery or a missing signal.
+ *
+ * ONLY WHAT THE DRIVER CHANGED is stored. Every row starts at the checklist's
+ * declared default, and those defaults are already on the phone — writing 42
+ * of them back on every tap would be noise, and would freeze a copy of them
+ * into a draft nobody has confirmed. A row set back to its default drops out
+ * of the draft again.
+ *
+ * Resolves to the check as stored, or `null` when the day or the vehicle it
+ * was begun on is no longer the one open — the check is not written into a
+ * different day or onto a different vehicle.
+ *
+ * A COMPLETED check is not reopened by a late save: it is returned as it was.
+ * And while this vehicle use already has a check, a second one is not started
+ * beside it — repeat checks are a later, deliberate feature.
+ */
+export function saveVehicleCheckDraft(input: VehicleCheckWrite): Promise<VehicleCheck | null> {
+  return queued(() => writeCheck(input, null));
+}
+
+/**
+ * Complete a check: store the final answers and mark it done, in one write.
+ *
+ * THE COMPLETED RECORD IS WRITTEN IN FULL — every row, in order, with the
+ * label, the section and the result as the driver confirmed them, defaults
+ * included. A draft is shorthand against today's checklist; a completed check
+ * is the driver's evidence, and must read the same whatever the checklist
+ * later becomes — rows added, retired, renamed, moved or re-defaulted.
+ *
+ * REFUSES — rejects, writing nothing — unless every item of the vehicle's
+ * checklist is answered and every defect is described. Completing a check
+ * that is already complete returns it unchanged: a double press cannot make a
+ * second completed check or move the completion time.
+ */
+export function completeVehicleCheck(input: CompleteVehicleCheckInput): Promise<VehicleCheck | null> {
+  return queued(() => writeCheck(input, input));
+}
+
+export interface CompleteVehicleCheckInput extends VehicleCheckWrite {
+  /** The driver's declared moment of certification — see `VehicleCheck`. */
+  completedAt: Date;
+  /** The authenticated driver's stable user id: who made the declaration. */
+  completedBy: string;
+}
+
+async function writeCheck(input: VehicleCheckWrite, certification: { completedAt: Date; completedBy: string } | null): Promise<VehicleCheck | null> {
+  const completedAt = certification?.completedAt ?? null;
+  const open = await readOpenShift();
+  const vehicle = open?.vehicle ?? null;
+  if (open === null || vehicle === null || open.id !== input.shiftId || vehicle.startedAt !== input.vehicleStartedAt) {
+    return null;
+  }
+
+  const existing = vehicle.checks.find(check => check.id === input.checkId);
+  if (existing?.status === CHECK_STATUS.completed) return existing;
+  if (existing === undefined && vehicle.checks.length > 0) return vehicle.checks[vehicle.checks.length - 1] ?? null;
+
+  const checklist = checklistFor(vehicle.vehicleClass);
+  const byKey = new Map(input.answers.map(answer => [answer.key, answer]));
+  if (byKey.size !== input.answers.length) throw new Error("Refusing a check with a repeated item");
+  const known = new Set(checklistItems(checklist).map(entry => entry.key));
+  for (const key of byKey.keys()) {
+    if (!known.has(key)) throw new Error("Refusing a check with an item not on this vehicle's checklist");
+  }
+
+  const items: CheckItem[] = [];
+  for (const section of checklist.sections) {
+    for (const entry of section.items) {
+      const answer = byKey.get(entry.key);
+      if (answer === undefined) continue;
+      const isDefect = answer.result === CHECK_RESULT.defect;
+      // A draft keeps only what differs from the declared default; a completed
+      // record keeps every row, so it can never be re-read against new defaults.
+      if (completedAt === null && !isDefect && answer.result === entry.defaultResult) continue;
+      // The description travels only with a defect: switching an item back to
+      // OK or N/A must not leave an old description attached to it.
+      const typed = isDefect ? (completedAt === null ? answer.note : answer.note.trim()) : "";
+      if (typed.length > DEFECT_NOTE_MAX_LENGTH) throw new Error("Refusing an over-long defect description");
+      const item: CheckItem = { key: entry.key, label: entry.label, result: answer.result, note: isDefect && typed !== "" ? typed : null };
+      // The certificate records where each row sat, so it can be shown again
+      // exactly as confirmed whatever the checklist later becomes. A draft is
+      // laid out by the checklist it is answered against, and records none.
+      if (completedAt !== null) item.section = { id: section.id, title: section.title };
+      items.push(item);
+    }
+  }
+
+  if (certification !== null) {
+    const complete = items.length === known.size && items.every(entry => entry.result !== CHECK_RESULT.defect || entry.note !== null);
+    if (!complete || Number.isNaN(certification.completedAt.getTime())) throw new Error("Refusing to complete an unfinished check");
+    // Unattributable certification is refused rather than stored anonymously.
+    if (certification.completedBy === "") throw new Error("Refusing to complete a check with no driver");
+  }
+
+  const check: VehicleCheck = {
+    id:               input.checkId,
+    checklist:        checklist.id,
+    checklistVersion: checklist.version,
+    startedAt:        existing?.startedAt ?? input.startedAt.toISOString(),
+    status:           certification === null ? CHECK_STATUS.draft : CHECK_STATUS.completed,
+    completedAt:      certification === null ? null : certification.completedAt.toISOString(),
+    completedBy:      certification?.completedBy ?? null,
+    items,
+  };
+  const checks = existing === undefined
+    ? [...vehicle.checks, check]
+    : vehicle.checks.map(stored => (stored.id === check.id ? check : stored));
+
+  const updated: LocalShift = { ...open, vehicle: { ...vehicle, checks } };
+  openShiftFile().write(JSON.stringify(updated));
+  return check;
 }
 
 /** Forget the open shift. The end of a day, and the reset a test needs. */

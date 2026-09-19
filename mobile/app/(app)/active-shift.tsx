@@ -38,6 +38,7 @@ export default function ActiveShiftRoute() {
       shift={shift}
       onDiscard={discard}
       onAddVehicle={() => { router.push("/add-vehicle"); }}
+      onVehicleChecks={() => { router.push("/vehicle-check"); }}
     />
   );
 }

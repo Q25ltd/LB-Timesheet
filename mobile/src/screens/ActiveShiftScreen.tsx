@@ -15,9 +15,9 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  * The owner asked to approve the whole composition before any operational
- * action is wired, so the unbuilt actions are RENDERED and DISABLED: Vehicle
- * Checks, Change Vehicle/Unit, Fuel, AdBlue and Finish Shift. None of them has
- * an `onPress`. Two are live: Discard Shift, and Add Vehicle. A control that answers a press by doing nothing
+ * action is wired, so the unbuilt actions are RENDERED and DISABLED: Change
+ * Vehicle/Unit, Fuel, AdBlue and Finish Shift. None of them has an `onPress`.
+ * Three are live: Discard Shift, Add Vehicle, and Vehicle Checks. A control that answers a press by doing nothing
  * teaches a driver the app is broken, so each carries the platform's disabled
  * affordance and tells assistive technology the same thing the pixels do.
  *
@@ -66,30 +66,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { VEHICLE_CLASSES, type LocalShift, type LocalVehicle, type VehicleClass } from "../shift/localShift";
+import { checkStateOf, type VehicleCheckState } from "../shift/vehicleCheck";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
+import { formatClockTime, formatMileage } from "./format";
 
 /** Said to assistive technology by every control this increment has not wired. */
 const NOT_YET_AVAILABLE = "Not available yet";
 
 function classLabel(id: VehicleClass): string {
   return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
-}
-
-/** The declared start, as a plain clock time. */
-function startedTime(iso: string): string {
-  const at = new Date(iso);
-  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
-}
-
-/**
- * 184203 → "184,203".
- *
- * Grouped by hand rather than through `toLocaleString`, which would render
- * differently depending on the device's locale — a mileage the driver typed
- * should read back the same on every phone.
- */
-function groupDigits(value: number): string {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 /**
@@ -111,13 +96,25 @@ interface ActiveShiftScreenProps {
   onDiscard: () => void;
   /** Open the flow that puts a first vehicle into a day that has none. */
   onAddVehicle: () => void;
+  /** Open, resume or show the walkaround check for the current vehicle. */
+  onVehicleChecks: () => void;
 }
 
-export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle }: ActiveShiftScreenProps) {
+/**
+ * What the Vehicle checks row says — taken from the stored checks, never
+ * assumed. A check the driver has opened but not answered is still not started.
+ */
+const CHECK_STATE_LABEL: Record<VehicleCheckState, string> = {
+  "not-started": "Not completed",
+  "in-progress": "In progress",
+  completed:     "Completed",
+};
+
+export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
-  const startedAt = startedTime(shift.startedAt);
+  const startedAt = formatClockTime(shift.startedAt);
 
   /**
    * DISCARD ASKS BEFORE IT ACTS, and this is the whole safety of the feature.
@@ -199,7 +196,7 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle }: ActiveShif
         <View style={styles.card}>
           {vehicle === null
             ? <NoVehicle onAddVehicle={onAddVehicle} />
-            : <CurrentVehicle vehicle={vehicle} changeLabel={words.change} />}
+            : <CurrentVehicle vehicle={vehicle} changeLabel={words.change} onVehicleChecks={onVehicleChecks} />}
         </View>
 
         {/* ── CURRENT TRAILER goes here ──────────────────────────────────────
@@ -236,7 +233,10 @@ function NoVehicle({ onAddVehicle }: { onAddVehicle: () => void }) {
   );
 }
 
-function CurrentVehicle({ vehicle, changeLabel }: { vehicle: LocalVehicle; changeLabel: string }) {
+function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks }: {
+  vehicle: LocalVehicle; changeLabel: string; onVehicleChecks: () => void;
+}) {
+  const checkState = checkStateOf(vehicle.checks);
   return (
     <View style={styles.cardBody} testID="active-vehicle">
       {/* The plate is what a driver checks they are in the right truck by, so
@@ -260,20 +260,33 @@ function CurrentVehicle({ vehicle, changeLabel }: { vehicle: LocalVehicle; chang
       <View style={styles.facts}>
         <FactRow label="Start mileage">
           <Text style={styles.factValue} testID="vehicle-mileage-value">
-            {`${groupDigits(vehicle.startMileage)} mi`}
+            {formatMileage(vehicle.startMileage)}
           </Text>
         </FactRow>
         <FactRow label="Vehicle checks">
-          {/* The only check state that exists. Deliberately not a red or amber
-              badge: nothing is wrong with a shift whose checks are still to be
-              done, and a warning colour here would cry wolf every morning. */}
-          <View style={styles.pill}>
-            <Text style={styles.pillText} testID="vehicle-checks-state">Not completed</Text>
+          {/* Read from the stored checks. Neutral while the check is still to
+              do: nothing is wrong with a shift whose checks are still to be
+              done, and a warning colour here would cry wolf every morning. Only
+              a completed check is marked — by a small tick in the check's own
+              restrained green. */}
+          <View style={[styles.pill, checkState === "completed" ? styles.pillDone : null]}>
+            {checkState === "completed" ? <View style={styles.pillTick} /> : null}
+            <Text
+              style={[styles.pillText, checkState === "completed" ? styles.pillTextDone : null]}
+              testID="vehicle-checks-state"
+            >
+              {CHECK_STATE_LABEL[checkState]}
+            </Text>
           </View>
         </FactRow>
       </View>
 
-      <PrimaryButton label="Vehicle Checks" disabled testID="vehicle-checks" />
+      {/* Once the check is done it is no longer what to do next, so it stops
+          being the filled action — but it stays reachable, because the record
+          it opens is the driver's evidence of the walkaround. */}
+      {checkState === "completed"
+        ? <DoneAction label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />
+        : <PrimaryButton label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />}
       <View style={styles.secondarySlot}>
         <PendingAction label={changeLabel} testID="change-vehicle" />
       </View>
@@ -311,6 +324,28 @@ function FactRow({ label, children }: { label: string; children: React.ReactNode
       <Text style={styles.factRowLabel}>{label}</Text>
       {children}
     </View>
+  );
+}
+
+/**
+ * A live control that is no longer the next thing to do.
+ *
+ * Bordered rather than filled, and with the brand's own text rather than the
+ * muted grey of the unbuilt controls above — so it reads as something the
+ * driver may open, not as something they cannot.
+ */
+function DoneAction({ label, onPress, testID }: { label: string; onPress: () => void; testID: string }) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: false }}
+      style={({ pressed }) => [styles.pending, styles.done, pressed ? styles.donePressed : null]}
+    >
+      <Text style={[styles.pendingLabel, styles.doneLabel]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -454,6 +489,20 @@ const styles = StyleSheet.create({
   },
   factRowLabel: { fontSize: 15, color: colors.textMuted },
   factValue: { flexShrink: 1, fontSize: 16, fontWeight: "700", color: colors.text, textAlign: "right" },
+  // A completed check is marked by one small tick in the check's own green,
+  // and nothing louder: the row is a status, not a result.
+  pillDone: { flexDirection: "row", alignItems: "center", gap: 6, borderColor: colors.success },
+  pillTick: {
+    width: 9, height: 5,
+    borderLeftWidth: 2, borderBottomWidth: 2,
+    borderColor: colors.success,
+    transform: [{ rotate: "-45deg" }],
+    marginTop: -3,
+  },
+  pillTextDone: { color: colors.success },
+  done: { borderColor: colors.border, backgroundColor: colors.surface },
+  donePressed: { backgroundColor: colors.surfaceAccent },
+  doneLabel: { color: colors.brandDark },
   pill: {
     borderRadius: 999,
     borderWidth: 1,

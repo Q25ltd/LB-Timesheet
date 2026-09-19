@@ -23,6 +23,15 @@ export const colors = {
   placeholder: "#8FA3B8",
   danger:      "#B3261E",
   dangerBg:    "#FDECEA",
+  /**
+   * An OK answer on a vehicle check, and the tick marking a completed check on
+   * Active Shift — nowhere else. The app avoids traffic-light colour; a safety
+   * check is the one place a result is marked by it — restrained green for OK,
+   * neutral for N/A, `danger` for a defect.
+   */
+  success:     "#1E7B3E",
+  /** A selected N/A on a vehicle check: answered, but neither good nor bad. */
+  neutralSelected: "#E4E8EE",
   disabled:    "#9BB3CC",
   onBrand:     "#FFFFFF",
 } as const;
