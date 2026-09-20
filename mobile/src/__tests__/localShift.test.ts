@@ -163,6 +163,7 @@ test("COLD START: a shift this module never created is recovered from the file a
     workingFor: NORTHGATE,
     startedAt: STARTED_AT.toISOString(),
     vehicle: { ...LORRY, startedAt: STARTED_AT.toISOString(), checks: [] },
+    previousVehicles: [],
     status: "open",
     createdAt: STARTED_AT.toISOString(),
   };

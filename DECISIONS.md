@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-10
+> Last updated: 2026-09-20
 
 ---
 
@@ -755,6 +755,56 @@ exists, is unchanged, and remains deliberately unconnected — how the local
 record reaches a company is the submission increment's problem, and D28 already
 says that happens only when the driver explicitly sends it. STATUS.md owns what
 is built.
+
+### D30 — A vehicle USE is the unit of the day; class belongs to the use (2026-09-20)
+
+Owner decision, settled while Change Vehicle / Unit was built. It fixes what a
+day records when a driver hands one vehicle back and takes another.
+
+**Each period of use is its own record, and history is immutable.** A day holds
+the vehicle in use and every earlier use, each with its own start mileage, its
+own checks, the moment it began and — once ended — the odometer reading the
+driver entered and the moment it ended. Returning to a plate used earlier is a
+**new use**, never a resumption: the earlier record, its mileages and its
+completed check are never reopened, and one plate may appear several times in
+one day. A use is identified by **when it began**, never by its plate.
+
+**End mileage is entered, never inferred.** It may equal the start mileage and
+may never fall below it. Nothing derives it from a later reading.
+
+**CLASS BELONGS TO THE USE, NOT TO THE DAY.** During one shift a driver may
+move between **Class 1, Class 2 and Van in any direction and any number of
+times** — Class 1 → Class 2, Class 2 → Class 1, Van → Class 2, Class 1 → Van,
+Class 2 → Van → Class 1. A day that has used a Class 1 is **not** locked to
+Class 1 afterwards. Every use stores its own `vehicleClass`; the classes
+already used constrain the next one in no way, and vehicles used earlier are
+offered back whatever their class.
+
+*Corrects:* an earlier implementation that let a Class 1 change only to another
+Class 1. That rule was wrong and is gone, with tests pinning every direction.
+
+**Terminology follows the vehicle IN USE.** Class 1 → *Current Unit / Change
+Unit*; Class 2 and Van → *Current Vehicle / Change Vehicle*. It flips mid-day
+as the class changes, because it is what the driver is sitting in now, not what
+the day started with.
+
+**A returned-to vehicle is asked, not assumed.** It may have been used or moved
+while the driver was away, so reuse asks for a new start mileage and an
+explicit *Perform vehicle checks? Yes/No*. An earlier check is never carried
+across, and "No" means "not now" — there is no permanent "checks not required"
+state.
+
+**A TRAILER IS A SEPARATE ASSET, AND IS NOT CLASS 1-ONLY.** In V1 the
+trailer-capable classes are **Class 1 ✅ and Class 2 ✅** — a rigid may pull a
+drawbar — and **Van ❌**. A trailer is never part of the vehicle record, is
+checked on its own list, and no local data model or screen may assume trailers
+belong only with Class 1. Trailer functionality itself is not built; STATUS.md
+owns what is.
+
+*Why:* payroll and the daily timesheet need each period of use with its own
+mileages, and a walkaround check is evidence about one vehicle at one time.
+Merging uses by plate, or freezing the day's class, would lose exactly the
+facts the paper form captures.
 
 ## ❓ Open — ask the user, do not guess
 

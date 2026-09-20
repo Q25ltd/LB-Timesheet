@@ -1,17 +1,18 @@
 /**
  * The vehicle a driver enters — class, number plate, start mileage — and the
- * form pieces Start Shift and Add Vehicle are both built from.
+ * form pieces every screen that asks for one is built from.
  *
- * ONE DEFINITION OF A VALID VEHICLE. The same three answers are asked in two
- * places: at Start Shift for a day that begins with a truck, and at Add
- * Vehicle for a day that began without one. Two copies of "a whole,
- * non-negative mileage" or "trimmed and upper-cased" would drift apart, and a
- * plate stored one way from one screen and another way from the other is the
- * kind of disagreement nobody notices until a timesheet is wrong. So both
- * screens render these fields and read them through `vehicleDetailsFrom`.
+ * ONE DEFINITION OF A VALID VEHICLE. The same three answers are asked in three
+ * places: at Start Shift for a day that begins with a truck, at Add Vehicle
+ * for a day that began without one, and at Change Unit / Change Vehicle for
+ * the next one. Two copies of "a whole, non-negative mileage" or "trimmed and
+ * upper-cased" would drift apart, and a plate stored one way from one screen
+ * and another way from the other is the kind of disagreement nobody notices
+ * until a timesheet is wrong. So all three render these fields and read them
+ * through `vehicleDetailsFrom`.
  *
  * The rows, sections and inputs are Start Shift's own, moved here unchanged:
- * the owner approved that form on a phone, and the second screen that asks
+ * the owner approved that form on a phone, and every later screen that asks
  * the same questions should look like the first.
  */
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
@@ -50,9 +51,10 @@ export const keyboardSafeScrollProps = {
  *
  * Digits only: an odometer reads whole miles, and allowing `12.5`, `1e4` or a
  * minus sign would only widen what can be written into a payroll record.
- * `0` is valid — a new vehicle genuinely reads zero.
+ * `0` is valid — a new vehicle genuinely reads zero. The one rule for every
+ * mileage the driver types, start or end.
  */
-function parseMileage(raw: string): number | null {
+export function parseMileage(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
   const value = Number(raw);
   return Number.isSafeInteger(value) ? value : null;

@@ -77,6 +77,7 @@ function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
     workingFor: PERSONAL,
     startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
     vehicle: null,
+    previousVehicles: [],
     status: "open",
     createdAt: new Date(2026, 8, 13, 5, 42).toISOString(),
     ...over,
@@ -88,7 +89,10 @@ type View = Awaited<ReturnType<typeof render>>;
 function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promise<View> {
   return render(
     <SafeAreaProvider initialMetrics={METRICS}>
-      <ActiveShiftScreen shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined} onVehicleChecks={() => undefined} />
+      <ActiveShiftScreen
+        shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined}
+      />
     </SafeAreaProvider>,
   );
 }
@@ -334,8 +338,16 @@ test("there is no COMBINED vehicle-and-trailer check workflow", async () => {
 // Everything unbuilt is visible, ranked, and inert
 // ═══════════════════════════════════════════════════════════════════════════
 
+test("Change Vehicle is present for a vehicle, and is LIVE", async () => {
+  // Replaces the Step 3A contract that it does nothing. What it opens is
+  // proven in `changeVehicle.test.tsx`.
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  expect(view.getByTestId("change-vehicle").props.accessibilityLabel).toBe("Change Vehicle");
+  expect(isDisabled(view, "change-vehicle")).toBe(false);
+});
+
 test.each([
-  ["change-vehicle",  "Change Vehicle"],
   ["fuel",            "Fuel"],
   ["adblue",          "AdBlue"],
   ["finish-shift",    "Finish Shift"],

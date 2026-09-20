@@ -25,7 +25,7 @@
  * rows, so a defect is recorded against the thing that is actually wrong.
  *
  * ════════════════════════════════════════════════════════════════════════════
- * CLASS 1 IS THE UNIT ONLY
+ * A VEHICLE CHECK COVERS THE VEHICLE ONLY — NEVER A TRAILER
  * ════════════════════════════════════════════════════════════════════════════
  *
  * A Class 1 check covers the tractor unit, and nothing here claims the trailer
@@ -38,8 +38,11 @@
  * From check 21 it keeps its own wiring and switches; trailer electrical
  * couplings are the trailer's.
  *
- * A Class 2 is a rigid vehicle with no trailer, so the same trailer-dependent
- * items are absent from it too.
+ * A Class 2 is missing the same items for the same reason, not because a rigid
+ * never tows: a rigid MAY pull a drawbar trailer (D30 — the V1
+ * trailer-capable classes are Class 1 and Class 2, not a van). Wherever a
+ * trailer is checked it is checked as its own asset, on its own list, so a
+ * towing vehicle's own list is the same list either way.
  *
  * ════════════════════════════════════════════════════════════════════════════
  * EVERY ITEM DECLARES ITS STARTING RESULT

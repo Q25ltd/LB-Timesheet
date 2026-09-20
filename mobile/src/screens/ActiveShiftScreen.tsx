@@ -15,11 +15,12 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  * The owner asked to approve the whole composition before any operational
- * action is wired, so the unbuilt actions are RENDERED and DISABLED: Change
- * Vehicle/Unit, Fuel, AdBlue and Finish Shift. None of them has an `onPress`.
- * Three are live: Discard Shift, Add Vehicle, and Vehicle Checks. A control that answers a press by doing nothing
- * teaches a driver the app is broken, so each carries the platform's disabled
- * affordance and tells assistive technology the same thing the pixels do.
+ * action is wired, so the unbuilt actions are RENDERED and DISABLED: Fuel,
+ * AdBlue and Finish Shift. None of them has an `onPress`. Four are live:
+ * Discard Shift, Add Vehicle, Vehicle Checks, and Change Unit / Change
+ * Vehicle. A control that answers a press by doing nothing teaches a driver
+ * the app is broken, so each carries the platform's disabled affordance and
+ * tells assistive technology the same thing the pixels do.
  *
  * Rank is therefore carried by SIZE, POSITION and GROUPING rather than by
  * colour — everything unbuilt shares one muted treatment, so the hierarchy the
@@ -34,32 +35,37 @@
  * WHAT IT REFUSES TO SAY
  * ════════════════════════════════════════════════════════════════════════════
  *
- * Only `LocalShift` is rendered — declared start, working context, and the
- * vehicle as the driver entered it. There is no current mileage, no distance,
- * no driving time, no break, no fuel total and no defect count, because none
- * of those is recorded anywhere (CLAUDE.md — never read a field nothing
- * writes). There is no trailer either: Class 1 pulls one, but no trailer has
- * ever been captured, so inventing "Trailer: None" would state a fact nobody
- * established.
+ * Only `LocalShift` is rendered — declared start, working context, the
+ * vehicle as the driver entered it, and the vehicles used earlier in the day.
+ * There is no current mileage, no distance, no driving time, no break, no
+ * fuel total and no defect count, because none of those is recorded anywhere
+ * (CLAUDE.md — never read a field nothing writes). There is no trailer either: a Class 1 pulls a semi-trailer and a
+ * Class 2 may pull a drawbar, but no trailer has ever been captured, so
+ * inventing "Trailer: None" would state a fact nobody established.
  *
- * Checks are shown as NOT COMPLETED, which is true and is the only check state
- * that exists. "Passed", "Roadworthy" and "Safe" are claims about an
- * inspection that has not happened, on a screen a driver might rely on.
+ * Checks are shown as the stored checks say — Not completed, In progress or
+ * Completed — and never more. "Passed", "Roadworthy" and "Safe" are claims
+ * about an inspection, on a screen a driver might rely on.
  *
  * Choosing a company at Start Shift was an intention, not a transmission
  * (D28), so nothing here says synced, sent or received.
  *
  * ════════════════════════════════════════════════════════════════════════════
- * UNIT AND TRAILER ARE SEPARATE ASSETS, AND ALWAYS WILL BE
+ * VEHICLE AND TRAILER ARE SEPARATE ASSETS, AND ALWAYS WILL BE
  * ════════════════════════════════════════════════════════════════════════════
  *
- * A Class 1 unit and its trailer are checked independently, on separate
+ * A towing vehicle and its trailer are checked independently, on separate
  * screens, and either can be swapped without touching the other's state. So
  * the asset section below is ONE self-contained block — heading, identity,
  * facts, then its own actions — and the trailer becomes a second block of the
  * same shape directly beneath it when trailer data exists. Nothing above or
  * below has to move, and no combined "vehicle & trailer checks" control is
  * introduced here, because that workflow is never going to exist.
+ *
+ * WHICH vehicle is towing does not change that shape. A Class 1 pulls a
+ * semi-trailer and a Class 2 may pull a drawbar — both are trailer-capable in
+ * V1, a van is not (D30) — and the block below is the
+ * vehicle in use, whatever class it is, with the trailer block beneath it.
  */
 import { View, Text, ScrollView, Pressable, Alert, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -67,6 +73,7 @@ import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { VEHICLE_CLASSES, type LocalShift, type LocalVehicle, type VehicleClass } from "../shift/localShift";
 import { checkStateOf, type VehicleCheckState } from "../shift/vehicleCheck";
+import { usedThisShift, type UsedVehicle } from "../shift/usedVehicles";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 import { formatClockTime, formatMileage } from "./format";
 
@@ -81,6 +88,11 @@ function classLabel(id: VehicleClass): string {
  * A Class 1 is a tractor UNIT pulling a separate trailer, and that is what
  * drivers call it. A Class 2 or a van is one vehicle, so calling it a unit
  * would be jargon adopted for internal consistency at the driver's expense.
+ * A rigid towing a drawbar is still called a vehicle — this is what the thing
+ * is called, not what it may tow.
+ *
+ * It follows the vehicle IN USE, not the day: a driver who changes a unit for
+ * a van is in a vehicle from that moment, and reads "Current Vehicle".
  */
 function assetWords(vehicleClass: VehicleClass | null) {
   const isUnit = vehicleClass === "class1";
@@ -98,6 +110,8 @@ interface ActiveShiftScreenProps {
   onAddVehicle: () => void;
   /** Open, resume or show the walkaround check for the current vehicle. */
   onVehicleChecks: () => void;
+  /** Open the flow that ends the current vehicle and takes the next. */
+  onChangeVehicle: () => void;
 }
 
 /**
@@ -110,7 +124,7 @@ const CHECK_STATE_LABEL: Record<VehicleCheckState, string> = {
   completed:     "Completed",
 };
 
-export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks }: ActiveShiftScreenProps) {
+export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
@@ -196,7 +210,14 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
         <View style={styles.card}>
           {vehicle === null
             ? <NoVehicle onAddVehicle={onAddVehicle} />
-            : <CurrentVehicle vehicle={vehicle} changeLabel={words.change} onVehicleChecks={onVehicleChecks} />}
+            : (
+              <CurrentVehicle
+                vehicle={vehicle}
+                changeLabel={words.change}
+                onVehicleChecks={onVehicleChecks}
+                onChangeVehicle={onChangeVehicle}
+              />
+            )}
         </View>
 
         {/* ── CURRENT TRAILER goes here ──────────────────────────────────────
@@ -204,6 +225,8 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
             its own card, its own Trailer Checks and Change Trailer actions,
             and its own independent check state. It is absent rather than empty
             because no trailer has ever been recorded. */}
+
+        <UsedThisShift vehicles={usedThisShift(shift)} />
 
         <Text style={styles.sectionLabel}>DURING THE SHIFT</Text>
         <View style={styles.tiles}>
@@ -233,8 +256,8 @@ function NoVehicle({ onAddVehicle }: { onAddVehicle: () => void }) {
   );
 }
 
-function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks }: {
-  vehicle: LocalVehicle; changeLabel: string; onVehicleChecks: () => void;
+function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks, onChangeVehicle }: {
+  vehicle: LocalVehicle; changeLabel: string; onVehicleChecks: () => void; onChangeVehicle: () => void;
 }) {
   const checkState = checkStateOf(vehicle.checks);
   return (
@@ -285,10 +308,10 @@ function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks }: {
           being the filled action — but it stays reachable, because the record
           it opens is the driver's evidence of the walkaround. */}
       {checkState === "completed"
-        ? <DoneAction label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />
+        ? <SecondaryAction label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />
         : <PrimaryButton label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />}
       <View style={styles.secondarySlot}>
-        <PendingAction label={changeLabel} testID="change-vehicle" />
+        <SecondaryAction label={changeLabel} onPress={onChangeVehicle} testID="change-vehicle" />
       </View>
     </View>
   );
@@ -328,13 +351,14 @@ function FactRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 /**
- * A live control that is no longer the next thing to do.
+ * A live control that is not the next thing to do — Change Unit, or a
+ * completed check still worth opening.
  *
  * Bordered rather than filled, and with the brand's own text rather than the
- * muted grey of the unbuilt controls above — so it reads as something the
- * driver may open, not as something they cannot.
+ * muted grey of the unbuilt controls — so it reads as something the driver
+ * may open, not as something they cannot.
  */
-function DoneAction({ label, onPress, testID }: { label: string; onPress: () => void; testID: string }) {
+function SecondaryAction({ label, onPress, testID }: { label: string; onPress: () => void; testID: string }) {
   return (
     <Pressable
       testID={testID}
@@ -342,10 +366,39 @@ function DoneAction({ label, onPress, testID }: { label: string; onPress: () => 
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: false }}
-      style={({ pressed }) => [styles.pending, styles.done, pressed ? styles.donePressed : null]}
+      style={({ pressed }) => [styles.pending, styles.secondary, pressed ? styles.secondaryPressed : null]}
     >
-      <Text style={[styles.pendingLabel, styles.doneLabel]}>{label}</Text>
+      <Text style={[styles.pendingLabel, styles.secondaryLabel]}>{label}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * The vehicles used earlier in the day — one line per vehicle, most recently
+ * used first. Only a vehicle's identity and when it was last used: this is a
+ * reminder of the day, not a log of it. Each USE is still kept separately in
+ * the day (`usedThisShift` groups for the screen only).
+ */
+function UsedThisShift({ vehicles }: { vehicles: readonly UsedVehicle[] }) {
+  if (vehicles.length === 0) return null;
+  return (
+    <>
+      <Text style={styles.sectionLabel} testID="used-this-shift-label">USED THIS SHIFT</Text>
+      <View style={styles.card} testID="used-this-shift">
+        {vehicles.map((used, index) => (
+          <View
+            key={`${used.vehicleClass}-${used.numberPlate}`}
+            style={[styles.usedRow, index === vehicles.length - 1 ? null : styles.usedDivided]}
+            testID={`used-${used.numberPlate}`}
+          >
+            <Text style={styles.usedPlate}>{used.numberPlate}</Text>
+            <Text style={styles.usedMeta}>
+              {`${classLabel(used.vehicleClass)} · last used ${formatClockTime(used.lastEndedAt)}`}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
   );
 }
 
@@ -500,9 +553,14 @@ const styles = StyleSheet.create({
     marginTop: -3,
   },
   pillTextDone: { color: colors.success },
-  done: { borderColor: colors.border, backgroundColor: colors.surface },
-  donePressed: { backgroundColor: colors.surfaceAccent },
-  doneLabel: { color: colors.brandDark },
+  secondary: { borderColor: colors.border, backgroundColor: colors.surface },
+  secondaryPressed: { backgroundColor: colors.surfaceAccent },
+  secondaryLabel: { color: colors.brandDark },
+
+  usedRow: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg, gap: 2 },
+  usedDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  usedPlate: { fontSize: 18, fontWeight: "800", color: colors.text, letterSpacing: 0.5 },
+  usedMeta: { fontSize: 14, color: colors.textMuted },
   pill: {
     borderRadius: 999,
     borderWidth: 1,
