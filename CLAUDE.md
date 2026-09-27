@@ -8,16 +8,16 @@
 
 ## ⚠️ WHICH PROJECT AM I IN?
 
-**You are in LogisticBay TIMESHEETS.** Repo root: `~/LB-Timesheet`
+**You are in LogisticBay TIMESHEETS.** Repo root: `/Volumes/Development/Projects/LogisticBay/LB-Timesheet`
 
 This is **NOT** the LogisticBay TMS. The TMS is a **separate product**, in a
-**separate repo** (`~/timesheet-app` — the folder name is historical and
+**separate repo** (`/Volumes/Development/Projects/LogisticBay/timesheet-app` — the folder name is historical and
 misleading; that folder is the full TMS), with its **own database**, own auth,
 own deployment and own billing.
 
 Hard rules:
 
-- **Never edit anything under `~/timesheet-app` from this session.** If a task
+- **Never edit anything under `/Volumes/Development/Projects/LogisticBay/timesheet-app` from this session.** If a task
   seems to require a TMS change, STOP and ask the user.
 - **Never import from the TMS.** Never add it as a dependency. Never point a
   connection string, migration, or seed script at its database.
@@ -25,7 +25,7 @@ Hard rules:
   was forked from it. Forking means **copying by hand into this repo**, never
   linking, never sharing a package, never sharing a schema.
 - Both folders are often connected at once. **Check the path before every
-  write.** A path starting `~/timesheet-app` is the wrong repo.
+  write.** A path starting `/Volumes/Development/Projects/LogisticBay/timesheet-app` is the wrong repo.
 
 ---
 
