@@ -47,6 +47,8 @@ export default function AppLayout() {
       <Stack.Screen name="add-vehicle" />
       <Stack.Screen name="vehicle-check" />
       <Stack.Screen name="change-vehicle" />
+      <Stack.Screen name="vehicle-fill" />
+      <Stack.Screen name="vehicle-usage" />
     </Stack>
   );
 }

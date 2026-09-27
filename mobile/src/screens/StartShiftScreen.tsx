@@ -26,10 +26,11 @@
  * nothing into the shift: the driver cannot see those fields any more, so they
  * cannot be agreeing to them.
  */
-import { useRef, useState } from "react";
-import { View, Text, TextInput, ScrollView, StyleSheet } from "react-native";
+import { useState } from "react";
+import { View, Text, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { TimeOfDayFields, timeStyles, useTimeOfDay } from "./timeOfDay";
 import type { AccountMembership } from "../api/account";
 import type { VehicleClass, VehicleDetails, WorkingContext } from "../shift/localShift";
 import {
@@ -41,7 +42,7 @@ import {
   keyboardSafeScrollProps,
   vehicleDetailsFrom,
 } from "./vehicleForm";
-import { colors, radius, spacing, typography } from "../theme/index";
+import { spacing } from "../theme/index";
 
 const PERSONAL: WorkingContext = { kind: "personal" };
 
@@ -56,52 +57,34 @@ interface StartShiftScreenProps {
   onStart: (input: { workingFor: WorkingContext; startedAt: Date; vehicle: VehicleDetails | null }) => void;
 }
 
-function twoDigits(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-/** Hours 00–23 / minutes 00–59, and nothing else. */
-function parseClockPart(raw: string, max: number): number | null {
-  if (!/^\d{1,2}$/.test(raw.trim())) return null;
-  const value = Number(raw);
-  return value >= 0 && value <= max ? value : null;
-}
-
 export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const [working, setWorking] = useState<WorkingContext>(PERSONAL);
 
   /**
-   * The clock is read ONCE, when the screen opens.
+   * The clock is read ONCE, when the screen opens (`useTimeOfDay`).
    *
    * A start time that crept forward while the driver filled in a plate would
-   * be a different working day from the one they booked on for, so this is
-   * seeded from a ref rather than recomputed on render.
+   * be a different working day from the one they booked on for.
    */
-  const openedAt = useRef(new Date());
-  const [hours, setHours] = useState(() => twoDigits(openedAt.current.getHours()));
-  const [minutes, setMinutes] = useState(() => twoDigits(openedAt.current.getMinutes()));
+  const time = useTimeOfDay(() => new Date());
 
   const [vehicleAnswer, setVehicleAnswer] = useState<VehicleAnswer>("unanswered");
   const [vehicleClass, setVehicleClass] = useState<VehicleClass | null>(null);
   const [numberPlate, setNumberPlate] = useState("");
   const [mileage, setMileage] = useState("");
 
-  const hour = parseClockPart(hours, 23);
-  const minute = parseClockPart(minutes, 59);
   // Read only on the "Yes" branch, so fields filled in and then hidden by
   // answering "Not yet" cannot travel with the shift.
   const vehicle: VehicleDetails | null =
     vehicleAnswer === "yes" ? vehicleDetailsFrom(vehicleClass, numberPlate, mileage) : null;
 
-  const timeIsValid = hour !== null && minute !== null;
-  const canStart = timeIsValid
+  const canStart = time.valid
     && (vehicleAnswer === "not-yet" || (vehicleAnswer === "yes" && vehicle !== null));
 
   function start() {
-    if (!canStart || hour === null || minute === null) return;
-    const startedAt = new Date(openedAt.current);
-    startedAt.setHours(hour, minute, 0, 0);
+    const startedAt = time.at();
+    if (!canStart || startedAt === null) return;
     // `vehicle` is null on the "Not yet" branch by construction, so nothing
     // typed and then hidden can travel with the shift.
     onStart({ workingFor: working, startedAt, vehicle });
@@ -154,12 +137,8 @@ export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScr
         </FormSection>
 
         <FormSection label="START TIME">
-          <View style={styles.clock} testID="start-time">
-            <ClockField testID="start-time-hours" label="Hours" value={hours} onChange={setHours} invalid={hour === null} />
-            <Text style={styles.clockSeparator}>:</Text>
-            <ClockField testID="start-time-minutes" label="Minutes" value={minutes} onChange={setMinutes} invalid={minute === null} />
-          </View>
-          <Text style={styles.hint}>
+          <TimeOfDayFields testID="start-time" time={time} />
+          <Text style={timeStyles.hint}>
             Set to now. Change it if you started earlier — this is the time that goes on your timesheet.
           </Text>
         </FormSection>
@@ -207,42 +186,3 @@ export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScr
     </View>
   );
 }
-
-/** Two digits, large enough to hit with gloves on. */
-function ClockField({ testID, label, value, onChange, invalid }: {
-  testID: string; label: string; value: string; onChange: (next: string) => void; invalid: boolean;
-}) {
-  return (
-    <TextInput
-      testID={testID}
-      value={value}
-      onChangeText={onChange}
-      keyboardType="number-pad"
-      maxLength={2}
-      selectTextOnFocus
-      accessibilityLabel={label}
-      style={[styles.clockInput, invalid ? styles.clockInvalid : null]}
-    />
-  );
-}
-
-
-const styles = StyleSheet.create({
-  clock: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: spacing.lg },
-  clockInput: {
-    width: 84,
-    minHeight: 64,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.field,
-    backgroundColor: colors.surface,
-    textAlign: "center",
-    fontSize: 30,
-    fontWeight: "700",
-    color: colors.brandDark,
-  },
-  clockInvalid: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
-  clockSeparator: { fontSize: 30, fontWeight: "700", color: colors.brandDark, marginHorizontal: spacing.md },
-
-  hint: { ...typography.helper, marginTop: spacing.sm, marginHorizontal: spacing.xs },
-});

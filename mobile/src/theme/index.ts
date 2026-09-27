@@ -30,6 +30,8 @@ export const colors = {
    * neutral for N/A, `danger` for a defect.
    */
   success:     "#1E7B3E",
+  /** The pale ground behind a success, as `dangerBg` is behind an error. */
+  successBg:   "#E8F4EC",
   /** A selected N/A on a vehicle check: answered, but neither good nor bad. */
   neutralSelected: "#E4E8EE",
   disabled:    "#9BB3CC",

@@ -337,7 +337,7 @@ test("Add Vehicle on a no-vehicle Active Shift opens the flow", async () => {
   const view = await wrap(
     <ActiveShiftScreen
       shift={noVehicleShift()} onDiscard={() => undefined} onAddVehicle={onAddVehicle}
-      onVehicleChecks={() => undefined} onChangeVehicle={() => undefined}
+      onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
     />,
   );
 

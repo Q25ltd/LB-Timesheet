@@ -83,7 +83,7 @@ const text = (view: View, testID: string) => String(view.getByTestId(testID).pro
 const allText = (view: View) => JSON.stringify(view.toJSON()).toLowerCase();
 
 function vehicleOf(details: VehicleDetails = UNIT, checks: VehicleCheck[] = []): LocalVehicle {
-  return { ...details, startedAt: STARTED_AT.toISOString(), checks };
+  return { ...details, startedAt: STARTED_AT.toISOString(), checks, fills: [] };
 }
 
 const keysOf = (vehicleClass: VehicleDetails["vehicleClass"]) => checklistItems(checklistFor(vehicleClass)).map(entry => entry.key);

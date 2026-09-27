@@ -11,13 +11,19 @@
  * After the change: to Vehicle Checks for the NEW vehicle when the driver
  * chose to check a vehicle they are returning to, otherwise back to Active
  * Shift. Vehicle Checks replaces this screen, so its Back lands on the day.
+ *
+ * TWO STORE OPERATIONS, ONE SCREEN. A next vehicle is a change
+ * (`changeVehicle`); no next vehicle is an end (`endVehicleUse`, D32). The
+ * screen asks; which one is written is decided here, by whether the driver
+ * named a vehicle. Both land back on Active Shift, which then shows either the
+ * new vehicle or no active vehicle.
  */
 import { useEffect, useState } from "react";
 import { Alert } from "react-native";
 import { Redirect, router } from "expo-router";
 import { ChangeVehicleScreen, type VehicleChange } from "../../src/screens/ChangeVehicleScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { changeVehicle, readOpenShift, type LocalShift, type LocalVehicle } from "../../src/shift/localShift";
+import { changeVehicle, endVehicleUse, readOpenShift, type LocalShift, type LocalVehicle } from "../../src/shift/localShift";
 import { usedThisShift } from "../../src/shift/usedVehicles";
 
 export default function ChangeVehicleRoute() {
@@ -49,24 +55,38 @@ export default function ChangeVehicleRoute() {
  * Write the change, then go where the driver goes next.
  *
  * The moment of the press ends the vehicle in use and begins the next one —
- * the same instant for both; see `changeVehicle`.
+ * the same instant for both; see `changeVehicle`. With NO next vehicle that
+ * moment only ends one: nothing begins, and a vehicle added later starts its
+ * own use then (`endVehicleUse`).
  */
 async function confirm(shift: LocalShift, current: LocalVehicle, change: VehicleChange): Promise<void> {
   const noun = current.vehicleClass === "class1" ? "unit" : "vehicle";
+  const next = change.next;
+  const at = new Date();
   try {
-    const day = await changeVehicle({
-      shiftId: shift.id,
-      endingStartedAt: current.startedAt,
-      endMileage: change.endMileage,
-      next: change.next,
-      changedAt: new Date(),
-    });
+    const day = next === null
+      ? await endVehicleUse({
+          shiftId: shift.id,
+          endingStartedAt: current.startedAt,
+          endMileage: change.endMileage,
+          endedAt: at,
+        })
+      : await changeVehicle({
+          shiftId: shift.id,
+          endingStartedAt: current.startedAt,
+          endMileage: change.endMileage,
+          next,
+          changedAt: at,
+        });
     // The day was discarded or finished while this screen was open.
     if (day === null) { router.replace("/today"); return; }
     if (change.performChecks) router.replace("/vehicle-check");
     else router.dismissTo("/active-shift");
   } catch (error: unknown) {
-    Alert.alert(`Couldn't change the ${noun}`, "Nothing was changed. Please try again.");
+    Alert.alert(
+      next === null ? `Couldn't end the ${noun}` : `Couldn't change the ${noun}`,
+      "Nothing was changed. Please try again.",
+    );
     throw error;
   }
 }

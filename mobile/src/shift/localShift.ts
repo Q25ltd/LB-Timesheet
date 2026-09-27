@@ -29,17 +29,19 @@
  * checks, defects — that is the moment to revisit it, with data in hand.
  *
  * NOT persisted here: anything the requirements have not asked for. There is
- * no trailer, no fuel and no note field waiting for a later step to fill in
+ * no trailer, and no note field waiting for a later step to fill in
  * (CLAUDE.md — never invent a field nothing writes). Vehicle checks and their
- * defects ARE stored, inside the vehicle they check — see `vehicleCheck.ts`.
+ * defects ARE stored, inside the vehicle they check — see `vehicleCheck.ts` —
+ * and so are the fuel and AdBlue put into it (`vehicleFill.ts`), inside the
+ * same use, with an unknown quantity stored as ABSENT and never as zero.
  *
  * ONE VEHICLE AT A TIME, AND EVERY EARLIER ONE KEPT. A day holds the vehicle
  * in use (`vehicle`) and, once the driver has changed vehicle, each earlier
  * USE of a vehicle, closed with the mileage and time it ended at
  * (`previousVehicles`). A use is identified by when it began, `startedAt` —
  * never by its plate: returning to a truck used this morning is a NEW use,
- * with its own start mileage and its own checks, and the morning's record is
- * left exactly as it was.
+ * with its own start mileage, its own checks and its own fills, and the
+ * morning's record is left exactly as it was.
  *
  * CLASS BELONGS TO THE USE, NOT TO THE DAY. Each use stores its own
  * `vehicleClass`, and a day may move between Class 1, Class 2 and a van in
@@ -49,6 +51,14 @@
  */
 import { File, Paths } from "expo-file-system";
 import { checklistFor, checklistItems } from "./checklists";
+import {
+  FILL_NOTE_MAX_LENGTH,
+  FILL_TYPES,
+  asVehicleFill,
+  isStorableLitres,
+  type FillType,
+  type VehicleFill,
+} from "./vehicleFill";
 import {
   CHECK_RESULT,
   CHECK_STATUS,
@@ -103,6 +113,12 @@ export interface LocalVehicle extends VehicleDetails {
    * they live here rather than keyed by number plate.
    */
   checks: VehicleCheck[];
+  /**
+   * The fuel and AdBlue put into THIS use of the vehicle, in the order the
+   * driver recorded them. Empty until one is. Same containment as `checks`,
+   * and for the same reason — see `vehicleFill.ts`.
+   */
+  fills: VehicleFill[];
 }
 
 /**
@@ -118,6 +134,22 @@ export interface EndedVehicle extends LocalVehicle {
   /** The device clock at the change — the same instant the next use began. */
   endedAt: string;
 }
+
+/**
+ * Whether a use is the vehicle IN USE or one that has ENDED. One registry, no
+ * magic strings.
+ *
+ * A write that targets a use states which it expects, and is refused when the
+ * day disagrees. A fuel entry begun under the vehicle in use must not land on
+ * that same use after the driver has handed it back — and must never land on
+ * whatever replaced it (D31).
+ */
+export const USAGE_STATE = {
+  inUse: "in-use",
+  ended: "ended",
+} as const;
+
+export type UsageState = (typeof USAGE_STATE)[keyof typeof USAGE_STATE];
 
 /** Trimmed and upper-cased — how a plate is stored and shown, wherever it is typed. */
 export function normalisePlate(raw: string): string {
@@ -139,9 +171,10 @@ export interface LocalShift {
   /** The driver's declared start of work, as an instant. */
   startedAt: string;
   /**
-   * The vehicle IN USE. `null` when the driver has booked on without a
-   * vehicle — a real state (D29). Never carries an end: a use that has ended
-   * is in `previousVehicles`.
+   * The vehicle IN USE. `null` is a real state, whichever way the day
+   * reached it: booked on without a vehicle (D29), or the driver ended one and
+   * carried on without another (D32). Never carries an end: a use that has
+   * ended is in `previousVehicles`.
    */
   vehicle: LocalVehicle | null;
   /**
@@ -296,7 +329,37 @@ function asLocalVehicle(value: unknown, shiftStartedAt: string): LocalVehicle | 
   else if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
   else usageStartedAt = startedAt;
 
-  return { ...vehicle, startedAt: usageStartedAt, checks: readChecks(record["checks"], vehicle.vehicleClass) };
+  const fills = readFills(record["fills"]);
+  if (fills === null) return null;
+
+  return { ...vehicle, startedAt: usageStartedAt, checks: readChecks(record["checks"], vehicle.vehicleClass), fills };
+}
+
+/**
+ * The fuel and AdBlue put into this use, or `null` if they cannot be read.
+ *
+ * ABSENT means none: every build before fills existed stored vehicles without
+ * the field, and nothing was ever recorded on them.
+ *
+ * A PRESENT but malformed list fails the whole day closed — it does NOT drop
+ * the bad record the way an unreadable check does. The two are different
+ * kinds of thing: a lost check reads as "Not completed" and the driver simply
+ * checks again, but a lost fill is a quantity nobody can reconstruct, and a
+ * day quietly missing one would read as complete when it is not. Mileages are
+ * treated the same way (`asPreviousVehicles`).
+ */
+function readFills(value: unknown): VehicleFill[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const fills: VehicleFill[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const fill = asVehicleFill(raw);
+    if (fill === null || seen.has(fill.id)) return null;
+    seen.add(fill.id);
+    fills.push(fill);
+  }
+  return fills;
 }
 
 /**
@@ -412,6 +475,7 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
       startMileage: input.vehicle.startMileage,
       startedAt,
       checks:       [],
+      fills:        [],
     },
     previousVehicles: [],
     status:     "open",
@@ -434,7 +498,8 @@ export interface AddVehicleInput {
 }
 
 /**
- * Put the first vehicle into a day that started without one.
+ * Put a vehicle into a day that has none — the first of the day, or the next
+ * one after the driver ended a use and carried on without a vehicle (D32).
  *
  * Resolves to the open shift as it now stands, or `null` when there is no
  * open shift to add to — it never creates one.
@@ -469,14 +534,25 @@ async function addIfNoVehicle({ vehicle, startedAt }: AddVehicleInput): Promise<
   if (open === null) return null;
   if (open.vehicle !== null) return open;
 
+  const at = startedAt.toISOString();
+  // ONE USE, ONE START, which `asLocalShift` enforces on the way back in. A
+  // day may already hold ended uses — the driver gave a vehicle up and carried
+  // on without one (D32) — so a vehicle added in the very millisecond one
+  // ended would write a day the reader then refuses, and the driver's day
+  // would vanish. Refused here instead, changing nothing.
+  if (open.previousVehicles.some(use => use.startedAt === at)) {
+    throw new Error("Refusing a vehicle use that starts at the same instant as another");
+  }
+
   const updated: LocalShift = {
     ...open,
     vehicle: {
       vehicleClass: vehicle.vehicleClass,
       numberPlate,
       startMileage: vehicle.startMileage,
-      startedAt: startedAt.toISOString(),
+      startedAt: at,
       checks: [],
+      fills: [],
     },
   };
   const file = openShiftFile();
@@ -561,9 +637,74 @@ async function changeIfCurrent({ shiftId, endingStartedAt, endMileage, next, cha
       startMileage: next.startMileage,
       startedAt: at,
       checks: [],
+      fills: [],
     },
     previousVehicles: [...open.previousVehicles, ended],
   };
+  openShiftFile().write(JSON.stringify(updated));
+  return updated;
+}
+
+export interface EndVehicleUseInput {
+  /** The day being changed. */
+  shiftId: string;
+  /** The use being ended, by its `startedAt` — the vehicle the driver saw on screen. */
+  endingStartedAt: string;
+  /** The odometer reading as the driver hands that vehicle back. */
+  endMileage: number;
+  /**
+   * The moment the driver gives the vehicle up, from the device clock. Passed
+   * in, so it is the press rather than the write. NOTHING begins at it: a
+   * vehicle taken later gets its own, later start.
+   */
+  endedAt: Date;
+}
+
+/**
+ * End the vehicle in use and carry the shift on WITH NO VEHICLE (D32).
+ *
+ * A driver hands a truck back at 13:00 and spends two hours in the yard
+ * waiting for the next one. That time is part of the working day and belongs
+ * to no vehicle, so the day keeps running with `vehicle: null` — the same
+ * state as a day that booked on without one (D29).
+ *
+ * THIS IS NOT FINISHING THE SHIFT. The status stays `open`, the declared
+ * start, the working context and the whole history are untouched, and Finish
+ * Shift remains a separate action this can never become.
+ *
+ * NO REPLACEMENT USE IS INVENTED. The gap is the ABSENCE of a use, not a use
+ * of nothing: `previousVehicles` gains exactly the one record that just ended,
+ * with the mileage and moment the driver gave it up, and a vehicle added later
+ * begins its own use at its own later moment (`addVehicleToOpenShift`). This
+ * `endedAt` is never rewritten to meet it, so the real gap survives.
+ *
+ * ONCE, however many presses — the same rule as a change: it applies only
+ * while the vehicle in use is still the one named by `endingStartedAt`, so a
+ * second press finds none there and returns the day unchanged. Resolves to the
+ * day as it now stands, or `null` when that day is not the one open.
+ *
+ * REFUSES — rejects, writing nothing — an end mileage below the use's start
+ * mileage, and a reading or moment that is not real.
+ */
+export function endVehicleUse(input: EndVehicleUseInput): Promise<LocalShift | null> {
+  return queued(() => endIfCurrent(input));
+}
+
+async function endIfCurrent({ shiftId, endingStartedAt, endMileage, endedAt }: EndVehicleUseInput): Promise<LocalShift | null> {
+  if (!Number.isSafeInteger(endMileage) || endMileage < 0 || Number.isNaN(endedAt.getTime())) {
+    throw new Error("Refusing an invalid end of a vehicle use");
+  }
+
+  const open = await readOpenShift();
+  if (open === null || open.id !== shiftId) return null;
+  const current = open.vehicle;
+  // Already ended — by an earlier press — or nothing to end.
+  if (current?.startedAt !== endingStartedAt) return open;
+
+  if (endMileage < current.startMileage) throw new Error("Refusing an end mileage below the start mileage");
+
+  const ended: EndedVehicle = { ...current, endMileage, endedAt: endedAt.toISOString() };
+  const updated: LocalShift = { ...open, vehicle: null, previousVehicles: [...open.previousVehicles, ended] };
   openShiftFile().write(JSON.stringify(updated));
   return updated;
 }
@@ -692,6 +833,202 @@ async function writeCheck(input: VehicleCheckWrite, certification: { completedAt
   const updated: LocalShift = { ...open, vehicle: { ...vehicle, checks } };
   openShiftFile().write(JSON.stringify(updated));
   return check;
+}
+
+export interface RecordVehicleFillInput {
+  /** The day the fill belongs to. */
+  shiftId: string;
+  /** The vehicle USE it went into, by its `startedAt`. */
+  vehicleStartedAt: string;
+  /** Whether that use is expected to be the one in use, or one that has ended. */
+  usageState: UsageState;
+  /**
+   * The fill's own id. A second write with the same id CORRECTS that fill
+   * rather than adding another, so a double tap is one entry and an edit is
+   * the same operation as an add.
+   */
+  fillId: string;
+  type: FillType;
+  /** The driver's declared moment — the device clock, or their correction of it. */
+  recordedAt: Date;
+  /** Litres, or `null` when the driver does not know. Never 0 for unknown. */
+  litres: number | null;
+  /** Optional; empty means none, and is stored as `null`. */
+  note: string;
+}
+
+/**
+ * Record fuel or AdBlue on a vehicle use, or correct one already recorded.
+ *
+ * IT LANDS ON THE USE NAMED BY `vehicleStartedAt`, AND NOWHERE ELSE. A fill is
+ * never matched by number plate: a day may hold three uses of AB12 CDE, and
+ * correcting the morning's fuel must not touch the afternoon's
+ * (`locateUsage`). A name that matches no use writes nothing at all.
+ *
+ * ANY USE OF THE OPEN DAY MAY RECEIVE ONE — the one in use, from Fuel or
+ * AdBlue on Active Shift, or one that has ended, from that use's own Edit
+ * (D31). A driver who fuelled a truck just before handing it back corrects
+ * THAT use afterwards, never whatever they are driving now. An ended use stays
+ * historical in every other respect: its class, plate, times, start mileage
+ * and completed check cannot be touched here, and only its `fills` change.
+ *
+ * THE USE MUST STILL BE IN THE STATE THE CALLER EXPECTS (`usageState`). A
+ * fill begun under the vehicle in use is refused if that use has since ended
+ * — it neither follows the plate nor moves to the replacement.
+ *
+ * Resolves to the day as it now stands, or `null` when that day is not the
+ * one open, no use answers to that name, or the use is not in the expected
+ * state — writing nothing in every one of those cases.
+ *
+ * REFUSES — rejects, writing nothing — an unknown type, an invalid moment, an
+ * over-long note, and any `litres` that is not a real positive reading. An
+ * UNKNOWN quantity is `null`, never 0: zero is a measurement.
+ */
+export function recordVehicleFill(input: RecordVehicleFillInput): Promise<LocalShift | null> {
+  return queued(() => writeFill(input));
+}
+
+async function writeFill({ shiftId, vehicleStartedAt, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
+  if (fillId === "") throw new Error("Refusing a fill with no id");
+  if (!FILL_TYPES.some(entry => entry.id === type)) throw new Error("Refusing a fill of an unknown type");
+  if (Number.isNaN(recordedAt.getTime())) throw new Error("Refusing a fill with an invalid time");
+  if (litres !== null && !isStorableLitres(litres)) throw new Error("Refusing a fill quantity that is not a positive reading");
+  const described = note.trim();
+  if (described.length > FILL_NOTE_MAX_LENGTH) throw new Error("Refusing an over-long fill note");
+
+  const open = await readOpenShift();
+  if (open === null || open.id !== shiftId) return null;
+  const target = locateUsage(open, vehicleStartedAt, usageState);
+  if (target === null) return null;
+
+  const held = target.use.fills.some(stored => stored.id === fillId);
+
+  const fill: VehicleFill = {
+    id: fillId,
+    type,
+    recordedAt: recordedAt.toISOString(),
+    litres,
+    note: described === "" ? null : described,
+  };
+  const fills = held
+    ? target.use.fills.map(stored => (stored.id === fillId ? fill : stored))
+    : [...target.use.fills, fill];
+
+  return writeFills(open, target, fills);
+}
+
+/**
+ * The one use a `startedAt` names, in the state the caller expects, or `null`.
+ *
+ * `startedAt` IS the identity of a use (see the module header), and no two in
+ * a day may share one, so this can never be ambiguous. An unknown name — an
+ * empty string, a use from another day, a plate mistaken for a time — matches
+ * nothing and the caller writes nothing, rather than falling back to the
+ * vehicle in use and correcting the wrong truck. So does a use that exists but
+ * is no longer in the expected state: the vehicle a screen was opened for has
+ * been handed back since.
+ */
+function locateUsage(open: LocalShift, startedAt: string, state: UsageState): { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number } | null {
+  if (startedAt === "") return null;
+  if (state === USAGE_STATE.inUse) {
+    return open.vehicle !== null && open.vehicle.startedAt === startedAt ? { use: open.vehicle, ended: false } : null;
+  }
+  const index = open.previousVehicles.findIndex(use => use.startedAt === startedAt);
+  const ended = open.previousVehicles[index];
+  return ended === undefined ? null : { use: ended, ended: true, index };
+}
+
+/**
+ * The day with one use's fills replaced, and NOTHING else touched — an ended
+ * use keeps its class, plate, times, mileages and checks exactly as they are.
+ */
+function writeFills(
+  open: LocalShift,
+  target: { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number },
+  fills: VehicleFill[],
+): LocalShift {
+  const updated: LocalShift = target.ended
+    ? { ...open, previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, fills } : use)) }
+    : { ...open, vehicle: { ...target.use, fills } };
+  openShiftFile().write(JSON.stringify(updated));
+  return updated;
+}
+
+export interface RemoveVehicleFillInput {
+  shiftId: string;
+  vehicleStartedAt: string;
+  /** Whether that use is expected to be the one in use, or one that has ended. */
+  usageState: UsageState;
+  fillId: string;
+}
+
+/**
+ * Remove a fill the driver recorded by mistake, from the use that holds it —
+ * the one in use, or one that has ended (D31).
+ *
+ * Only that one goes: every other fill, the checks, the mileages, the times
+ * and the day's other uses are untouched. Removing one that is not there
+ * returns the day unchanged, so a repeated press cannot take a second entry
+ * with it, and a `vehicleStartedAt` naming no use — or a use no longer in the
+ * expected state — removes nothing anywhere.
+ */
+export function removeVehicleFill(input: RemoveVehicleFillInput): Promise<LocalShift | null> {
+  return queued(() => deleteFill(input));
+}
+
+async function deleteFill({ shiftId, vehicleStartedAt, usageState, fillId }: RemoveVehicleFillInput): Promise<LocalShift | null> {
+  const open = await readOpenShift();
+  if (open === null || open.id !== shiftId) return null;
+  const target = locateUsage(open, vehicleStartedAt, usageState);
+  if (target === null) return null;
+  if (!target.use.fills.some(stored => stored.id === fillId)) return open;
+
+  return writeFills(open, target, target.use.fills.filter(stored => stored.id !== fillId));
+}
+
+export interface CorrectEndMileageInput {
+  shiftId: string;
+  /** The ENDED use being corrected, by its `startedAt`. */
+  vehicleStartedAt: string;
+  /** The odometer reading the driver meant to enter when they handed it back. */
+  endMileage: number;
+}
+
+/**
+ * Correct the end mileage of a use that has ENDED, while the day is open (D31).
+ *
+ * A driver who typed 18 for 180 when they handed a truck back fixes it here.
+ * ONLY `endMileage` changes: the use's plate, class, `startedAt`, `endedAt`,
+ * start mileage, checks and fills stay exactly as they were, and so does every
+ * other use — including the one that followed, whose start mileage was read
+ * off a different odometer, or the same one at a different moment.
+ *
+ * ENDED USES ONLY. The vehicle in use has no end yet, so it is not found here.
+ * A name that matches no ended use writes nothing and resolves to `null`, as
+ * does a day that is not the one open. Never by plate.
+ *
+ * REFUSES — rejects, writing nothing — a reading that is not a whole number,
+ * or one below the use's start mileage. Equal to it is a use that stood still.
+ */
+export function correctEndMileage(input: CorrectEndMileageInput): Promise<LocalShift | null> {
+  return queued(() => rewriteEndMileage(input));
+}
+
+async function rewriteEndMileage({ shiftId, vehicleStartedAt, endMileage }: CorrectEndMileageInput): Promise<LocalShift | null> {
+  if (!Number.isSafeInteger(endMileage) || endMileage < 0) throw new Error("Refusing an invalid end mileage");
+
+  const open = await readOpenShift();
+  if (open === null || open.id !== shiftId) return null;
+  const target = locateUsage(open, vehicleStartedAt, USAGE_STATE.ended);
+  if (target === null || !target.ended) return null;
+  if (endMileage < target.use.startMileage) throw new Error("Refusing an end mileage below the start mileage");
+
+  const updated: LocalShift = {
+    ...open,
+    previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, endMileage } : use)),
+  };
+  openShiftFile().write(JSON.stringify(updated));
+  return updated;
 }
 
 /** Forget the open shift. The end of a day, and the reset a test needs. */

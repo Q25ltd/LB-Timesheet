@@ -16,7 +16,7 @@ import { Alert } from "react-native";
 import { Redirect, router, useFocusEffect } from "expo-router";
 import { ActiveShiftScreen } from "../../src/screens/ActiveShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { USAGE_STATE, clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
 
 export default function ActiveShiftRoute() {
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
@@ -40,6 +40,14 @@ export default function ActiveShiftRoute() {
       onAddVehicle={() => { router.push("/add-vehicle"); }}
       onVehicleChecks={() => { router.push("/vehicle-check"); }}
       onChangeVehicle={() => { router.push("/change-vehicle"); }}
+      // Fuel and AdBlue name the EXACT use in the card, and say it is the one
+      // in use: if it has been handed back by the time the driver saves, the
+      // save is refused rather than landing on it or on its replacement.
+      onFill={(type, usage) => {
+        router.push({ pathname: "/vehicle-fill", params: { type, usage, usageState: USAGE_STATE.inUse } });
+      }}
+      // An ended use is opened by its identity — never by plate.
+      onOpenUsage={usage => { router.push({ pathname: "/vehicle-usage", params: { usage } }); }}
     />
   );
 }

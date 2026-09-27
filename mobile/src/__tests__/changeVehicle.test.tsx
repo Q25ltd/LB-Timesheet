@@ -17,6 +17,7 @@ import type { AuthenticatedAccount } from "../api/account";
 import ChangeVehicleRoute from "../../app/(app)/change-vehicle";
 import { ChangeVehicleScreen } from "../screens/ChangeVehicleScreen";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
+import AddVehicleRoute from "../../app/(app)/add-vehicle";
 import VehicleCheckRoute from "../../app/(app)/vehicle-check";
 import { checklistFor, checklistItems } from "../shift/checklists";
 import {
@@ -509,7 +510,7 @@ test("the screen itself asks ONCE — three taps while the write is still runnin
   const onConfirm = jest.fn(() => new Promise<void>(() => { /* never settles */ }));
   const view = await wrap(
     <ChangeVehicleScreen
-      current={{ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [] }}
+      current={{ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] }}
       candidates={[]}
       onLeave={() => { /* not used here */ }}
       onConfirm={onConfirm}
@@ -542,11 +543,15 @@ test("Active Shift shows the NEW vehicle as current, and the one before it under
   await waitFor(() => { expect(active.queryByTestId("vehicle-plate-value")).not.toBeNull(); });
   expect(text(active, "vehicle-plate-value")).toBe("XY34 ZZZ");
   expect(text(active, "used-this-shift-label")).toBe("USED THIS SHIFT");
-  expect(active.getByTestId("used-AB12 CDE")).toBeTruthy();
-  expect(active.getByText("Class 1 · last used 09:00")).toBeTruthy();
+  // The ended use is its own compact row, identified by when it began and
+  // saying which vehicle it was and the miles it did.
+  const ended = (await readOpenShift())?.previousVehicles[0];
+  expect(active.getByTestId(`usage-${ended?.startedAt ?? ""}`)).toBeTruthy();
+  expect(String(active.getByTestId(`usage-${ended?.startedAt ?? ""}`).props.accessibilityLabel))
+    .toBe(`AB12 CDE, Class 1. 100,000 → ${(ended?.endMileage ?? 0).toLocaleString("en-GB")} mi · ${(ended?.endMileage ?? 0) - 100_000} mi`);
 });
 
-test("Active Shift lists a truck used twice ONCE, while the day keeps both uses", async () => {
+test("Active Shift lists a truck used twice as TWO entries — the reuse list groups, the history does not", async () => {
   await dayWith();
   await changed(XY34, 9);
   await changed({ ...AB12, startMileage: 100_130 }, 11);
@@ -555,8 +560,20 @@ test("Active Shift lists a truck used twice ONCE, while the day keeps both uses"
   const active = await wrap(<ActiveShiftRoute />);
 
   await waitFor(() => { expect(active.queryByTestId("used-this-shift")).not.toBeNull(); });
-  expect(active.queryAllByTestId(/^used-(?!this-shift)/).map(node => String(node.props.testID))).toEqual(["used-AB12 CDE"]);
-  expect((await readOpenShift())?.previousVehicles.map(use => use.numberPlate)).toEqual(["AB12 CDE", "XY34 ZZZ", "AB12 CDE"]);
+  const day = await readOpenShift();
+  const starts = (day?.previousVehicles ?? []).map(use => use.startedAt);
+  // Three ended uses, three entries — two of them the same registration
+  // (owner decision, 2026-09-20).
+  expect(active.queryAllByTestId(/^usage-[0-9]/).map(node => String(node.props.testID)))
+    .toEqual([...starts].reverse().map(startedAt => `usage-${startedAt}`));
+  expect(day?.previousVehicles.map(use => use.numberPlate)).toEqual(["AB12 CDE", "XY34 ZZZ", "AB12 CDE"]);
+  await active.unmount();
+
+  // The REUSE list is the other view and stays GROUPED: the two AB12 uses
+  // are one candidate, and XY34 — the vehicle in use — is not offered at all.
+  const view = await openChange();
+  await toNextStep(view, "220200");
+  expect(candidates(view)).toEqual(["AB12 CDE"]);
 });
 
 test("a day that has never changed vehicle shows no USED THIS SHIFT at all", async () => {
@@ -580,9 +597,16 @@ test("after a RESTART, Active Shift shows the current vehicle and every earlier 
   await waitFor(() => { expect(active.queryByTestId("vehicle-plate-value")).not.toBeNull(); });
   expect(text(active, "vehicle-plate-value")).toBe("AB12 CDE");
   expect(text(active, "vehicle-checks-state")).toBe("Not completed");
-  expect(active.getByTestId("used-XY34 ZZZ")).toBeTruthy();
   const day = await readOpenShift();
-  expect(day?.previousVehicles[0]?.checks[0]?.status).toBe("completed");
+  const [first, second] = day?.previousVehicles ?? [];
+  // Both earlier uses are rows, newest first, read from the file alone.
+  expect(active.queryAllByTestId(/^usage-[0-9]/).map(node => String(node.props.testID)))
+    .toEqual([`usage-${second?.startedAt ?? ""}`, `usage-${first?.startedAt ?? ""}`]);
+  // Each use carries its OWN check state: the morning's is completed, the
+  // XY34 use never was, and the current AB12 use is not either. (How an ended
+  // use SHOWS it is proven in `vehicleUsage.test.tsx`.)
+  expect(first?.checks[0]?.status).toBe("completed");
+  expect(second?.checks).toEqual([]);
 });
 
 test("with no vehicle there is nothing to change — back to Active Shift; with no day, Home", async () => {
@@ -612,6 +636,193 @@ test("the whole change works with the network DEAD, and calls no server", async 
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalled(); });
   expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Carrying on with NO vehicle (D32)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Through the end mileage to the No vehicle step, where it is confirmed. */
+async function toNoVehicle(view: View, endMileage: string): Promise<void> {
+  await toNextStep(view, endMileage);
+  await press(view, "use-no-vehicle");
+}
+
+const activeShift = async (): Promise<View> => {
+  const view = await wrap(<ActiveShiftRoute />);
+  await waitFor(() => { expect(view.queryByTestId("screen-title")).not.toBeNull(); });
+  return view;
+};
+
+test("THREE answers to what comes next: a vehicle used earlier, a different one, or none at all", async () => {
+  await dayWith();
+  await changed(XY34, 9);
+  const view = await openChange();
+
+  await toNextStep(view, "220090");
+
+  expect(candidates(view)).toEqual(["AB12 CDE"]);
+  expect(view.queryByTestId("use-different")).not.toBeNull();
+  expect(view.queryByTestId("use-no-vehicle")).not.toBeNull();
+  // Said in its own words, in its own section — never a plate among plates.
+  expect(String(view.getByTestId("use-no-vehicle").props.accessibilityLabel))
+    .toBe("No vehicle. Carry on with the shift without a vehicle");
+});
+
+test("it is offered on a day that has used only ONE vehicle", async () => {
+  await dayWith();
+  const view = await openChange();
+
+  await toNextStep(view, "100250");
+
+  expect(candidates(view)).toEqual([]);
+  expect(view.queryByTestId("use-no-vehicle")).not.toBeNull();
+});
+
+test("choosing it says what will happen, and cannot be mistaken for Cancel or Finish Shift", async () => {
+  await dayWith();
+  const before = storedBytes();
+  const view = await openChange();
+
+  await toNoVehicle(view, "100250");
+
+  expect(text(view, "ending-summary")).toBe("Ending AB12 CDE at 100,250 mi");
+  expect(text(view, "no-vehicle-headline")).toBe("Carry on without a vehicle");
+  expect(text(view, "no-vehicle-detail")).toContain("shift stays open");
+  expect(view.getByText(/not Finish Shift/)).toBeTruthy();
+  // A filled button like the other two answers, not a quiet way out.
+  expect(String(view.getByTestId("no-vehicle-confirm").props.accessibilityLabel)).toBe("Continue Without a Vehicle");
+  expect(isDisabled(view, "no-vehicle-confirm")).toBe(false);
+  // Reading the step writes nothing.
+  expect(storedBytes()).toBe(before);
+  expect((await readOpenShift())?.vehicle).not.toBeNull();
+});
+
+test("BACK from it returns to the choices, having changed nothing", async () => {
+  await dayWith();
+  const before = storedBytes();
+  const view = await openChange();
+  await toNoVehicle(view, "100250");
+
+  await press(view, "change-back");
+
+  expect(view.queryByTestId("use-no-vehicle")).not.toBeNull();
+  expect(view.queryByTestId("no-vehicle-confirm")).toBeNull();
+  expect(storedBytes()).toBe(before);
+  expect(mockRouter.dismissTo).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["a Class 1", { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 }, "100250", "Change Unit"],
+  ["a Class 2", { vehicleClass: "class2", numberPlate: "RG11 AAA", startMileage: 40_000 }, "40100", "Change Vehicle"],
+  ["a van",     { vehicleClass: "van",    numberPlate: "VN11 BBB", startMileage: 500 },     "640",    "Change Vehicle"],
+] as const)("%s can be given up for no vehicle, and the day carries on", async (_what, vehicle, endMileage, title) => {
+  await dayWith(vehicle);
+  const view = await openChange();
+  expect(text(view, "screen-title")).toBe(title);
+
+  await toNoVehicle(view, endMileage);
+  await press(view, "no-vehicle-confirm");
+
+  await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
+  const day = await readOpenShift();
+  expect(day?.status).toBe("open");
+  expect(day?.vehicle).toBeNull();
+  expect(day?.previousVehicles).toMatchObject([{ numberPlate: vehicle.numberPlate, endMileage: Number(endMileage) }]);
+  // Never Vehicle Checks: there is no vehicle to check.
+  expect(mockRouter.replace).not.toHaveBeenCalled();
+});
+
+test("the end mileage is still validated on the way to No vehicle", async () => {
+  await dayWith();
+  const view = await openChange();
+
+  await type(view, "end-mileage", "99999");
+
+  expect(isDisabled(view, "change-continue")).toBe(true);
+  expect(text(view, "end-mileage-error")).toBe("Can't be less than the start mileage, 100,000 mi.");
+  expect(view.queryByTestId("use-no-vehicle")).toBeNull();
+});
+
+test("Active Shift then says NO ACTIVE VEHICLE, keeps the ended use, and still offers Add Vehicle", async () => {
+  await dayWith();
+  await completeCheckOnCurrent();
+  const ended = (await readOpenShift())?.vehicle?.startedAt ?? "";
+  const view = await openChange();
+  await toNoVehicle(view, "100250");
+  await press(view, "no-vehicle-confirm");
+  await view.unmount();
+
+  const active = await activeShift();
+
+  expect(active.getByText("No active vehicle")).toBeTruthy();
+  expect(active.queryByTestId("add-vehicle")).not.toBeNull();
+  expect(active.queryByTestId("active-vehicle")).toBeNull();
+  expect(active.queryByTestId("still-on-shift")).not.toBeNull();
+  // The use it just closed is in the day's history, with its own numbers —
+  // and keeps its completed check.
+  expect(text(active, `usage-mileage-${ended}`)).toBe("100,000 → 100,250 mi · 250 mi");
+  expect((await readOpenShift())?.previousVehicles[0]?.checks[0]?.status).toBe("completed");
+  // Nothing invented for the time with no vehicle.
+  expect(active.queryAllByTestId(/^usage-[0-9]/)).toHaveLength(1);
+});
+
+test("Fuel and AdBlue are unavailable, and Finish Shift is still its own separate action", async () => {
+  await dayWith();
+  const view = await openChange();
+  await toNoVehicle(view, "100250");
+  await press(view, "no-vehicle-confirm");
+  await view.unmount();
+
+  const active = await activeShift();
+
+  // Not even rendered: with no vehicle in use there is nothing to put them in.
+  expect(active.queryByTestId("fuel")).toBeNull();
+  expect(active.queryByTestId("adblue")).toBeNull();
+  // Still on the screen, still not this increment's to press.
+  expect(active.queryByTestId("finish-shift")).not.toBeNull();
+  expect(isDisabled(active, "finish-shift")).toBe(true);
+  // And the shift is genuinely still open.
+  expect((await readOpenShift())?.status).toBe("open");
+});
+
+test("a rapid double press closes ONE use and leaves one day", async () => {
+  await dayWith();
+  const view = await openChange();
+  await toNoVehicle(view, "100250");
+
+  await act(async () => {
+    const confirm = view.getByTestId("no-vehicle-confirm");
+    await Promise.all([fireEvent.press(confirm), fireEvent.press(confirm), fireEvent.press(confirm)]);
+  });
+
+  const day = await readOpenShift();
+  expect(day?.previousVehicles).toHaveLength(1);
+  expect(day?.vehicle).toBeNull();
+});
+
+test("a vehicle added after the gap is a NEW use, and the earlier end is not moved to meet it", async () => {
+  await dayWith();
+  const view = await openChange();
+  await toNoVehicle(view, "100250");
+  await press(view, "no-vehicle-confirm");
+  await view.unmount();
+  const closed = (await readOpenShift())?.previousVehicles[0];
+
+  const add = await wrap(<AddVehicleRoute />);
+  await waitFor(() => { expect(add.queryByTestId("number-plate")).not.toBeNull(); });
+  await press(add, "vehicle-class-class1");
+  await type(add, "number-plate", "XY34 ZZZ");
+  await type(add, "start-mileage", "220000");
+  await press(add, "add-vehicle-submit");
+  await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
+
+  const day = await readOpenShift();
+  expect(day?.vehicle).toMatchObject({ numberPlate: "XY34 ZZZ", startMileage: 220_000, checks: [], fills: [] });
+  // Its own start, later than the end it followed — the gap is real.
+  expect(day?.previousVehicles[0]).toEqual(closed);
+  expect(Date.parse(day?.vehicle?.startedAt ?? "")).toBeGreaterThan(Date.parse(closed?.endedAt ?? ""));
+  expect(day?.previousVehicles).toHaveLength(1);
 });
 
 // ── The signed-in harness the Vehicle Check route needs ───────────────────

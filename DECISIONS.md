@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-20
+> Last updated: 2026-09-27
 
 ---
 
@@ -806,6 +806,155 @@ mileages, and a walkaround check is evidence about one vehicle at one time.
 Merging uses by plate, or freezing the day's class, would lose exactly the
 facts the paper form captures.
 
+### D31 — Fuel and AdBlue are EVENTS on an exact vehicle use, and a quantity may be unknown (2026-09-20, final 2026-09-27)
+
+Owner decision, settled while Fuel + AdBlue was built and finalised with the
+Active Shift layout. It fixes the LOCAL model only; see O6 for what is still
+open.
+
+**A LIST OF EVENTS, NOT A FIELD.** Each fill — diesel or AdBlue — is its own
+record `{ id, type, recordedAt, litres, note }`, held on the vehicle USE it
+went into (`vehicle.fills`), exactly as a check is. A use may hold any number
+of them, of either type. Nothing is summed across uses: three uses of one
+registration are three lists, and returning to a truck used earlier starts an
+empty one (D30).
+
+**THE QUANTITY MAY BE UNKNOWN, AND UNKNOWN IS NOT ZERO.** Yard pumps have
+broken meters and bulk tanks have none; a driver genuinely knows fuel went in
+and genuinely does not know how much. `litres` is therefore `number | null`,
+where `null` means the amount is not known. **0 is never stored for unknown**,
+no quantity is ever estimated, and no screen may show an unknown amount as
+`0 L`. A total reports the litres that ARE known beside a COUNT of the fills
+whose amount is not. The driver is never asked to justify not knowing.
+
+**FUEL AND ADBLUE FROM THE CURRENT VEHICLE BELONG TO THE CURRENT USE — AND
+ONLY TO IT.** They are actions inside the current vehicle / unit card on
+Active Shift. There is **no vehicle or usage selector** in Add Fuel / Add
+AdBlue: the screen is opened for the exact use in the card and records
+against that use alone. If that use has been handed back before the driver
+saves — changed for another vehicle, or ended into no vehicle (D32) — the
+save **fails closed**: nothing is written, not to the ended use, not to its
+replacement, and never by plate. With no vehicle in use there is no current
+Fuel or AdBlue at all.
+
+**RETROSPECTIVE CORRECTION HAPPENS ON THE ENDED USE ITSELF.** USED THIS SHIFT
+lists each ended use as one compact row; the row opens THAT use — named by its
+`startedAt`, never by plate, an unknown name opening nothing — and its **Edit**
+may, while the overall shift is open:
+
+- correct the **end mileage** (never below the start mileage; the distance is
+  recomputed from it); and
+- **add, correct and remove** that use's Fuel and AdBlue entries, with the same
+  time / known-or-unknown litres / optional note as a current fill.
+
+**IMMUTABLE IN THAT EDIT:** the use's plate, class, `startedAt`, `endedAt`,
+start mileage and completed check certificate. No other use is touched — not
+the next use's start mileage, and not another use of the same registration.
+Moving an existing fill from one use to another is not part of this and would
+be its own decision; editing a fill changes its quantity, time and note only.
+
+**HISTORICAL DETAIL AND EDIT DO NOT NEED A VEHICLE IN USE.** A driver between
+vehicles (D32) can still open an ended use and correct its end mileage or its
+fills without taking another vehicle first.
+
+*Why:* the paper timesheet records what went into which vehicle and when, and
+a driver at a broken pump still has to record it. Refusing the entry, or
+storing a zero, would both put a false number on a payroll document. Putting
+the correction on the use it belongs to keeps the routine fill fast and the
+correction unambiguous.
+
+### D32 — A shift may run with NO vehicle; a no-vehicle period is a gap, not a record (2026-09-26)
+
+Owner decision, settled while Fuel + AdBlue was built. It extends the Change
+Unit / Change Vehicle contract of D30.
+
+**A DRIVER MAY END A VEHICLE USE WITHOUT STARTING ANOTHER.** They hand the unit
+back at 13:00 with its end mileage and then wait, load in the yard, travel as
+passenger, or sit two hours until the next one is free. That time is part of the
+working day. So the Change flow offers a third answer to what comes next — a
+vehicle used earlier, a different vehicle, or **no vehicle** — and the third is
+as ordinary as the other two.
+
+**THE SHIFT STAYS OPEN AND `vehicle` BECOMES `null`** — the same honest state as
+a day that booked on without one (D29). A shift with `vehicle: null` and a
+non-empty history is a valid ACTIVE shift, and stays one across a restart. The
+ended use is closed exactly as any change closes one (D30): the odometer
+reading the driver entered, the moment they gave it up, and nothing else
+touched — its checks and its fills stay on it.
+
+**THIS IS NOT FINISH SHIFT**, which remains a separate action. Nothing about
+giving a vehicle up files, submits or ends the driver's day.
+
+**NO RECORD IS CREATED FOR THE GAP.** The absence of a vehicle is the absence of
+a use, never a use of nothing: no placeholder vehicle, no "No vehicle" history
+entry, no period covering 13:00–15:00. A vehicle taken later begins a **new
+use** at its own actual start, and the earlier `endedAt` is **never** rewritten
+to meet it — so `old.endedAt < new.startedAt` across a gap, while a direct
+vehicle-to-vehicle change may still have `old.endedAt == new.startedAt`. A
+re-taken registration is a new use with its own checks and its own empty fills
+(D30, D31).
+
+**IT RECORDS NO ACTIVITY.** It is not a break, rest, POA, other work, idle time,
+waiting time or any tachograph status, and no screen, field or future reader may
+treat it as one. The shift itself already represents the working day.
+
+**CURRENT FUEL AND ADBLUE NEED A VEHICLE IN USE** (D31). With none they are
+unavailable — an unattached fill does not exist. The day's ENDED uses stay
+openable and correctable from USED THIS SHIFT all the same (D31).
+
+*Why:* the paper timesheet records the vehicle a driver had and the miles it
+did. A driver between vehicles has neither, and the honest record is the
+absence of one. Forcing them to keep a vehicle they handed back, or to finish
+the shift they are still working, would both put something false on a payroll
+document.
+
+This fixes the LOCAL model. How a no-vehicle period appears in a submitted
+timesheet or PDF is not decided here; STATUS.md owns what is built.
+
+### D33 — The current vehicle card folds away when the driver's focus moves elsewhere (2026-09-27)
+
+Owner decision, taken while the Active Shift layout was finalised. It is a
+presentation rule only: nothing about it is ever stored in the day, the API or
+any timesheet data, and a remount of Active Shift may open the card again.
+
+**THE CURRENT VEHICLE / CURRENT UNIT CARD IS COLLAPSIBLE.** Collapsed, it is one
+row — the plate and a chevron — and the whole row opens it. Expanded, it shows
+the plate, class, start mileage, check status, Vehicle Checks, Change Vehicle /
+Change Unit, Fuel and AdBlue. Pressing the plate header folds and opens it.
+
+**IT OPENS EXPANDED WHENEVER A VEHICLE IS TAKEN** — at Active Shift's first
+showing, and again for each new vehicle use — so the driver sees its details
+and checks straight away.
+
+**THE RULE: interaction INSIDE the current vehicle keeps its state; interaction
+with ANOTHER Active Shift section folds it.**
+
+- Inside, never folding: Vehicle / Unit Checks, Change Vehicle / Change Unit,
+  Fuel, AdBlue.
+- Another section, folding: a USED THIS SHIFT row (built — the card folds as
+  the use opens); Finish Shift, once it is built (today it is disabled and takes
+  no press); the CURRENT TRAILER — selecting, adding or pressing it — once
+  trailers exist; and any future separate Active Shift section that becomes the
+  driver's focus.
+
+The resulting hierarchy once a trailer is taken:
+
+```text
+CURRENT UNIT
+[ AB12 CDE                         > ]
+
+CURRENT TRAILER
+[ trailer details / actions          ]
+
+USED THIS SHIFT
+…
+```
+
+However it was folded, the driver can press the collapsed row at any time to
+open it again. No trailer exists yet, so no hook, placeholder, route, state or
+trailer model has been built for it; the Trailer increment and the Finish Shift
+increment each apply this rule with their own actions.
+
 ## ❓ Open — ask the user, do not guess
 
 ### O1 — Retention period and cancellation
@@ -846,13 +995,21 @@ roster + active/inactive, subscription, download copies) is confirmed to exist.
 Undecided: does it live at `timesheets.logisticbay.com` alongside the driver-
 facing surface, or its own subdomain?
 
-### O6 — Fuel / AdBlue modelling
+### O6 — Fuel / AdBlue modelling — 🔶 PARTLY CLOSED 2026-09-20
 User asked for fuel and AdBlue **per unit**. In the TMS these are shift-level
 `String @default("")`, which cannot express which truck was fuelled after a
-mid-day swap. Proposed: move to the segment, as a small list of filling events
-(`{ type: fuel | adblue, litres, time, unitReg }`), numeric not string.
+mid-day swap.
 
-Needs confirming: one value per segment, or a list of events?
+**Settled, for the LOCAL model only: a LIST OF EVENTS per vehicle use, with an
+optional quantity, addable and correctable against any use of the open day**
+— see D31. The original question ("one value per segment,
+or a list of events?") is answered: a list. Events belong to the use, not to
+the registration, and `litres` may be absent when the driver does not know it.
+
+**Still open: how this reaches the server.** No Prisma model, migration,
+segment mapping or submission format exists for fills, and D31 claims none.
+Whether a segment carries the events as rows, how an unknown quantity is
+represented on the wire, and what a PDF prints, are all undecided.
 
 ### O7 — Pricing model
 Not frozen. Company-size tiers under consideration. Do not hard-code commercial

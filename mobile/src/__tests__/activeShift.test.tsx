@@ -24,13 +24,16 @@
  * assert the ABSENCE of things, scanning the whole rendered text rather than
  * one node, and they fail the moment a plausible-looking value appears.
  */
-import { render, fireEvent, waitFor } from "@testing-library/react-native";
+import { render, fireEvent, waitFor, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 import { ActiveShiftScreen } from "../screens/ActiveShiftScreen";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
 import { clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
 import type { LocalShift, LocalVehicle, VehicleClass, WorkingContext } from "../shift/localShift";
+import { checklistFor } from "../shift/checklists";
+import { CHECK_RESULT, CHECK_STATUS, type VehicleCheck } from "../shift/vehicleCheck";
+import { colors } from "../theme/index";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -68,7 +71,7 @@ const NORTHGATE: WorkingContext = {
 const LORRY: LocalVehicle = {
   vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203,
   startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
-  checks: [],
+  checks: [], fills: [],
 };
 
 function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
@@ -91,7 +94,7 @@ function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promi
     <SafeAreaProvider initialMetrics={METRICS}>
       <ActiveShiftScreen
         shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined}
-        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
       />
     </SafeAreaProvider>,
   );
@@ -256,7 +259,7 @@ test("class, plate and start mileage all come from the shift", async () => {
 test("the plate is shown VERBATIM — never reformatted into a UK shape", async () => {
   // Plates are international. A Lithuanian one must survive intact.
   const view = await show(shiftWith({
-    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, startedAt: LORRY.startedAt, checks: [] },
+    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, startedAt: LORRY.startedAt, checks: [], fills: [] },
   }));
 
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("KAT 123");
@@ -348,8 +351,6 @@ test("Change Vehicle is present for a vehicle, and is LIVE", async () => {
 });
 
 test.each([
-  ["fuel",            "Fuel"],
-  ["adblue",          "AdBlue"],
   ["finish-shift",    "Finish Shift"],
 ])("%s is present but does nothing", async (testID, label) => {
   const view = await show(shiftWith({ vehicle: LORRY }));
@@ -360,12 +361,31 @@ test.each([
   await pressingDoesNothing(view, testID);
 });
 
-test("Fuel, AdBlue and Finish Shift are offered with or without a vehicle", async () => {
+test.each([["fuel", "Fuel"], ["adblue", "AdBlue"]])("%s is LIVE once there is a vehicle to put it in", async (testID, label) => {
+  // Replaces the Step 3A contract that these do nothing. What they open is
+  // proven in `vehicleFill.test.tsx`.
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  expect(view.getByTestId(testID).props.accessibilityLabel).toBe(label);
+  expect(isDisabled(view, testID)).toBe(false);
+});
+
+test("with NO vehicle there is no Fuel or AdBlue at all — nothing to put it into", async () => {
   const view = await show(shiftWith());
 
-  for (const testID of ["fuel", "adblue", "finish-shift"]) {
-    expect(isDisabled(view, testID)).toBe(true);
-  }
+  // Not disabled tiles: absent. A fill needs a vehicle in use (D31, D32).
+  expect(view.queryByTestId("fuel")).toBeNull();
+  expect(view.queryByTestId("adblue")).toBeNull();
+  expect(isDisabled(view, "finish-shift")).toBe(true);
+});
+
+test("Fuel and AdBlue sit INSIDE the current vehicle card, not in a section of their own", async () => {
+  const view = await show(shiftWith({ vehicle: LORRY }));
+
+  const card = view.getByTestId("active-vehicle");
+  expect(within(card).queryByTestId("fuel")).not.toBeNull();
+  expect(within(card).queryByTestId("adblue")).not.toBeNull();
+  expect(renderedText(view)).not.toContain("DURING THE SHIFT");
 });
 
 test("no fuel or AdBlue TOTALS are shown, because no entry has ever been made", async () => {
@@ -389,7 +409,6 @@ test("Discard is live, and the unbuilt actions are still stubs", async () => {
   alert.mockRestore();
   // The rest of the workspace is unchanged — still rendered, still inert.
   expect(isDisabled(view, "finish-shift")).toBe(true);
-  expect(isDisabled(view, "fuel")).toBe(true);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -576,6 +595,288 @@ test("discarding asks no server for permission", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // The route: what actually happens to the stored day
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The current vehicle card folds away (owner correction, 2026-09-27)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const UNIT: LocalVehicle = { ...LORRY, vehicleClass: "class1", numberPlate: "AB12 CDE" };
+const VAN: LocalVehicle = { ...LORRY, vehicleClass: "van", numberPlate: "DG" };
+const ENDED = { ...LORRY, numberPlate: "ABSB", vehicleClass: "class1" as const, startMileage: 12, endMileage: 18,
+  startedAt: new Date(2026, 8, 13, 4, 0).toISOString(), endedAt: new Date(2026, 8, 13, 5, 42).toISOString() };
+
+/** Every detail and action the open card carries — none of which a folded card may show. */
+const CARD_DETAIL = ["vehicle-class-value", "vehicle-mileage-value", "vehicle-checks-state", "vehicle-checks", "change-vehicle", "fuel", "adblue"];
+
+function showWith(shift: LocalShift, handlers: Partial<{
+  onVehicleChecks: () => void; onChangeVehicle: () => void; onFill: (type: string, usage: string) => void; onOpenUsage: (usage: string) => void;
+}> = {}): Promise<View> {
+  return render(
+    <SafeAreaProvider initialMetrics={METRICS}>
+      <ActiveShiftScreen
+        shift={shift} onDiscard={() => undefined} onAddVehicle={() => undefined}
+        onVehicleChecks={handlers.onVehicleChecks ?? (() => undefined)}
+        onChangeVehicle={handlers.onChangeVehicle ?? (() => undefined)}
+        onFill={handlers.onFill ?? (() => undefined)}
+        onOpenUsage={handlers.onOpenUsage ?? (() => undefined)}
+      />
+    </SafeAreaProvider>,
+  );
+}
+
+function isExpanded(view: View): boolean {
+  const state: unknown = view.getByTestId("current-vehicle-toggle").props.accessibilityState;
+  return typeof state === "object" && state !== null && "expanded" in state && state.expanded === true;
+}
+
+async function toggle(view: View): Promise<void> {
+  await fireEvent.press(view.getByTestId("current-vehicle-toggle"));
+}
+
+test("the current vehicle card starts OPEN, with every detail and action", async () => {
+  const view = await showWith(shiftWith({ vehicle: LORRY }));
+
+  expect(isExpanded(view)).toBe(true);
+  for (const testID of CARD_DETAIL) expect(view.queryByTestId(testID)).not.toBeNull();
+  expect(renderedText(view)).toContain("184,203 mi");
+});
+
+test("pressing the plate panel FOLDS the card to its plate alone", async () => {
+  const view = await showWith(shiftWith({ vehicle: LORRY }));
+
+  await toggle(view);
+
+  expect(isExpanded(view)).toBe(false);
+  expect(view.getByTestId("vehicle-plate-value").props.children).toBe("AB24 XYZ");
+  for (const testID of CARD_DETAIL) expect(view.queryByTestId(testID)).toBeNull();
+  const said = renderedText(view);
+  for (const hidden of ["184,203", "Not completed", "Vehicle Checks", "Change Vehicle", "Fuel", "AdBlue"]) {
+    expect(said).not.toContain(hidden);
+  }
+});
+
+test("the WHOLE folded card is one control, and pressing it opens the card again", async () => {
+  const view = await showWith(shiftWith({ vehicle: LORRY }));
+  await toggle(view);
+
+  // The plate text is INSIDE the one pressable — not a target of its own.
+  const control = view.getByTestId("current-vehicle-toggle");
+  expect(within(control).queryByTestId("vehicle-plate-value")).not.toBeNull();
+  expect(control.props.accessibilityRole).toBe("button");
+  await toggle(view);
+
+  expect(isExpanded(view)).toBe(true);
+  for (const testID of CARD_DETAIL) expect(view.queryByTestId(testID)).not.toBeNull();
+});
+
+test.each([
+  ["a Class 1", UNIT, "CURRENT UNIT", "Change Unit"],
+  ["a Class 2", LORRY, "CURRENT VEHICLE", "Change Vehicle"],
+  ["a van", VAN, "CURRENT VEHICLE", "Change Vehicle"],
+] as const)("%s keeps its own wording, open or folded", async (_what, vehicle, section, change) => {
+  const view = await showWith(shiftWith({ vehicle }));
+
+  expect(view.getByTestId("current-asset-label").props.children).toBe(section);
+  expect(view.getByTestId("change-vehicle").props.accessibilityLabel).toBe(change);
+  await toggle(view);
+  expect(view.getByTestId("current-asset-label").props.children).toBe(section);
+  expect(view.getByTestId("vehicle-plate-value").props.children).toBe(vehicle.numberPlate);
+});
+
+test("the card's actions do their own jobs and NEVER fold the card", async () => {
+  const onVehicleChecks = jest.fn();
+  const onChangeVehicle = jest.fn();
+  const onFill = jest.fn();
+  const view = await showWith(shiftWith({ vehicle: LORRY }), { onVehicleChecks, onChangeVehicle, onFill });
+
+  for (const testID of ["vehicle-checks", "change-vehicle", "fuel", "adblue"]) {
+    await fireEvent.press(view.getByTestId(testID));
+    expect(isExpanded(view)).toBe(true);
+  }
+
+  expect(onVehicleChecks).toHaveBeenCalledTimes(1);
+  expect(onChangeVehicle).toHaveBeenCalledTimes(1);
+  expect(onFill.mock.calls).toEqual([["fuel", LORRY.startedAt], ["adblue", LORRY.startedAt]]);
+});
+
+test("folding is screen state only: it survives a re-render of the same day, and writes nothing", async () => {
+  const shift = shiftWith({ vehicle: LORRY });
+  const view = await showWith(shift);
+  await toggle(view);
+
+  await view.rerender(
+    <SafeAreaProvider initialMetrics={METRICS}>
+      <ActiveShiftScreen
+        shift={{ ...shift }} onDiscard={() => undefined} onAddVehicle={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+      />
+    </SafeAreaProvider>,
+  );
+
+  expect(isExpanded(view)).toBe(false);
+  // Nothing about the card reached the day it renders.
+  expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "previousVehicles", "startedAt", "status", "vehicle", "workingFor"]);
+  expect(Object.keys(LORRY).sort()).toEqual(["checks", "fills", "numberPlate", "startMileage", "startedAt", "vehicleClass"]);
+});
+
+test("a NEW vehicle use opens its card again, so its checks are the first thing seen", async () => {
+  const view = await showWith(shiftWith({ vehicle: LORRY }));
+  await toggle(view);
+
+  const next: LocalVehicle = { ...UNIT, startedAt: new Date(2026, 8, 13, 11, 0).toISOString() };
+  await view.rerender(
+    <SafeAreaProvider initialMetrics={METRICS}>
+      <ActiveShiftScreen
+        shift={shiftWith({ vehicle: next })} onDiscard={() => undefined} onAddVehicle={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+      />
+    </SafeAreaProvider>,
+  );
+
+  expect(isExpanded(view)).toBe(true);
+  expect(view.queryByTestId("vehicle-checks-state")).not.toBeNull();
+});
+
+test("NO vehicle: nothing to fold — the Add Vehicle state is unchanged", async () => {
+  const view = await showWith(shiftWith({ previousVehicles: [ENDED] }));
+
+  expect(view.queryByTestId("current-vehicle-toggle")).toBeNull();
+  expect(view.queryByTestId("no-vehicle")).not.toBeNull();
+  expect(view.queryByTestId("add-vehicle")).not.toBeNull();
+  expect(view.queryByTestId("still-on-shift")).not.toBeNull();
+});
+
+test("USED THIS SHIFT rows are unchanged by a folded card: same rows, same exact targets", async () => {
+  const onOpenUsage = jest.fn();
+  const view = await showWith(shiftWith({ vehicle: LORRY, previousVehicles: [ENDED] }), { onOpenUsage });
+
+  await toggle(view);
+
+  expect(view.getByTestId(`usage-mileage-${ENDED.startedAt}`).props.children).toBe("12 → 18 mi · 6 mi");
+  await fireEvent.press(view.getByTestId(`usage-${ENDED.startedAt}`));
+  expect(onOpenUsage).toHaveBeenCalledWith(ENDED.startedAt);
+  expect(isExpanded(view)).toBe(false);
+});
+
+test("pressing a USED THIS SHIFT row FOLDS the open card, and still opens exactly that use", async () => {
+  const onOpenUsage = jest.fn();
+  const view = await showWith(shiftWith({ vehicle: LORRY, previousVehicles: [ENDED] }), { onOpenUsage });
+  expect(isExpanded(view)).toBe(true);
+
+  await fireEvent.press(view.getByTestId(`usage-${ENDED.startedAt}`));
+
+  expect(onOpenUsage).toHaveBeenCalledWith(ENDED.startedAt);
+  expect(isExpanded(view)).toBe(false);
+  for (const testID of CARD_DETAIL) expect(view.queryByTestId(testID)).toBeNull();
+});
+
+test("a card folded by another section opens again with one press of its row", async () => {
+  const view = await showWith(shiftWith({ vehicle: LORRY, previousVehicles: [ENDED] }));
+  await fireEvent.press(view.getByTestId(`usage-${ENDED.startedAt}`));
+
+  await toggle(view);
+
+  expect(isExpanded(view)).toBe(true);
+  for (const testID of CARD_DETAIL) expect(view.queryByTestId(testID)).not.toBeNull();
+});
+
+test("with NO vehicle, pressing a USED THIS SHIFT row still opens it — there is no card to fold", async () => {
+  const onOpenUsage = jest.fn();
+  const view = await showWith(shiftWith({ previousVehicles: [ENDED] }), { onOpenUsage });
+
+  await fireEvent.press(view.getByTestId(`usage-${ENDED.startedAt}`));
+
+  expect(onOpenUsage).toHaveBeenCalledWith(ENDED.startedAt);
+  expect(view.queryByTestId("no-vehicle")).not.toBeNull();
+});
+
+// ─── The folded card says whether THIS use's checks are done ────────────────
+
+function check(status: "completed" | "draft", answered: boolean): VehicleCheck {
+  const list = checklistFor("class2");
+  return {
+    id: `check-${status}`, checklist: list.id, checklistVersion: list.version,
+    startedAt: LORRY.startedAt, status,
+    completedAt: status === CHECK_STATUS.completed ? LORRY.startedAt : null,
+    completedBy: status === CHECK_STATUS.completed ? "user_1" : null,
+    items: answered ? [{ key: "anything", label: "Anything", result: CHECK_RESULT.ok, note: null }] : [],
+  };
+}
+const CHECKED: LocalVehicle = { ...LORRY, checks: [check(CHECK_STATUS.completed, true)] };
+const HALF_CHECKED: LocalVehicle = { ...LORRY, checks: [check(CHECK_STATUS.draft, true)] };
+
+/** The folded card's ground and border, as rendered. */
+function cardColours(view: View): { background: unknown; border: unknown } {
+  const style = StyleSheet.flatten(view.getByTestId("current-vehicle-card").props.style) as { backgroundColor?: unknown; borderColor?: unknown };
+  return { background: style.backgroundColor, border: style.borderColor };
+}
+
+async function folded(vehicle: LocalVehicle): Promise<View> {
+  const view = await showWith(shiftWith({ vehicle }));
+  await toggle(view);
+  return view;
+}
+
+test.each([
+  ["no check at all", LORRY],
+  ["a check still in progress", HALF_CHECKED],
+] as const)("FOLDED with %s: the plate, 'Checks not completed', and the subtle error ground", async (_what, vehicle) => {
+  const view = await folded(vehicle);
+
+  expect(view.getByTestId("vehicle-plate-value").props.children).toBe("AB24 XYZ");
+  expect(view.getByTestId("collapsed-checks-state").props.children).toBe("Checks not completed");
+  expect(cardColours(view)).toEqual({ background: colors.dangerBg, border: colors.danger });
+});
+
+test("FOLDED with a COMPLETED check: the plate, 'Checks completed', and the subtle success ground", async () => {
+  const view = await folded(CHECKED);
+
+  expect(view.getByTestId("vehicle-plate-value").props.children).toBe("AB24 XYZ");
+  expect(view.getByTestId("collapsed-checks-state").props.children).toBe("Checks completed");
+  expect(cardColours(view)).toEqual({ background: colors.successBg, border: colors.success });
+});
+
+test("the status is THIS use's alone — an earlier use's completed check does not count", async () => {
+  const earlier = { ...ENDED, checks: [check(CHECK_STATUS.completed, true)] };
+  const view = await showWith(shiftWith({ vehicle: LORRY, previousVehicles: [earlier] }));
+  await toggle(view);
+
+  expect(view.getByTestId("collapsed-checks-state").props.children).toBe("Checks not completed");
+});
+
+test("the plate keeps its own ink — the status colour is on the ground and the status line, not the plate", async () => {
+  for (const vehicle of [LORRY, CHECKED]) {
+    const view = await folded(vehicle);
+    const plate = StyleSheet.flatten(view.getByTestId("vehicle-plate-value").props.style) as { color?: unknown };
+    expect(plate.color).toBe(colors.brandDark);
+    await view.unmount();
+  }
+});
+
+test("FOLDED: the chevron stays, laid over the edge so the plate centres on the CARD", async () => {
+  const view = await folded(LORRY);
+
+  const control = view.getByTestId("current-vehicle-toggle");
+  const chevron = StyleSheet.flatten(within(control).getByTestId("current-vehicle-chevron").props.style) as { position?: unknown };
+  expect(chevron.position).toBe("absolute");
+  const box = StyleSheet.flatten(control.props.style) as { paddingHorizontal?: unknown; paddingLeft?: unknown; paddingRight?: unknown; alignItems?: unknown };
+  expect(box.alignItems).toBe("center");
+  expect(box.paddingLeft ?? box.paddingHorizontal).toBe(box.paddingRight ?? box.paddingHorizontal);
+});
+
+test("the whole folded card, status and all, still opens with one press — and open, it has no status ground", async () => {
+  const view = await folded(CHECKED);
+  const control = view.getByTestId("current-vehicle-toggle");
+  expect(within(control).queryByTestId("collapsed-checks-state")).not.toBeNull();
+  expect(String(control.props.accessibilityLabel)).toBe("AB24 XYZ. Checks completed");
+
+  await toggle(view);
+
+  expect(isExpanded(view)).toBe(true);
+  expect(view.queryByTestId("collapsed-checks-state")).toBeNull();
+  expect(view.getByTestId("vehicle-checks-state").props.children).toBe("Completed");
+  expect(cardColours(view).background).toBe(colors.surface);
+});
 
 describe("the Active Shift route", () => {
   beforeEach(async () => {

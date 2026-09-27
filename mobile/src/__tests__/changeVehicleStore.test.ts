@@ -10,13 +10,19 @@
 import { File, Paths } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
+  USAGE_STATE,
+  addVehicleToOpenShift,
   changeVehicle,
   clearOpenShift,
   completeVehicleCheck,
+  endVehicleUse,
+  newLocalId,
   readOpenShift,
+  recordVehicleFill,
   saveVehicleCheckDraft,
   startLocalShift,
   type ChangeVehicleInput,
+  type EndVehicleUseInput,
   type LocalShift,
   type VehicleDetails,
 } from "../shift/localShift";
@@ -133,7 +139,7 @@ test("the next vehicle is a NEW use: its own start mileage, its own start, and n
 
   const day = await changeFrom(shift, { endMileage: 100_120, changedAt: at(9), next: XY34 });
 
-  expect(day?.vehicle).toEqual({ ...XY34, startedAt: at(9).toISOString(), checks: [] });
+  expect(day?.vehicle).toEqual({ ...XY34, startedAt: at(9).toISOString(), checks: [], fills: [] });
   // One instant: the old use ends exactly as the new begins.
   expect(day?.previousVehicles[0]?.endedAt).toBe(day?.vehicle?.startedAt);
 });
@@ -358,7 +364,7 @@ test("the change survives a COLD START — current and every earlier use, read f
     ["XY34 ZZZ", 220_090, at(13).toISOString()],
   ]);
   expect(checkStateOf(recovered?.previousVehicles[0]?.checks ?? [])).toBe("completed");
-  expect(recovered?.vehicle).toMatchObject({ numberPlate: "AB12 CDE", startMileage: 100_130, checks: [] });
+  expect(recovered?.vehicle).toMatchObject({ numberPlate: "AB12 CDE", startMileage: 100_130, checks: [], fills: [] });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -385,7 +391,7 @@ test("a day saved BEFORE vehicles could be changed still loads, with no earlier 
   const day = await readOpenShift();
 
   expect(day?.previousVehicles).toEqual([]);
-  expect(day?.vehicle).toEqual({ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [] });
+  expect(day?.vehicle).toEqual({ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
   // Reading is not writing.
   expect(storedFile().textSync()).toBe(bytes);
 });
@@ -406,9 +412,9 @@ test("an old day can be changed like any other — its vehicle becomes the first
 });
 
 const ended = (over: Record<string, unknown> = {}) => ({
-  ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], endMileage: 100_120, endedAt: at(9).toISOString(), ...over,
+  ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [], endMileage: 100_120, endedAt: at(9).toISOString(), ...over,
 });
-const current = { ...XY34, startedAt: at(9).toISOString(), checks: [] };
+const current = { ...XY34, startedAt: at(9).toISOString(), checks: [], fills: [] };
 
 test.each([
   ["earlier uses that are not a list",       { previousVehicles: "AB12 CDE" }],
@@ -447,6 +453,265 @@ test("changing vehicle makes NO request", async () => {
   const shift = await dayWith();
 
   await changeFrom(shift, { endMileage: 100_120, next: XY34 });
+
+  expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Giving a vehicle up with NOTHING to follow (D32)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "RG11 AAA", startMileage: 40_000 };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 BBB", startMileage: 500 };
+
+/** End the vehicle in use and carry on without one, as the screen asks for it. */
+async function endFrom(shift: LocalShift, over: Partial<EndVehicleUseInput> = {}): Promise<LocalShift | null> {
+  const open = (await readOpenShift()) ?? shift;
+  return endVehicleUse({
+    shiftId: shift.id,
+    endingStartedAt: open.vehicle?.startedAt ?? "",
+    endMileage: open.vehicle?.startMileage ?? 0,
+    endedAt: at(13),
+    ...over,
+  });
+}
+
+/** A fill on the vehicle in use — what must still be there after it is given up. */
+async function fill(shift: LocalShift, litres: number | null, type: "fuel" | "adblue", recordedAt: Date): Promise<void> {
+  const open = await readOpenShift();
+  await recordVehicleFill({
+    shiftId: shift.id, vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    type, recordedAt, litres, note: "",
+  });
+}
+
+test.each([["a Class 1", AB12], ["a Class 2", RIGID], ["a van", VAN]] as const)(
+  "%s in use can be given up with no vehicle to follow — the shift stays open",
+  async (_what, vehicle) => {
+    const shift = await dayWith(vehicle);
+
+    const day = await endFrom(shift, { endMileage: vehicle.startMileage + 40 });
+
+    expect(day?.vehicle).toBeNull();
+    expect(day?.status).toBe("open");
+    expect(day?.previousVehicles).toHaveLength(1);
+    expect(day?.previousVehicles[0]).toMatchObject({
+      vehicleClass: vehicle.vehicleClass,
+      numberPlate: vehicle.numberPlate,
+      startMileage: vehicle.startMileage,
+      endMileage: vehicle.startMileage + 40,
+    });
+    // The day is still there to work in — nothing was discarded.
+    expect(storedFile().exists).toBe(true);
+    expect(await readOpenShift()).not.toBeNull();
+  },
+);
+
+test("an end mileage BELOW the start is refused, nothing is written, and the vehicle stays in use", async () => {
+  const shift = await dayWith();
+  const before = storedFile().textSync();
+
+  await expect(endFrom(shift, { endMileage: 99_999 })).rejects.toThrow("below the start mileage");
+
+  expect(storedFile().textSync()).toBe(before);
+  expect((await readOpenShift())?.vehicle).not.toBeNull();
+});
+
+test("an end mileage EQUAL to the start is accepted — a vehicle may not have moved", async () => {
+  const shift = await dayWith();
+
+  const day = await endFrom(shift, { endMileage: 100_000 });
+
+  expect(day?.previousVehicles[0]?.endMileage).toBe(100_000);
+});
+
+test.each([
+  ["a fractional reading", { endMileage: 100_100.5 }],
+  ["a negative reading",   { endMileage: -1 }],
+  ["a moment that is not one", { endedAt: new Date(Number.NaN) }],
+])("%s is refused, and nothing is written", async (_why, over) => {
+  const shift = await dayWith();
+  const before = storedFile().textSync();
+
+  await expect(endFrom(shift, over)).rejects.toThrow("Refusing an invalid end");
+
+  expect(storedFile().textSync()).toBe(before);
+});
+
+test("it closes EXACTLY ONE use — the one in use — and leaves the earlier ones exactly as they were", async () => {
+  const shift = await dayWith();
+  await changeFrom(shift, { endMileage: 100_120, changedAt: at(9), next: XY34 });
+  const before = (await readOpenShift())?.previousVehicles;
+
+  const day = await endFrom(shift, { endMileage: 220_300, endedAt: at(13) });
+
+  expect(day?.previousVehicles).toHaveLength(2);
+  expect(day?.previousVehicles[0]).toEqual(before?.[0]);
+  expect(day?.previousVehicles[1]).toMatchObject({
+    numberPlate: "XY34 ZZZ", startMileage: 220_000, endMileage: 220_300, endedAt: at(13).toISOString(),
+  });
+});
+
+test("the closed use keeps its start and gains the two facts the driver gave", async () => {
+  const shift = await dayWith();
+  const startedAt = shift.vehicle?.startedAt;
+
+  const day = await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+
+  expect(day?.previousVehicles[0]).toMatchObject({
+    startedAt, startMileage: 100_000, endMileage: 100_250, endedAt: at(13).toISOString(),
+  });
+});
+
+test("the SHIFT is untouched — same day, same declared start, same context, still open", async () => {
+  const shift = await dayWith();
+
+  const day = await endFrom(shift, { endMileage: 100_250 });
+
+  expect(day).toMatchObject({
+    id: shift.id, startedAt: shift.startedAt, createdAt: shift.createdAt,
+    status: "open", workingFor: { kind: "personal" },
+  });
+});
+
+test("checks, fuel and AdBlue stay on the use that had them", async () => {
+  const shift = await dayWith();
+  await completeCheckOnCurrent(shift, "morning");
+  await fill(shift, 300, "fuel", at(8));
+  await fill(shift, null, "adblue", at(8, 30));
+  const held = (await readOpenShift())?.vehicle;
+
+  const day = await endFrom(shift, { endMileage: 100_250 });
+
+  const [closed] = day?.previousVehicles ?? [];
+  expect(closed?.checks).toEqual(held?.checks);
+  expect(checkStateOf(closed?.checks ?? [])).toBe("completed");
+  expect(closed?.fills).toEqual(held?.fills);
+  expect(closed?.fills.map(entry => [entry.type, entry.litres])).toEqual([["fuel", 300], ["adblue", null]]);
+});
+
+test("a RESTART during the gap restores an OPEN day with no vehicle and its history intact", async () => {
+  const shift = await dayWith();
+  await fill(shift, 300, "fuel", at(8));
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+
+  // Read again from the file alone.
+  const day = await readOpenShift();
+
+  expect(day?.status).toBe("open");
+  expect(day?.vehicle).toBeNull();
+  expect(day?.previousVehicles).toHaveLength(1);
+  expect(day?.previousVehicles[0]).toMatchObject({
+    numberPlate: "AB12 CDE", startMileage: 100_000, endMileage: 100_250, endedAt: at(13).toISOString(),
+  });
+  expect(day?.previousVehicles[0]?.fills).toMatchObject([{ type: "fuel", litres: 300 }]);
+});
+
+test("a later vehicle begins a NEW use at ITS OWN time, and the real gap survives", async () => {
+  const shift = await dayWith();
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+
+  const day = await addVehicleToOpenShift({ vehicle: XY34, startedAt: at(15) });
+
+  expect(day?.vehicle).toEqual({ ...XY34, startedAt: at(15).toISOString(), checks: [], fills: [] });
+  // NO use covers 13:00–15:00: the gap is the absence of one, not a record of one.
+  expect(day?.previousVehicles).toHaveLength(1);
+  const [closed] = day?.previousVehicles ?? [];
+  expect(closed?.endedAt).toBe(at(13).toISOString());
+  expect(Date.parse(day?.vehicle?.startedAt ?? "") - Date.parse(closed?.endedAt ?? "")).toBe(2 * 60 * 60 * 1000);
+});
+
+test("the earlier use's END is not rewritten to meet the vehicle that arrives later", async () => {
+  const shift = await dayWith();
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+  const closedBefore = (await readOpenShift())?.previousVehicles[0];
+
+  await addVehicleToOpenShift({ vehicle: XY34, startedAt: at(15) });
+
+  expect((await readOpenShift())?.previousVehicles[0]).toEqual(closedBefore);
+});
+
+test("re-taking the SAME plate after the gap is a separate use — nothing is carried over", async () => {
+  const shift = await dayWith();
+  await completeCheckOnCurrent(shift, "morning");
+  await fill(shift, 300, "fuel", at(8));
+  await fill(shift, 40, "adblue", at(8, 30));
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+
+  const day = await addVehicleToOpenShift({ vehicle: { ...AB12, startMileage: 100_250 }, startedAt: at(15) });
+
+  expect(day?.vehicle).toMatchObject({ numberPlate: "AB12 CDE", startMileage: 100_250, checks: [], fills: [] });
+  expect(day?.vehicle?.startedAt).toBe(at(15).toISOString());
+  // The morning's use still holds every bit of it.
+  expect(day?.previousVehicles).toHaveLength(1);
+  expect(day?.previousVehicles[0]?.fills).toHaveLength(2);
+  expect(checkStateOf(day?.previousVehicles[0]?.checks ?? [])).toBe("completed");
+});
+
+test("three presses of the same confirmation close ONE use", async () => {
+  const shift = await dayWith();
+  const endingStartedAt = shift.vehicle?.startedAt ?? "";
+  const press = () => endVehicleUse({ shiftId: shift.id, endingStartedAt, endMileage: 100_250, endedAt: at(13) });
+
+  const days = await Promise.all([press(), press(), press()]);
+
+  for (const day of days) expect(day?.vehicle).toBeNull();
+  expect((await readOpenShift())?.previousVehicles).toHaveLength(1);
+  expect((await readOpenShift())?.vehicle).toBeNull();
+});
+
+test("it ends the day and the use NAMED — another day, or a use not in use, changes nothing", async () => {
+  const shift = await dayWith();
+  const before = storedFile().textSync();
+
+  expect(await endVehicleUse({
+    shiftId: "11111111-2222-4333-8444-999999999999",
+    endingStartedAt: shift.vehicle?.startedAt ?? "", endMileage: 100_250, endedAt: at(13),
+  })).toBeNull();
+  const unchanged = await endVehicleUse({
+    shiftId: shift.id, endingStartedAt: at(4).toISOString(), endMileage: 100_250, endedAt: at(13),
+  });
+
+  expect(unchanged?.vehicle).not.toBeNull();
+  expect(unchanged?.previousVehicles).toEqual([]);
+  expect(storedFile().textSync()).toBe(before);
+});
+
+test("a day that already has no vehicle cannot be ended again", async () => {
+  const shift = await dayWith();
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+  const before = storedFile().textSync();
+
+  const day = await endFrom(shift, { endMileage: 100_900, endedAt: at(14) });
+
+  expect(day?.vehicle).toBeNull();
+  expect(day?.previousVehicles).toHaveLength(1);
+  expect(storedFile().textSync()).toBe(before);
+});
+
+test("a vehicle whose start COLLIDES with an earlier use's is refused — that day would not load", async () => {
+  const shift = await dayWith();
+  const startedAt = shift.vehicle?.startedAt ?? "";
+  await endFrom(shift, { endMileage: 100_250, endedAt: at(13) });
+  const before = storedFile().textSync();
+
+  // A phone whose clock has gone backwards, onto the instant an earlier use
+  // began. One use, one start (`asLocalShift`): writing it would make the
+  // driver's whole day unreadable, so it is refused instead.
+  await expect(addVehicleToOpenShift({ vehicle: XY34, startedAt: new Date(startedAt) })).rejects.toThrow("same instant");
+
+  expect(storedFile().textSync()).toBe(before);
+  expect((await readOpenShift())?.vehicle).toBeNull();
+  // A real later moment is a real, separate use.
+  const day = await addVehicleToOpenShift({ vehicle: XY34, startedAt: at(15) });
+  expect(day?.vehicle?.startedAt).toBe(at(15).toISOString());
+});
+
+test("giving a vehicle up makes NO request", async () => {
+  const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(() => Promise.reject(new Error("offline")));
+  const shift = await dayWith();
+
+  await endFrom(shift, { endMileage: 100_250 });
 
   expect(fetchSpy).not.toHaveBeenCalled();
 });

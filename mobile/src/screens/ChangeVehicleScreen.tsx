@@ -17,8 +17,19 @@
  * not begun.
  *
  * ════════════════════════════════════════════════════════════════════════════
- * THE NEXT VEHICLE
+ * WHAT COMES NEXT — INCLUDING NOTHING
  * ════════════════════════════════════════════════════════════════════════════
+ *
+ * A driver may hand a vehicle back and keep working without one: waiting,
+ * loading in the yard, riding as passenger, two hours until the next unit is
+ * free. So the end mileage is followed by THREE answers — a vehicle used
+ * earlier today, a different vehicle, or NO VEHICLE (D32) — and the third is
+ * as ordinary as the other two.
+ *
+ * NO VEHICLE IS NOT CANCEL AND NOT FINISH SHIFT. It is its own step with its
+ * own confirmation, it says in words that the shift keeps running, and it
+ * carries the same filled button the other two answers do. Backing out of this
+ * screen is still the way to change nothing at all.
  *
  * USED THIS SHIFT comes first, because drivers go back to trucks they had
  * earlier: one entry per vehicle, most recently used first, never the one
@@ -66,7 +77,12 @@ import { colors, spacing, typography } from "../theme/index";
 /** What the driver confirms: how the vehicle in use ends, and what comes next. */
 export interface VehicleChange {
   endMileage: number;
-  next: VehicleDetails;
+  /**
+   * The vehicle taken next, or `null` to carry the shift on with NO VEHICLE
+   * (D32). `null` is an answer, never a missing one — this whole object is
+   * `null` while the driver has not finished answering.
+   */
+  next: VehicleDetails | null;
   /** Open Vehicle Checks for the next vehicle straight away. Asked only when reusing one. */
   performChecks: boolean;
 }
@@ -86,7 +102,8 @@ type Step =
   | { kind: "end" }
   | { kind: "next" }
   | { kind: "reuse"; vehicle: UsedVehicle }
-  | { kind: "new" };
+  | { kind: "new" }
+  | { kind: "none" };
 
 function classLabel(id: VehicleClass): string {
   return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
@@ -210,6 +227,57 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
             onPress={() => { setStep({ kind: "new" }); }}
           />
         </FormSection>
+        {/*
+          Its own section rather than a third row among the vehicles: it is not
+          a vehicle, and a driver scanning plates should not be able to pick it
+          by accident. It leads to a step that says what it does before it does
+          it (D32).
+        */}
+        <FormSection label="NO VEHICLE">
+          <OptionRow
+            testID="use-no-vehicle"
+            title="No vehicle"
+            detail="Carry on with the shift without a vehicle"
+            last
+            onPress={() => { setStep({ kind: "none" }); }}
+          />
+        </FormSection>
+      </>
+    );
+  } else if (step.kind === "none") {
+    // Nothing else to ask: the end mileage is already given, and there is no
+    // vehicle to describe or to check.
+    const change: VehicleChange | null = endMileage === null
+      ? null
+      : { endMileage, next: null, performChecks: false };
+    body = (
+      <>
+        <Text style={styles.summary} testID="ending-summary">
+          {`Ending ${current.numberPlate} at ${formatMileage(endMileage ?? current.startMileage)}`}
+        </Text>
+        <FormSection label="NO VEHICLE">
+          <View style={styles.vehicle}>
+            <Text style={styles.rowTitle} testID="no-vehicle-headline">Carry on without a vehicle</Text>
+            <Text style={styles.meta} testID="no-vehicle-detail">
+              {`Your shift stays open with no vehicle. ${current.numberPlate} is recorded as used, and you can add another vehicle whenever you get one.`}
+            </Text>
+          </View>
+        </FormSection>
+        {/* Said plainly, because the two are next to each other in a driver's
+            head and only one of them files the day's work. */}
+        <Text style={styles.hint}>
+          This is not Finish Shift — that is still yours to do at the end of the day. Fuel and AdBlue need a
+          vehicle, so they stay unavailable until you add one.
+        </Text>
+        <View style={formStyles.action}>
+          <PrimaryButton
+            label="Continue Without a Vehicle"
+            onPress={() => { confirm(change); }}
+            disabled={change === null}
+            submitting={submitting}
+            testID="no-vehicle-confirm"
+          />
+        </View>
       </>
     );
   } else if (step.kind === "reuse") {

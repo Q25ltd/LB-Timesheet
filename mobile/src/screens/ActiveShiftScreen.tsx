@@ -15,21 +15,25 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  * The owner asked to approve the whole composition before any operational
- * action is wired, so the unbuilt actions are RENDERED and DISABLED: Fuel,
- * AdBlue and Finish Shift. None of them has an `onPress`. Four are live:
- * Discard Shift, Add Vehicle, Vehicle Checks, and Change Unit / Change
- * Vehicle. A control that answers a press by doing nothing teaches a driver
- * the app is broken, so each carries the platform's disabled affordance and
- * tells assistive technology the same thing the pixels do.
+ * action is wired, so the one unbuilt action is RENDERED and DISABLED:
+ * Finish Shift, which has no `onPress`. The rest are live: Discard Shift,
+ * Add Vehicle, Vehicle Checks, Change Unit / Change Vehicle, Fuel and AdBlue,
+ * and each used vehicle. A control that answers a press by doing nothing
+ * teaches a driver the app is broken, so the unbuilt one carries the
+ * platform's disabled affordance and tells assistive technology the same
+ * thing the pixels do.
  *
  * Rank is therefore carried by SIZE, POSITION and GROUPING rather than by
- * colour — everything unbuilt shares one muted treatment, so the hierarchy the
- * owner is approving is the hierarchy the finished screen will have:
+ * colour, in the order a driver needs them (owner decision, 2026-09-27):
  *
- *   filled, full width   the one obvious next action
- *   bordered, full width the alternative to it
- *   two tiles            things wanted occasionally, mid-shift
- *   below a rule         the end of the day
+ *   the current vehicle   its plate, its facts, and every action on it —
+ *                         checks, change, and Fuel / AdBlue as two tiles
+ *                         INSIDE its card, because they are things done to
+ *                         the vehicle in use and nothing else
+ *   (the current trailer) its own card, directly below, when trailers exist
+ *   used this shift       compact rows, one per ENDED use; history, never
+ *                         the workspace, so it sits below every live action
+ *   below a rule          the end of the day
  *
  * ════════════════════════════════════════════════════════════════════════════
  * WHAT IT REFUSES TO SAY
@@ -37,11 +41,15 @@
  *
  * Only `LocalShift` is rendered — declared start, working context, the
  * vehicle as the driver entered it, and the vehicles used earlier in the day.
- * There is no current mileage, no distance, no driving time, no break, no
- * fuel total and no defect count, because none of those is recorded anywhere
- * (CLAUDE.md — never read a field nothing writes). There is no trailer either: a Class 1 pulls a semi-trailer and a
- * Class 2 may pull a drawbar, but no trailer has ever been captured, so
- * inventing "Trailer: None" would state a fact nobody established.
+ * There is no current mileage, no distance, no driving time, no break and no
+ * defect count, because none of those is recorded anywhere (CLAUDE.md —
+ * never read a field nothing writes). The fuel and AdBlue tiles DO carry a
+ * total for the vehicle in use, because the driver entered one: litres they
+ * gave, beside a count of the fills whose amount nobody knows. An unknown
+ * amount is never shown as 0 L and never joins the litres. There is no
+ * trailer either: a Class 1 pulls a semi-trailer and a Class 2 may pull a
+ * drawbar, but no trailer has ever been captured, so inventing
+ * "Trailer: None" would state a fact nobody established.
  *
  * Checks are shown as the stored checks say — Not completed, In progress or
  * Completed — and never more. "Passed", "Roadworthy" and "Safe" are claims
@@ -67,22 +75,20 @@
  * V1, a van is not (D30) — and the block below is the
  * vehicle in use, whatever class it is, with the trailer block beneath it.
  */
+import { useState } from "react";
 import { View, Text, ScrollView, Pressable, Alert, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { VEHICLE_CLASSES, type LocalShift, type LocalVehicle, type VehicleClass } from "../shift/localShift";
-import { checkStateOf, type VehicleCheckState } from "../shift/vehicleCheck";
-import { usedThisShift, type UsedVehicle } from "../shift/usedVehicles";
+import type { EndedVehicle, LocalShift, LocalVehicle, VehicleClass } from "../shift/localShift";
+import { checkStateOf } from "../shift/vehicleCheck";
+import { FILL_TYPES, summariseFills, type FillSummary, type FillType } from "../shift/vehicleFill";
+import { usageDistance, usageHistory } from "../shift/usedVehicles";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
-import { formatClockTime, formatMileage } from "./format";
+import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatMileage, formatMileageRange } from "./format";
 
 /** Said to assistive technology by every control this increment has not wired. */
 const NOT_YET_AVAILABLE = "Not available yet";
-
-function classLabel(id: VehicleClass): string {
-  return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
-}
 
 /**
  * A Class 1 is a tractor UNIT pulling a separate trailer, and that is what
@@ -112,22 +118,32 @@ interface ActiveShiftScreenProps {
   onVehicleChecks: () => void;
   /** Open the flow that ends the current vehicle and takes the next. */
   onChangeVehicle: () => void;
+  /** Record fuel or AdBlue on the vehicle in use — named by its use's `startedAt`. */
+  onFill: (type: FillType, usageStartedAt: string) => void;
+  /** Open one ended use — named by its `startedAt`, never by plate — to read or correct. */
+  onOpenUsage: (usageStartedAt: string) => void;
 }
 
-/**
- * What the Vehicle checks row says — taken from the stored checks, never
- * assumed. A check the driver has opened but not answered is still not started.
- */
-const CHECK_STATE_LABEL: Record<VehicleCheckState, string> = {
-  "not-started": "Not completed",
-  "in-progress": "In progress",
-  completed:     "Completed",
-};
-
-export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle }: ActiveShiftScreenProps) {
+export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
+  /**
+   * Which vehicle USE the driver has folded the card away for, if any — screen
+   * state only, never written to the day (D33). Named by the use, so a NEW
+   * vehicle is never folded: its card opens with its details and checks.
+   */
+  const [foldedUse, setFoldedUse] = useState<string | null>(null);
+  const expanded = vehicle !== null && foldedUse !== vehicle.startedAt;
+
+  /**
+   * Focus moving to ANOTHER section of the screen folds the current vehicle
+   * card, so what the driver turned to is not pushed down by it (D33). The
+   * card's own actions never call this.
+   */
+  function focusElsewhere() {
+    if (vehicle !== null) setFoldedUse(vehicle.startedAt);
+  }
   const startedAt = formatClockTime(shift.startedAt);
 
   /**
@@ -207,15 +223,28 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
         </View>
 
         <Text style={styles.sectionLabel} testID="current-asset-label">{words.section}</Text>
-        <View style={styles.card}>
+        <View
+          testID="current-vehicle-card"
+          style={[
+            styles.card,
+            // Folded, the card's whole field says whether THIS use's checks
+            // are done — subtly, as the design's own error / success grounds.
+            vehicle !== null && !expanded
+              ? [styles.clipped, checkStateOf(vehicle.checks) === "completed" ? styles.cardChecksDone : styles.cardChecksToDo]
+              : null,
+          ]}
+        >
           {vehicle === null
-            ? <NoVehicle onAddVehicle={onAddVehicle} />
+            ? <NoVehicle stillOnShift={shift.previousVehicles.length > 0} onAddVehicle={onAddVehicle} />
             : (
               <CurrentVehicle
                 vehicle={vehicle}
+                expanded={expanded}
+                onToggle={() => { setFoldedUse(expanded ? vehicle.startedAt : null); }}
                 changeLabel={words.change}
                 onVehicleChecks={onVehicleChecks}
                 onChangeVehicle={onChangeVehicle}
+                onFill={type => { onFill(type, vehicle.startedAt); }}
               />
             )}
         </View>
@@ -226,16 +255,15 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
             and its own independent check state. It is absent rather than empty
             because no trailer has ever been recorded. */}
 
-        <UsedThisShift vehicles={usedThisShift(shift)} />
-
-        <Text style={styles.sectionLabel}>DURING THE SHIFT</Text>
-        <View style={styles.tiles}>
-          <Tile label="Fuel" testID="fuel" />
-          <Tile label="AdBlue" testID="adblue" />
-        </View>
+        <UsedThisShift
+          usages={usageHistory(shift)}
+          onOpenUsage={usage => { focusElsewhere(); onOpenUsage(usage); }}
+        />
 
         {/* The end of the day, held apart by a rule and a full gap so it is
-            never the button a driver hits while reaching for another. */}
+            never the button a driver hits while reaching for another. When it
+            is built it is another section, and pressing it folds the vehicle
+            card like any other (D33); while it is disabled it takes no press. */}
         <View style={styles.endOfDay}>
           <PendingAction label="Finish Shift" testID="finish-shift" />
         </View>
@@ -244,11 +272,19 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
   );
 }
 
-/** A shift running without a vehicle is a complete state, not a half-start (D29). */
-function NoVehicle({ onAddVehicle }: { onAddVehicle: () => void }) {
+/**
+ * A shift running without a vehicle is a complete state, not a half-start —
+ * booked on without one (D29), or carrying on after handing one back (D32).
+ * No Fuel or AdBlue here: there is nothing to put them into. A used vehicle's
+ * own entries are still correctable from its row below.
+ */
+function NoVehicle({ stillOnShift, onAddVehicle }: { stillOnShift: boolean; onAddVehicle: () => void }) {
   return (
     <View style={styles.cardBody} testID="no-vehicle">
-      <Text style={styles.absent}>No active vehicle</Text>
+      <Text style={[styles.absent, stillOnShift ? styles.absentWithNote : null]}>No active vehicle</Text>
+      {/* Only once a vehicle has been handed back, when a driver may wonder
+          whether giving it up ended the day. It did not. */}
+      {stillOnShift ? <Text style={styles.absentNote} testID="still-on-shift">You are still on shift.</Text> : null}
       {/* The obvious next thing to do, said by being the only filled control
           on the screen rather than by a sentence explaining itself. */}
       <PrimaryButton label="Add Vehicle" onPress={onAddVehicle} testID="add-vehicle" />
@@ -256,17 +292,75 @@ function NoVehicle({ onAddVehicle }: { onAddVehicle: () => void }) {
   );
 }
 
-function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks, onChangeVehicle }: {
-  vehicle: LocalVehicle; changeLabel: string; onVehicleChecks: () => void; onChangeVehicle: () => void;
+function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChecks, onChangeVehicle, onFill }: {
+  vehicle: LocalVehicle;
+  expanded: boolean;
+  /** The plate header: open a folded card, fold an open one. */
+  onToggle: () => void;
+  changeLabel: string;
+  onVehicleChecks: () => void;
+  onChangeVehicle: () => void;
+  onFill: (type: FillType) => void;
 }) {
+  /**
+   * COLLAPSIBLE, and OPEN by default. Opened, the card is the driver's
+   * workspace: checks and every action on the vehicle. Collapsed, it is one
+   * row — the plate and a chevron — so what sits below it (the trailer, when
+   * trailers exist, and the day's history) is reachable without scrolling.
+   *
+   * Screen state only, held by the screen (D33): it is never written to the
+   * day, and a remount opens the card again.
+   */
   const checkState = checkStateOf(vehicle.checks);
+
+  if (!expanded) {
+    // The WHOLE card is the target, not the plate or the chevron. The plate
+    // and the check line are centred on the CARD: equal padding both sides,
+    // with the chevron laid over the right-hand padding rather than beside
+    // the text, so it cannot pull the plate off centre.
+    const done = checkState === "completed";
+    const status = done ? "Checks completed" : "Checks not completed";
+    return (
+      <Pressable
+        testID="current-vehicle-toggle"
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={`${vehicle.numberPlate}. ${status}`}
+        accessibilityHint="Shows this vehicle's checks and actions"
+        accessibilityState={{ expanded: false }}
+        style={({ pressed }) => [styles.collapsed, pressed ? styles.collapsedPressed : null]}
+      >
+        <Text style={styles.collapsedPlate} testID="vehicle-plate-value" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+          {vehicle.numberPlate}
+        </Text>
+        <View style={styles.collapsedStatus}>
+          {done ? <View style={styles.pillTick} /> : null}
+          <Text style={[styles.collapsedStatusText, done ? styles.pillTextDone : styles.collapsedStatusToDo]} testID="collapsed-checks-state">
+            {status}
+          </Text>
+        </View>
+        <View style={[styles.disclosure, styles.disclosureClosed]} testID="current-vehicle-chevron" />
+      </Pressable>
+    );
+  }
+
   return (
     <View style={styles.cardBody} testID="active-vehicle">
       {/* The plate is what a driver checks they are in the right truck by, so
           it is the largest thing in the card and sits in its own panel. Held
           to one line and shrunk to fit rather than wrapped or clipped: plates
-          are international and some are long. */}
-      <View style={styles.platePanel}>
+          are international and some are long. The panel is also the card's
+          disclosure: pressing it folds the card away. The actions below are
+          NOT inside it, so pressing one never collapses anything. */}
+      <Pressable
+        testID="current-vehicle-toggle"
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={vehicle.numberPlate}
+        accessibilityHint="Hides this vehicle's checks and actions"
+        accessibilityState={{ expanded: true }}
+        style={({ pressed }) => [styles.platePanel, pressed ? styles.tilePressed : null]}
+      >
         <Text
           style={styles.plate}
           testID="vehicle-plate-value"
@@ -276,7 +370,8 @@ function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks, onChangeVehicle
         >
           {vehicle.numberPlate}
         </Text>
-      </View>
+        <View style={[styles.disclosure, styles.disclosureOpen]} />
+      </Pressable>
 
       <Text style={styles.class} testID="vehicle-class-value">{classLabel(vehicle.vehicleClass)}</Text>
 
@@ -312,6 +407,19 @@ function CurrentVehicle({ vehicle, changeLabel, onVehicleChecks, onChangeVehicle
         : <PrimaryButton label="Vehicle Checks" onPress={onVehicleChecks} testID="vehicle-checks" />}
       <View style={styles.secondarySlot}>
         <SecondaryAction label={changeLabel} onPress={onChangeVehicle} testID="change-vehicle" />
+      </View>
+      {/* Things put INTO this vehicle, so they live in its card — below the
+          actions that decide whether the driver is in it at all. */}
+      <View style={styles.tiles}>
+        {FILL_TYPES.map(entry => (
+          <FillTile
+            key={entry.id}
+            testID={entry.id}
+            label={entry.label}
+            summary={summariseFills(vehicle.fills, entry.id)}
+            onPress={() => { onFill(entry.id); }}
+          />
+        ))}
       </View>
     </View>
   );
@@ -374,31 +482,60 @@ function SecondaryAction({ label, onPress, testID }: { label: string; onPress: (
 }
 
 /**
- * The vehicles used earlier in the day — one line per vehicle, most recently
- * used first. Only a vehicle's identity and when it was last used: this is a
- * reminder of the day, not a log of it. Each USE is still kept separately in
- * the day (`usedThisShift` groups for the screen only).
+ * Each vehicle use that has ENDED, as one compact row — history, not the
+ * workspace, so it never stands between the vehicle in use and its actions.
+ *
+ * ONE ROW PER USE, NEWEST ENDED FIRST, NEVER GROUPED BY PLATE. A driver who
+ * took AB12 CDE twice reads two rows with two sets of mileages. Merging them
+ * by registration would invent a journey nobody drove. The row says only what
+ * identifies the use at a glance — plate, class, its mileages — and opens THAT
+ * use, by its `startedAt`, where its checks, fuel and AdBlue are shown and
+ * corrected. Every number is stored or subtracted from two stored numbers.
+ *
+ * Openable whether or not a vehicle is in use now (D31).
  */
-function UsedThisShift({ vehicles }: { vehicles: readonly UsedVehicle[] }) {
-  if (vehicles.length === 0) return null;
+function UsedThisShift({ usages, onOpenUsage }: {
+  usages: readonly EndedVehicle[];
+  onOpenUsage: (usageStartedAt: string) => void;
+}) {
+  if (usages.length === 0) return null;
   return (
     <>
       <Text style={styles.sectionLabel} testID="used-this-shift-label">USED THIS SHIFT</Text>
-      <View style={styles.card} testID="used-this-shift">
-        {vehicles.map((used, index) => (
-          <View
-            key={`${used.vehicleClass}-${used.numberPlate}`}
-            style={[styles.usedRow, index === vehicles.length - 1 ? null : styles.usedDivided]}
-            testID={`used-${used.numberPlate}`}
-          >
-            <Text style={styles.usedPlate}>{used.numberPlate}</Text>
-            <Text style={styles.usedMeta}>
-              {`${classLabel(used.vehicleClass)} · last used ${formatClockTime(used.lastEndedAt)}`}
-            </Text>
-          </View>
+      <View testID="used-this-shift" style={[styles.card, styles.clipped]}>
+        {usages.map((use, index) => (
+          <UsedRow
+            key={use.startedAt}
+            use={use}
+            last={index === usages.length - 1}
+            onPress={() => { onOpenUsage(use.startedAt); }}
+          />
         ))}
       </View>
     </>
+  );
+}
+
+function UsedRow({ use, last, onPress }: { use: EndedVehicle; last: boolean; onPress: () => void }) {
+  const mileage = `${formatMileageRange(use.startMileage, use.endMileage)} mi · ${formatMileage(usageDistance(use))}`;
+  return (
+    <Pressable
+      testID={`usage-${use.startedAt}`}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${use.numberPlate}, ${classLabel(use.vehicleClass)}. ${mileage}`}
+      accessibilityHint="Opens this vehicle use"
+      style={({ pressed }) => [styles.usedRow, last ? null : styles.usedDivided, pressed ? styles.tilePressed : null]}
+    >
+      <View style={styles.usedText}>
+        <Text style={styles.usedTitle} numberOfLines={1} testID={`usage-title-${use.startedAt}`}>
+          <Text style={styles.usedPlate}>{use.numberPlate}</Text>
+          {` · ${classLabel(use.vehicleClass)}`}
+        </Text>
+        <Text style={styles.usedMeta} testID={`usage-mileage-${use.startedAt}`}>{mileage}</Text>
+      </View>
+      <View style={styles.usedChevron} />
+    </Pressable>
   );
 }
 
@@ -425,19 +562,34 @@ function PendingAction({ label, testID }: { label: string; testID: string }) {
   );
 }
 
-/** Wanted occasionally during the day, so a pair of tiles rather than a stack. */
-function Tile({ label, testID }: { label: string; testID: string }) {
+/**
+ * Fuel or AdBlue on the vehicle in use: what this use has had, and the way to
+ * add more.
+ *
+ * Wanted occasionally during the day, so a pair of tiles rather than a stack.
+ * The summary is this use's own arithmetic and nothing else — litres that were
+ * given, and a COUNT of the fills whose quantity nobody knows. An unknown
+ * amount is never shown as 0 L and never joins the total (`fillSummaryText`).
+ */
+function FillTile({ testID, label, summary, onPress }: {
+  testID: string; label: string; summary: FillSummary; onPress: () => void;
+}) {
+  const total = fillSummaryText(summary);
   return (
     <Pressable
       testID={testID}
-      disabled
+      onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: true }}
-      accessibilityHint={NOT_YET_AVAILABLE}
-      style={[styles.pending, styles.tile]}
+      accessibilityLabel={total === null ? label : `${label}. ${total.amount}, ${total.detail}`}
+      style={({ pressed }) => [styles.tile, styles.tileLive, pressed ? styles.tilePressed : null]}
     >
-      <Text style={styles.pendingLabel}>{label}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
+      {total === null ? null : (
+        <>
+          <Text style={styles.tileAmount} testID={`${testID}-amount`}>{total.amount}</Text>
+          <Text style={styles.tileDetail} testID={`${testID}-detail`}>{total.detail}</Text>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -502,16 +654,49 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   cardBody: { padding: spacing.lg },
+  // A pressed row's tint stays inside the card's rounded corners.
+  clipped: { overflow: "hidden" },
 
+  // The plate stays centred; the chevron sits at the panel's right edge.
   platePanel: {
     backgroundColor: colors.surfaceAccent,
     borderRadius: radius.field,
     borderWidth: 1,
     borderColor: colors.border,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.xxl,
     alignItems: "center",
+    justifyContent: "center",
   },
+  // Equal padding left and right, wide enough for the chevron laid over the
+  // right-hand side, so the plate and its check line centre on the card.
+  collapsed: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    minHeight: 68,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xxl + spacing.md,
+    borderRadius: radius.card,
+  },
+  collapsedPressed: { opacity: 0.7 },
+  // The plate stays in the brand's dark ink whatever the checks say.
+  collapsedPlate: { fontSize: 24, fontWeight: "800", color: colors.brandDark, letterSpacing: 1.5, textAlign: "center" },
+  collapsedStatus: { flexDirection: "row", alignItems: "center", gap: 6 },
+  collapsedStatusText: { fontSize: 13, fontWeight: "700" },
+  collapsedStatusToDo: { color: colors.danger },
+  cardChecksToDo: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
+  cardChecksDone: { backgroundColor: colors.successBg, borderColor: colors.success },
+  disclosure: {
+    width: 10,
+    height: 10,
+    borderRightWidth: 2.5,
+    borderTopWidth: 2.5,
+    borderColor: colors.textMuted,
+  },
+  // Closed: points right, "there is more". Open: points up, "fold this away".
+  disclosureClosed: { position: "absolute", right: spacing.lg, top: "50%", marginTop: -5, transform: [{ rotate: "45deg" }] },
+  disclosureOpen: { position: "absolute", right: spacing.lg, top: "50%", marginTop: -3, transform: [{ rotate: "-45deg" }] },
   plate: {
     fontSize: 30,
     fontWeight: "800",
@@ -557,10 +742,29 @@ const styles = StyleSheet.create({
   secondaryPressed: { backgroundColor: colors.surfaceAccent },
   secondaryLabel: { color: colors.brandDark },
 
-  usedRow: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg, gap: 2 },
+  // One row per ended use: two short lines and a chevron, 60pt or so, so a
+  // day of many changes stays a list rather than a wall.
+  usedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    minHeight: 60,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
   usedDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  usedPlate: { fontSize: 18, fontWeight: "800", color: colors.text, letterSpacing: 0.5 },
+  usedText: { flex: 1, gap: 2 },
+  usedTitle: { fontSize: 15, color: colors.textMuted },
+  usedPlate: { fontSize: 17, fontWeight: "800", color: colors.text, letterSpacing: 0.5 },
   usedMeta: { fontSize: 14, color: colors.textMuted },
+  usedChevron: {
+    width: 9,
+    height: 9,
+    borderRightWidth: 2.5,
+    borderTopWidth: 2.5,
+    borderColor: colors.textMuted,
+    transform: [{ rotate: "45deg" }],
+  },
   pill: {
     borderRadius: 999,
     borderWidth: 1,
@@ -578,6 +782,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: spacing.lg,
   },
+  absentWithNote: { paddingBottom: spacing.xs },
+  absentNote: { ...typography.subtitle, textAlign: "center", marginBottom: spacing.lg },
 
   secondarySlot: { marginTop: spacing.md },
   pending: {
@@ -594,8 +800,23 @@ const styles = StyleSheet.create({
 
   // Equal halves that shrink together; no fixed tile width to break on a
   // narrow phone.
-  tiles: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.xl },
+  tiles: { flexDirection: "row", gap: spacing.md, marginTop: spacing.md },
   tile: { flex: 1 },
+  tileLive: {
+    minHeight: sizing.control,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.md,
+    gap: 2,
+  },
+  tilePressed: { backgroundColor: colors.surfaceAccent },
+  tileLabel: { fontSize: 16, fontWeight: "700", color: colors.brandDark },
+  tileAmount: { fontSize: 18, fontWeight: "800", color: colors.text },
+  tileDetail: { fontSize: 13, color: colors.textMuted },
 
   // Pushed to the BOTTOM of the viewport whenever the content is shorter than
   // the screen — which is the no-vehicle day on a large phone, where a fixed
