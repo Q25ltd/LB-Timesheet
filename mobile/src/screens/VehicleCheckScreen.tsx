@@ -42,10 +42,11 @@
  * answered something.
  *
  * Complete Check stays unavailable until every row is answered and every
- * defect is described. Once completed, the check cannot be edited, and it is
- * shown from its own record alone — its rows, labels, sections, order and
- * results as the driver confirmed them — never re-read through the checklist
- * the app carries today (`sectionsOf`).
+ * defect is described. Once completed, the certificate itself is never
+ * edited: a mistake is put right with Correct Check, which appends a revision
+ * (D36), and the screen shows the latest one — from the record alone, its
+ * rows, labels, sections, order and results as confirmed, never re-read
+ * through the checklist the app carries today (`sectionsOf`).
  *
  * COLOUR. The app avoids traffic-light colour, and this control is the one
  * exception, because here the colour IS the result: restrained green for OK,
@@ -56,16 +57,19 @@ import { createRef, useEffect, useRef, useState, type RefObject } from "react";
 import { View, Text, TextInput, ScrollView, Pressable, ActivityIndicator, StyleSheet, Keyboard, type KeyboardEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { LocalVehicle } from "../shift/localShift";
+import { trailerTypeLabel, type LocalTrailer } from "../shift/trailer";
 import type { Checklist } from "../shift/checklists";
 import {
   CHECK_RESULT,
   CHECK_STATUS,
   DEFECT_NOTE_MAX_LENGTH,
   hasOverrides,
+  isCorrected,
   resultsOf,
   sectionsOf,
   summarise,
   type CheckAnswer,
+  type CheckItem,
   type CheckResult,
   type VehicleCheck,
 } from "../shift/vehicleCheck";
@@ -73,13 +77,117 @@ import { keyboardSafeScrollProps } from "./vehicleForm";
 import { formatClockTime, formatMileage } from "./format";
 import { colors, radius, sizing, spacing } from "../theme/index";
 
+/** A plain footer action: filled for the one that commits, outlined otherwise. */
+function PlainButton({ testID, label, filled, disabled, onPress }: {
+  testID: string; label: string; filled: boolean; disabled: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [
+        styles.plainButton,
+        filled ? styles.plainFilled : styles.plainOutlined,
+        disabled && filled ? styles.completeDisabled : null,
+        pressed && !disabled ? styles.completePressed : null,
+      ]}
+    >
+      <Text style={filled ? styles.plainFilledLabel : styles.plainOutlinedLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const RESULT_WORD: Record<CheckResult, string> = { pass: "OK", na: "N/A", fail: "DEFECT" };
+
+/**
+ * The certificate's versions, oldest first — the original, then each
+ * correction with the rows it changed from the version before it and when it
+ * was made. Read only: history is shown, never edited.
+ */
+function CorrectionHistory({ check }: { check: VehicleCheck }) {
+  const versions: { items: CheckItem[]; at: string | null }[] = [
+    { items: check.items, at: check.completedAt },
+    ...(check.revisions ?? []).map(revision => ({ items: revision.items, at: revision.revisedAt })),
+  ];
+  return (
+    <View style={styles.history} testID="check-history">
+      <Text style={styles.historyTitle}>CORRECTION HISTORY</Text>
+      {versions.map((version, index) => {
+        const before = index === 0 ? null : versions[index - 1]?.items ?? null;
+        const changes = before === null ? [] : version.items.filter(item => {
+          const was = before.find(entry => entry.key === item.key);
+          return was === undefined || was.result !== item.result || (was.note ?? "") !== (item.note ?? "");
+        });
+        const current = index === versions.length - 1;
+        return (
+          <View key={String(index)} style={styles.historyEntry} testID={index === 0 ? "check-history-original" : `check-history-revision-${String(index)}`}>
+            <Text style={styles.historyHead}>
+              {index === 0
+                ? `Original — completed ${version.at === null ? "" : formatClockTime(version.at)}`
+                : `Correction ${String(index)} — ${version.at === null ? "" : formatClockTime(version.at)}${current ? " (current)" : ""}`}
+            </Text>
+            {changes.map(item => {
+              const was = before?.find(entry => entry.key === item.key);
+              return (
+                <Text key={item.key} style={styles.historyChange} testID={`check-history-change-${String(index)}-${item.key}`}>
+                  {`${item.label}: ${was === undefined ? "—" : RESULT_WORD[was.result]} → ${RESULT_WORD[item.result]}${item.note === null ? "" : ` — ${item.note}`}`}
+                </Text>
+              );
+            })}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * What is being checked, as the screen names it. The screen serves a vehicle's
+ * walkaround and a trailer's (D35) with one set of rules; only these words
+ * differ, so the driver always knows WHICH asset they are checking.
+ */
+export interface CheckSubject {
+  /** "Unit Check", "Vehicle Check" or "Trailer Checks". */
+  title: string;
+  /** The plate, or the trailer number — the largest thing on the screen. */
+  name: string;
+  /** One line under it: the start mileage, or the trailer type. */
+  detail: string;
+  /** What the driver walks round: "vehicle" or "trailer". */
+  noun: string;
+}
+
+/** A vehicle use as the check screen names it — exactly as it always has. */
+export function vehicleCheckSubject(vehicle: LocalVehicle): CheckSubject {
+  return {
+    title: vehicle.vehicleClass === "class1" ? "Unit Check" : "Vehicle Check",
+    name: vehicle.numberPlate,
+    detail: `Start mileage: ${formatMileage(vehicle.startMileage)}`,
+    noun: "vehicle",
+  };
+}
+
+/** A trailer use as the check screen names it. */
+export function trailerCheckSubject(trailer: LocalTrailer): CheckSubject {
+  return { title: "Trailer Checks", name: trailer.trailerNumber, detail: trailerTypeLabel(trailer.trailerType), noun: "trailer" };
+}
+
 interface VehicleCheckScreenProps {
-  vehicle: LocalVehicle;
+  subject: CheckSubject;
   checklist: Checklist;
   /** The check being resumed or shown, or `null` for a fresh one. */
   check: VehicleCheck | null;
   /** Store the answers so far. Rejects if they could not be stored. */
   onSave: (answers: CheckAnswer[]) => Promise<void>;
+  /**
+   * Store a CORRECTION of the completed check (D36): every row as the driver
+   * now confirms it. Absent where a check cannot be corrected from here.
+   */
+  onRevise?: (answers: CheckAnswer[]) => Promise<void>;
   /** Store the finished check. Rejects if it could not be completed. */
   onComplete: (answers: CheckAnswer[]) => Promise<void>;
   onExit: () => void;
@@ -91,10 +199,26 @@ const CHOICES: readonly { result: CheckResult; label: string }[] = [
   { result: CHECK_RESULT.defect,        label: "DEFECT" },
 ];
 
-export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComplete, onExit }: VehicleCheckScreenProps) {
+export function VehicleCheckScreen({ subject, checklist, check, onSave, onComplete, onRevise, onExit }: VehicleCheckScreenProps) {
   const insets = useSafeAreaInsets();
   const completed = check?.status === CHECK_STATUS.completed;
   const [answers, setAnswers] = useState(() => resultsOf(checklist, check));
+  /**
+   * CORRECTING a completed check (D36): the rows open again, starting from its
+   * EFFECTIVE result — never today's defaults — and nothing is written until
+   * the driver confirms, which appends a revision and leaves the original.
+   */
+  const [correcting, setCorrecting] = useState(false);
+  const readOnly = completed && !correcting;
+  // A new revision arriving (the correction confirmed) closes correcting and
+  // shows the new effective result. Adjusted during render, from the prop.
+  const version = check === null ? "" : `${check.id}:${check.status}:${String(check.revisions?.length ?? 0)}`;
+  const [seenVersion, setSeenVersion] = useState(version);
+  if (version !== seenVersion) {
+    setSeenVersion(version);
+    setCorrecting(false);
+    setAnswers(resultsOf(checklist, check));
+  }
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
 
@@ -134,8 +258,7 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
 
   const summary = summarise(checklist, answers);
   const shown = sectionsOf(checklist, check);
-  const isUnit = vehicle.vehicleClass === "class1";
-  const title = isUnit ? "Unit Check" : "Vehicle Check";
+  const { title } = subject;
 
   function persist(next: Map<string, CheckAnswer>) {
     setAnswers(next);
@@ -145,13 +268,15 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
   }
 
   function choose(key: string, result: CheckResult) {
-    if (completed) return;
+    if (readOnly) return;
     const current = answers.get(key);
     if (current?.result === result) return;
     const next = new Map(answers);
     // A description belongs to a defect only; choosing OK or N/A drops it.
     next.set(key, { key, result, note: result === CHECK_RESULT.defect ? (current?.note ?? "") : "" });
-    persist(next);
+    // A correction is held on screen until confirmed; a draft is saved as it goes.
+    if (correcting) setAnswers(next);
+    else persist(next);
     if (result === CHECK_RESULT.defect) setRevealing(key);
   }
 
@@ -187,14 +312,36 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
 
   function describe(key: string, note: string) {
     const current = answers.get(key);
-    if (completed || current?.result !== CHECK_RESULT.defect) return;
+    if (readOnly || current?.result !== CHECK_RESULT.defect) return;
     const next = new Map(answers);
     next.set(key, { ...current, note: note.slice(0, DEFECT_NOTE_MAX_LENGTH) });
-    persist(next);
+    if (correcting) setAnswers(next);
+    else persist(next);
   }
 
   function leave() {
     void pending.current.then(onExit);
+  }
+
+  /** The correction differs from what the check says now — otherwise there is nothing to confirm. */
+  const changed = correcting && [...answers.values()].some(answer => {
+    const now = check === null ? undefined : resultsOf(checklist, check).get(answer.key);
+    return now === undefined || now.result !== answer.result || now.note.trim() !== answer.note.trim();
+  });
+
+  function confirmCorrection() {
+    if (!correcting || !changed || !summary.canComplete || inFlight.current || onRevise === undefined) return;
+    inFlight.current = true;
+    setSubmitting(true);
+    onRevise([...answers.values()]).then(
+      () => { inFlight.current = false; setSubmitting(false); },
+      () => { inFlight.current = false; setSubmitting(false); },
+    );
+  }
+
+  function cancelCorrection() {
+    setCorrecting(false);
+    setAnswers(resultsOf(checklist, check));
   }
 
   function complete() {
@@ -216,7 +363,9 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
     setCollapsed(next);
   }
 
-  const status = completed ? "Completed" : hasOverrides(checklist, answers) ? "In progress" : "Not confirmed";
+  const status = correcting ? "Correcting"
+    : completed ? (isCorrected(check) ? "Corrected" : "Completed")
+    : hasOverrides(checklist, answers) ? "In progress" : "Not confirmed";
 
   return (
     <View style={styles.screen}>
@@ -254,9 +403,9 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
         <View style={styles.identity}>
           <View style={styles.identityText}>
             <Text style={styles.plate} testID="check-plate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-              {vehicle.numberPlate}
+              {subject.name}
             </Text>
-            <Text style={styles.mileage} testID="check-mileage">{`Start mileage: ${formatMileage(vehicle.startMileage)}`}</Text>
+            <Text style={styles.mileage} testID="check-mileage">{subject.detail}</Text>
           </View>
           <View style={[styles.statusPill, completed ? styles.statusPillDone : null]}>
             <Text style={styles.statusText} testID="check-status">{status}</Text>
@@ -267,7 +416,7 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
           <View style={styles.info}>
             <View style={styles.infoIcon}><Text style={styles.infoIconText}>i</Text></View>
             <Text style={styles.infoText}>
-              Each item starts at its usual result. Walk round the vehicle and change anything
+              {`Each item starts at its usual result. Walk round the ${subject.noun} and change anything `}
               that differs — tap DEFECT if you find a problem — then press Complete Check.
             </Text>
           </View>
@@ -298,9 +447,9 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
                   entry={entry}
                   answer={answers.get(entry.key)}
                   last={index === section.rows.length - 1}
-                  readOnly={completed}
-                  onDefectLayout={completed ? undefined : (box, field) => { defectLaidOut(entry.key, box, field); }}
-                  onDefectFocus={completed ? undefined : defectFocused}
+                  readOnly={readOnly}
+                  onDefectLayout={readOnly ? undefined : (box, field) => { defectLaidOut(entry.key, box, field); }}
+                  onDefectFocus={readOnly ? undefined : defectFocused}
                   onChoose={result => { choose(entry.key, result); }}
                   onDescribe={note => { describe(entry.key, note); }}
                 />
@@ -308,6 +457,11 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
             </View>
           );
         })}
+
+        {/* Every version the certificate has had, oldest first: the original
+            and each correction, with what it changed. Nothing here is ever
+            edited; the last is what the check says now. */}
+        {completed && check !== null && isCorrected(check) && !correcting ? <CorrectionHistory check={check} /> : null}
       </ScrollView>
 
       <View ref={viewport.footer} style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]} testID="check-footer">
@@ -334,10 +488,36 @@ export function VehicleCheckScreen({ vehicle, checklist, check, onSave, onComple
           <Text style={styles.answered} testID="summary-total">{`${String(summary.total)} checks`}</Text>
         </View>
 
-        {completed && check?.completedAt ? (
-          <View style={styles.doneBanner} testID="check-completed-at">
-            <Text style={styles.doneText}>{`Check completed at ${formatClockTime(check.completedAt)}`}</Text>
-          </View>
+        {correcting ? (
+          <>
+            {summary.undescribedDefects > 0 ? (
+              <Text style={styles.blocker} testID="check-blocker">
+                {summary.undescribedDefects === 1 ? "Describe the defect to confirm the correction" : `Describe all ${String(summary.undescribedDefects)} defects to confirm the correction`}
+              </Text>
+            ) : null}
+            <PlainButton
+              testID="confirm-correction"
+              label="Confirm Correction"
+              filled
+              disabled={!changed || !summary.canComplete || submitting}
+              onPress={confirmCorrection}
+            />
+            <PlainButton testID="cancel-correction" label="Cancel" filled={false} disabled={submitting} onPress={cancelCorrection} />
+          </>
+        ) : completed && check?.completedAt ? (
+          <>
+            <View style={styles.doneBanner} testID="check-completed-at">
+              <Text style={styles.doneText}>{`Check completed at ${formatClockTime(check.completedAt)}`}</Text>
+              {isCorrected(check) ? (
+                <Text style={styles.correctedText} testID="check-corrected">
+                  {`Corrected at ${formatClockTime(check.revisions?.[check.revisions.length - 1]?.revisedAt ?? check.completedAt)}`}
+                </Text>
+              ) : null}
+            </View>
+            {onRevise === undefined ? null : (
+              <PlainButton testID="correct-check" label="Correct Check" filled={false} disabled={false} onPress={() => { setCorrecting(true); }} />
+            )}
+          </>
         ) : (
           <>
             {summary.undescribedDefects > 0 ? (
@@ -754,4 +934,23 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   doneText: { fontSize: 16, fontWeight: "700", color: colors.text },
+  correctedText: { fontSize: 13, fontWeight: "700", color: colors.brandDark, marginTop: 2 },
+
+  plainButton: {
+    minHeight: sizing.control,
+    borderRadius: radius.button,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: spacing.sm,
+  },
+  plainFilled: { backgroundColor: colors.brandDark },
+  plainOutlined: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  plainFilledLabel: { fontSize: 17, fontWeight: "800", color: colors.onBrand },
+  plainOutlinedLabel: { fontSize: 16, fontWeight: "700", color: colors.brandDark },
+
+  history: { marginTop: spacing.lg, marginBottom: spacing.lg, gap: spacing.md },
+  historyTitle: { fontSize: 13, fontWeight: "600", color: colors.textMuted, letterSpacing: 1 },
+  historyEntry: { gap: 2 },
+  historyHead: { fontSize: 15, fontWeight: "700", color: colors.text },
+  historyChange: { fontSize: 14, color: colors.textMuted },
 });

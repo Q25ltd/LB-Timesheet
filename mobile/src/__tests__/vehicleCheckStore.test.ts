@@ -19,6 +19,7 @@
 import { File, Paths } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
+  USAGE_STATE,
   addVehicleToOpenShift,
   clearOpenShift,
   completeVehicleCheck,
@@ -46,7 +47,7 @@ async function dayWith(vehicle: VehicleDetails = UNIT): Promise<LocalShift> {
 }
 
 function write(shift: LocalShift, answers: CheckAnswer[], checkId = "check-1"): VehicleCheckWrite {
-  return { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId, startedAt: CHECK_STARTED, answers };
+  return { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId, startedAt: CHECK_STARTED, answers };
 }
 
 const ok = (key: string): CheckAnswer => ({ key, result: "pass", note: "" });

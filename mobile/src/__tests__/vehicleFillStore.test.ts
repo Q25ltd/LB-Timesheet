@@ -509,7 +509,7 @@ test("rapid repeated recording of ONE entry leaves one entry", async () => {
 test("recording a fill leaves the checks, the mileages and the day's history untouched", async () => {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
@@ -723,7 +723,7 @@ test("a completed CHECK on an ended use survives a fill correction", async () =>
   const shift = await dayWith();
   const first = shift.vehicle?.startedAt ?? "";
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: first, checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });

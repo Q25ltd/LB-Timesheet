@@ -51,6 +51,8 @@ jest.mock("expo-router", () => {
       dismissTo: (href: string): void => { mockRouter.dismissTo(href); },
     },
     Redirect: ({ href }: { href: string }) => react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Vehicle Checks for the vehicle in use are opened with no parameters.
+    useLocalSearchParams: () => ({}),
     useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });

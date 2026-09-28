@@ -70,10 +70,16 @@ export const FILL_NOTE_MAX_LENGTH = 500;
  */
 const MAX_LITRES = 9999.99;
 
-export interface VehicleFill {
+/**
+ * One thing put into one asset use: diesel or AdBlue into a vehicle, or diesel
+ * into a refrigerated trailer's fridge unit (`trailer.ts`). The same record
+ * and the same rules wherever it lands — a real positive reading or an honest
+ * `null`, never 0 — but never the same LIST: a vehicle's fuel and a trailer's
+ * fridge diesel are held on their own uses and never added together.
+ */
+export interface FillRecord {
   /** Stable local id — `newLocalId()`, as a day and a check use. */
   id: string;
-  type: FillType;
   /**
    * The driver's declared moment: the device clock when the screen opened,
    * or the time they corrected it to. Never a server time (D28).
@@ -85,12 +91,17 @@ export interface VehicleFill {
   note: string | null;
 }
 
+/** Diesel or AdBlue put into a vehicle use. */
+export interface VehicleFill extends FillRecord {
+  type: FillType;
+}
+
 /**
  * A quantity this app is willing to store: a real, positive reading, to the
  * two decimal places a pump displays. Zero and negatives are not quantities,
  * and `null` — not this function — is how "unknown" is said.
  */
-export function isStorableLitres(value: number): boolean {
+function isStorableLitres(value: number): boolean {
   if (!Number.isFinite(value) || value <= 0 || value > MAX_LITRES) return false;
   const hundredths = value * 100;
   return Math.abs(hundredths - Math.round(hundredths)) < 1e-9;
@@ -121,12 +132,20 @@ export function parseLitres(raw: string): number | null {
  * as complete when it is not.
  */
 export function asVehicleFill(value: unknown): VehicleFill | null {
+  const fill = asFillRecord(value);
+  if (fill === null || typeof value !== "object" || value === null) return null;
+  const { type } = value as Record<string, unknown>;
+  if (!FILL_TYPES.some(entry => entry.id === type)) return null;
+  return { ...fill, type: type as FillType };
+}
+
+/** The fields every fill carries, or `null` if any is broken. */
+export function asFillRecord(value: unknown): FillRecord | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
 
-  const { id, type, recordedAt, litres, note } = record;
+  const { id, recordedAt, litres, note } = record;
   if (typeof id !== "string" || id === "") return null;
-  if (!FILL_TYPES.some(entry => entry.id === type)) return null;
   if (typeof recordedAt !== "string" || Number.isNaN(Date.parse(recordedAt))) return null;
 
   // Absent is not unknown: a fill has always been written with the field, so
@@ -134,7 +153,32 @@ export function asVehicleFill(value: unknown): VehicleFill | null {
   if (litres !== null && (typeof litres !== "number" || !isStorableLitres(litres))) return null;
   if (note !== null && (typeof note !== "string" || note.length > FILL_NOTE_MAX_LENGTH)) return null;
 
-  return { id, type: type as FillType, recordedAt, litres, note };
+  return { id, recordedAt, litres, note };
+}
+
+/**
+ * The list a fill lands in, after a write: a correction (the same id) replaces
+ * the entry where it stands; anything else is appended.
+ */
+export function withFill<T extends FillRecord>(fills: readonly T[], fill: T): T[] {
+  return fills.some(stored => stored.id === fill.id)
+    ? fills.map(stored => (stored.id === fill.id ? fill : stored))
+    : [...fills, fill];
+}
+
+/**
+ * A fill as the driver entered it, checked before anything is written — the
+ * rules every fill shares. Returns the note as stored (`null` when empty).
+ * REFUSES — throws — an invalid moment, an over-long note, and any `litres`
+ * that is not a real positive reading. Unknown is `null`, never 0.
+ */
+export function checkedFillNote(input: { fillId: string; recordedAt: Date; litres: number | null; note: string }): string | null {
+  if (input.fillId === "") throw new Error("Refusing a fill with no id");
+  if (Number.isNaN(input.recordedAt.getTime())) throw new Error("Refusing a fill with an invalid time");
+  if (input.litres !== null && !isStorableLitres(input.litres)) throw new Error("Refusing a fill quantity that is not a positive reading");
+  const described = input.note.trim();
+  if (described.length > FILL_NOTE_MAX_LENGTH) throw new Error("Refusing an over-long fill note");
+  return described === "" ? null : described;
 }
 
 /** One type's fills, in the order the driver recorded them. */
@@ -158,7 +202,11 @@ export interface FillSummary {
  * them would be a number the driver never gave. Screens report both halves.
  */
 export function summariseFills(fills: readonly VehicleFill[], type: FillType): FillSummary {
-  const mine = fillsOfType(fills, type);
+  return summariseRecords(fillsOfType(fills, type));
+}
+
+/** The same arithmetic over a list that is already one kind — a trailer's fridge diesel. */
+export function summariseRecords(mine: readonly FillRecord[]): FillSummary {
   let knownLitres = 0;
   let unknownCount = 0;
   for (const fill of mine) {

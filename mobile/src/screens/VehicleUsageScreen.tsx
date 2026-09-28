@@ -41,19 +41,21 @@ import { checkStateOf } from "../shift/vehicleCheck";
 import { FILL_TYPES, fillsOfType, summariseFills, type FillType } from "../shift/vehicleFill";
 import { usageDistance } from "../shift/usedVehicles";
 import { BackButton, FormSection, formStyles, keyboardSafeScrollProps, parseMileage } from "./vehicleForm";
-import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatLitres, formatMileage } from "./format";
+import { checkDetailLabel, classLabel, fillSummaryText, formatClockTime, formatLitres, formatMileage } from "./format";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 
 interface VehicleUsageScreenProps {
   use: EndedVehicle;
   onLeave: () => void;
+  /** Open THIS use's Vehicle / Unit Check — a forgotten one to complete, or its certificate (D36). */
+  onVehicleChecks: () => void;
   /** Open the fill screen for THIS use, to add to, correct or remove its entries. */
   onFills: (type: FillType) => void;
   /** Store a corrected end mileage on this use. Rejects if it could not be stored. */
   onSaveEndMileage: (endMileage: number) => Promise<void>;
 }
 
-export function VehicleUsageScreen({ use, onLeave, onFills, onSaveEndMileage }: VehicleUsageScreenProps) {
+export function VehicleUsageScreen({ use, onLeave, onVehicleChecks, onFills, onSaveEndMileage }: VehicleUsageScreenProps) {
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState(false);
   const hours = `${formatClockTime(use.startedAt)}–${formatClockTime(use.endedAt)}`;
@@ -86,21 +88,35 @@ export function VehicleUsageScreen({ use, onLeave, onFills, onSaveEndMileage }: 
 
         {editing
           ? <EditUsage use={use} onFills={onFills} onSaveEndMileage={onSaveEndMileage} onDone={() => { setEditing(false); }} />
-          : <UsageDetail use={use} onEdit={() => { setEditing(true); }} />}
+          : <UsageDetail use={use} onVehicleChecks={onVehicleChecks} onEdit={() => { setEditing(true); }} />}
       </ScrollView>
     </View>
   );
 }
 
-function UsageDetail({ use, onEdit }: { use: EndedVehicle; onEdit: () => void }) {
+function UsageDetail({ use, onVehicleChecks, onEdit }: { use: EndedVehicle; onVehicleChecks: () => void; onEdit: () => void }) {
+  const completed = checkStateOf(use.checks) === "completed";
+  const noun = use.vehicleClass === "class1" ? "Unit Check" : "Vehicle Check";
   return (
     <>
       <View style={[formStyles.card, styles.facts]}>
         <Row label="Start mileage" value={formatMileage(use.startMileage)} testID="usage-start-mileage" />
         <Row label="End mileage" value={formatMileage(use.endMileage)} testID="usage-end-mileage" />
         <Row label="Travelled" value={formatMileage(usageDistance(use))} testID="usage-travelled" />
-        <Row label="Vehicle checks" value={CHECK_STATE_LABEL[checkStateOf(use.checks)]} testID="usage-checks" last />
+        <Row label="Vehicle checks" value={checkDetailLabel(use.checks)} testID="usage-checks" last />
       </View>
+
+      {/* A check forgotten before the vehicle went back can still be completed
+          for THIS use; a completed one opens as its certificate (D36). */}
+      <Pressable
+        testID="usage-vehicle-checks"
+        onPress={onVehicleChecks}
+        accessibilityRole="button"
+        accessibilityLabel={completed ? `View ${noun}` : `Complete ${noun}`}
+        style={({ pressed }) => [styles.done, styles.checkAction, pressed ? formStyles.optionPressed : null]}
+      >
+        <Text style={styles.doneLabel}>{completed ? `View ${noun}` : `Complete ${noun}`}</Text>
+      </Pressable>
 
       {FILL_TYPES.map(entry => (
         <FormSection key={entry.id} label={entry.label.toUpperCase()}>
@@ -294,6 +310,7 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "45deg" }],
   },
 
+  checkAction: { marginTop: -spacing.sm, marginBottom: spacing.xl },
   done: {
     minHeight: sizing.control,
     borderRadius: radius.button,

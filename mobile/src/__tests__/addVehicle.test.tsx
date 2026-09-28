@@ -327,6 +327,8 @@ function noVehicleShift(): LocalShift {
     startedAt: STARTED_AT.toISOString(),
     vehicle: null,
     previousVehicles: [],
+    trailer: null,
+    previousTrailers: [],
     status: "open",
     createdAt: STARTED_AT.toISOString(),
   };
@@ -337,7 +339,7 @@ test("Add Vehicle on a no-vehicle Active Shift opens the flow", async () => {
   const view = await wrap(
     <ActiveShiftScreen
       shift={noVehicleShift()} onDiscard={() => undefined} onAddVehicle={onAddVehicle}
-      onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+      onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
     />,
   );
 

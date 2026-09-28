@@ -122,7 +122,7 @@ async function fillNow(litres: number | null, over: { type?: "fuel" | "adblue"; 
 async function threeUseDay(): Promise<{ first: string; middle: string; second: string }> {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });

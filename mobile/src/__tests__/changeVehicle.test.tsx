@@ -22,6 +22,7 @@ import VehicleCheckRoute from "../../app/(app)/vehicle-check";
 import { checklistFor, checklistItems } from "../shift/checklists";
 import {
   OPEN_SHIFT_FILE,
+  USAGE_STATE,
   changeVehicle,
   clearOpenShift,
   completeVehicleCheck,
@@ -47,6 +48,8 @@ jest.mock("expo-router", () => {
       dismissTo: (href: string): void => { mockRouter.dismissTo(href); },
     },
     Redirect: ({ href }: { href: string }) => react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Vehicle Checks for the vehicle in use are opened with no parameters.
+    useLocalSearchParams: () => ({}),
     useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });
@@ -115,7 +118,7 @@ async function completeCheckOnCurrent(): Promise<void> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await completeVehicleCheck({
-    shiftId: open.id, vehicleStartedAt: open.vehicle.startedAt, checkId: "morning", startedAt: at(5, 40),
+    shiftId: open.id, vehicleStartedAt: open.vehicle.startedAt, usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: DRIVER.user.id,
   });
@@ -388,7 +391,10 @@ test("YES: the returned-to vehicle becomes a new use and its Vehicle Checks open
 
   await press(view, "change-confirm");
 
-  await waitFor(() => { expect(mockRouter.replace).toHaveBeenCalledWith("/vehicle-check"); });
+  // The check opens for EXACTLY the use just begun.
+  await waitFor(async () => {
+    expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: (await readOpenShift())?.vehicle?.startedAt, usageState: "in-use" } });
+  });
   const day = await readOpenShift();
   expect(day?.vehicle).toMatchObject({ numberPlate: "AB12 CDE", startMileage: 100_130, checks: [] });
   expect(day?.previousVehicles[0]?.checks[0]?.status).toBe("completed");
@@ -509,7 +515,7 @@ test("the screen itself asks ONCE — three taps while the write is still runnin
   // of it, proven where the store cannot mask it: a write that never settles.
   const onConfirm = jest.fn(() => new Promise<void>(() => { /* never settles */ }));
   const view = await wrap(
-    <ChangeVehicleScreen
+    <ChangeVehicleScreen trailerInUse={null}
       current={{ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] }}
       candidates={[]}
       onLeave={() => { /* not used here */ }}

@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-27
+> Last updated: 2026-09-27 (Trailer foundation)
 
 ---
 
@@ -798,8 +798,8 @@ state.
 trailer-capable classes are **Class 1 ✅ and Class 2 ✅** — a rigid may pull a
 drawbar — and **Van ❌**. A trailer is never part of the vehicle record, is
 checked on its own list, and no local data model or screen may assume trailers
-belong only with Class 1. Trailer functionality itself is not built; STATUS.md
-owns what is.
+belong only with Class 1. The trailer's own lifecycle is D34; STATUS.md owns
+what is built.
 
 *Why:* payroll and the daily timesheet need each period of use with its own
 mileages, and a walkaround check is evidence about one vehicle at one time.
@@ -882,6 +882,10 @@ ended use is closed exactly as any change closes one (D30): the odometer
 reading the driver entered, the moment they gave it up, and nothing else
 touched — its checks and its fills stay on it.
 
+**NOT WHILE A TRAILER IS IN USE** (D34): a trailer needs a vehicle to tow it,
+so the driver hands the trailer back first; the vehicle is never ended with a
+trailer still in use.
+
 **THIS IS NOT FINISH SHIFT**, which remains a separate action. Nothing about
 giving a vehicle up files, submits or ends the driver's day.
 
@@ -932,10 +936,23 @@ with ANOTHER Active Shift section folds it.**
 - Inside, never folding: Vehicle / Unit Checks, Change Vehicle / Change Unit,
   Fuel, AdBlue.
 - Another section, folding: a USED THIS SHIFT row (built — the card folds as
-  the use opens); Finish Shift, once it is built (today it is disabled and takes
-  no press); the CURRENT TRAILER — selecting, adding or pressing it — once
-  trailers exist; and any future separate Active Shift section that becomes the
+  the use opens, and so does the trailer card); a trailer SUCCESSFULLY added or
+  changed to (built, D34 — the vehicle card folds and the new trailer opens
+  expanded); Finish Shift, once it is built (today it is disabled and takes no
+  press); and any future separate Active Shift section that becomes the
   driver's focus.
+- Merely OPENING Add Trailer or Change Trailer and backing out folds nothing
+  (owner correction, 2026-09-27): the fold follows a trailer actually taken, not
+  a form visited. For the same reason the trailer card's own actions (Change
+  Trailer, Fridge Diesel) fold nothing, and the vehicle's actions do not fold
+  the trailer card. A trailer already in use when Active Shift opens — after a
+  restart — folds nothing either.
+
+**THE CURRENT TRAILER CARD FOLDS THE SAME WAY**, with its own state: expanded
+for each new trailer use, its number header folding and opening it, collapsed
+to the trailer number centred over its own one-line check status, on the same
+subtle red or green ground as the vehicle card (D35). Vehicle and trailer are not an exclusive
+accordion: each is opened and folded by its own header, and both may be open.
 
 The resulting hierarchy once a trailer is taken:
 
@@ -951,9 +968,285 @@ USED THIS SHIFT
 ```
 
 However it was folded, the driver can press the collapsed row at any time to
-open it again. No trailer exists yet, so no hook, placeholder, route, state or
-trailer model has been built for it; the Trailer increment and the Finish Shift
-increment each apply this rule with their own actions.
+open it again. The Finish Shift increment applies this rule with its own action.
+
+### D34 — A trailer is its own asset with its own uses; a refrigerated trailer records its fridge diesel (2026-09-27)
+
+Owner decision, the Trailer foundation. It fixes the LOCAL model only: no
+server model, submission, PDF or email exists for trailers, and none is claimed.
+Trailer Checks are their own decision, D35.
+
+**ITS OWN USES, BESIDE THE VEHICLE'S.** The day holds the trailer in use
+(`trailer`) and every earlier trailer use (`previousTrailers`), never inside a
+vehicle use. A trailer use is a trailer number (trimmed and upper-cased, never
+format-checked — fleet numbers are as common as registrations), a type, when it
+began and, if refrigerated, its fridge diesel; an ended one adds when it ended.
+A use is identified by its `startedAt`, never its number. There is no trailer
+mileage.
+
+**TWO TYPES ONLY: Standard and Refrigerated.** The one distinction the app needs
+is whether the trailer has a fridge unit with its own diesel. No wider trailer
+taxonomy is recorded.
+
+**WHICH VEHICLES MAY TOW ONE: Class 1 and Class 2, never a van (D30).** CURRENT
+TRAILER — "No trailer" with Add Trailer, or the trailer in use — is shown behind
+a Class 1 or Class 2, and nowhere else.
+
+**THE INVARIANT: a trailer in use requires a vehicle in use that tows it**
+(owner correction, 2026-09-27):
+
+| Vehicle in use | Trailer in use | |
+|---|---|---|
+| Class 1 / Class 2 | yes | valid |
+| Class 1 / Class 2 | none | valid |
+| Van | none | valid |
+| none | none | valid |
+| Van | yes | **invalid** |
+| none | yes | **invalid** |
+
+It is enforced at the store, not only on screen: a trailer may only be added
+or changed to behind a Class 1 or Class 2, and a saved day holding an invalid
+pair fails closed rather than being guessed at.
+
+**INDEPENDENT ASSETS.** Changing the vehicle never ends, changes or resets the
+trailer; changing or ending the trailer never touches the vehicle. So the
+invariant is kept by REFUSING, never by a side effect: while a trailer is in
+use, Change Vehicle may not take a van and may not end into **No vehicle**. The
+final press is blocked with the instruction to hand the trailer back first
+("Hand back TR1234 first"), and the store refuses independently, changing
+neither asset. Once the driver has chosen No trailer, both are allowed.
+
+**CHANGE TRAILER** offers exactly two answers: a **different trailer** (its
+number and type) or **No trailer** (owner correction, 2026-09-27 — trailers used
+earlier are not offered back here). Changing ends the use in progress and
+begins the next at the same instant; typing the number of a trailer used earlier
+is a NEW use that inherits nothing — a new start, no fridge diesel, no Trailer
+Check. No trailer ends the use, leaves `trailer`
+`null` and the shift open, and creates no record for the gap — a trailer taken
+later begins at its own later time.
+
+**FRIDGE DIESEL** is diesel put into a refrigerated trailer's fridge unit. It is
+NOT the vehicle's Fuel, never joins it, and is recorded on the exact trailer use
+in the card: the same event model as D31 — one entry each, `litres` a real
+positive reading or `null` when unknown (never 0), a time and an optional note,
+correctable and removable. A standard trailer has none. If the trailer the form
+was opened for has been changed or handed back before the save, nothing is
+written — not to it, not to its replacement, never by trailer number.
+
+**EARLIER TRAILER USES ARE SHOWN ON ACTIVE SHIFT** (owner correction,
+2026-09-27): USED THIS SHIFT lists the ended vehicle uses under VEHICLES and,
+directly beneath, the ended trailer uses under TRAILERS — one row per use,
+newest ended first, never grouped by number, never the trailer in use. A row
+shows the trailer number, its type, its hours and its own check state
+("Checks completed" / "Checks not completed" — a draft is not completed); no
+fridge diesel. The day's `previousTrailers` is kept in full.
+
+**AN ENDED TRAILER USE OPENS AND IS CORRECTABLE** (owner decision,
+2026-09-27). Each TRAILERS row opens THAT use — by its `startedAt`, never by
+trailer number — on a Trailer Use screen in the Vehicle Use language: number,
+type, start, end and duration, its Trailer Check (state, and a certificate's
+defects) and, if refrigerated, its fridge diesel. **Editable:** a refrigerated
+use's fridge diesel — added, corrected, removed — on the Fridge Diesel form
+opened for that ended use. **Never editable:** the trailer number, its type,
+`startedAt` and `endedAt`; a completed certificate is never edited in place —
+a mistake in it is corrected by an appended revision (D36). A standard use
+has no Edit. Every such write names the use AND that it has
+ended (`usageState`), and lands on exactly one ended use: never the trailer in
+use, never another use of the same number, never by number; anything else
+writes nothing. A write begun on the trailer IN USE keeps its own protection —
+refused once that trailer has ended.
+
+*Why:* the paper timesheet records the trailers a driver used between which
+times, as separate facts from the truck, and a fridge trailer's diesel is a
+separate fill from the truck's. Folding either into the vehicle record would
+lose which asset something happened to.
+
+### D35 — Trailer Checks: each trailer use gets its own walkaround, on the Vehicle Check model (2026-09-27)
+
+Owner decision, completing the trailer feature (D34). LOCAL only: no server
+model, submission, PDF or email exists for trailer checks, and none is claimed.
+
+**SOURCE.** Based on current DVSA guidance on GOV.UK, read 27 September 2026:
+*Carry out HGV daily walkaround checks* (27 numbered checks, last updated 21
+September 2023); *Guide to maintaining roadworthiness* — "The check should cover
+the whole vehicle or combination… Where trailers are changed on multiple
+occasions, a check should be made on each trailer being used"; and *Securing
+loads on HGVs and goods vehicles* — before loading, check the load platform,
+bodywork, anchorage points and twist locks where fitted, and that securing
+equipment is in a usable condition. The checklist is BASED ON that guidance; it
+is not DVSA-approved and nothing may say so.
+
+**THE MAPPING.** Of DVSA's 27 checks, 1–5, 8, 9, 11 and 13–17 are the towing
+vehicle's alone (cab, engine, power) and are not on the trailer list. The
+trailer list takes the trailer's share of 10 (lights), 12 (body, doors, landing
+legs, guards), 18 (spray suppression), 19 (tyres and wheels), 23 (load), 24
+(number plate), 25 (reflectors), 26 (markings, hazard panels) and 27 (other /
+specialised equipment); ALL of 20 (brake lines, trailer parking brake), 21
+(electrical couplings and wiring) and 22 (coupling security); and the part of 6
+that is only true with THIS trailer attached — the service brake working the
+trailer brakes. Coupling is on the trailer list although half of it is on the
+tractor, because taking this trailer is what makes it true or false. **Check 7
+(the height marker)** also changes with the trailer and its load, but the marker
+is in the cab, so it is answered on the towing vehicle's own list and not
+repeated here (owner review, 2026-09-27). Every row names its DVSA check, and a
+test holds that no tractor-only check appears and no trailer-relevant one is
+missing. 33 rows in six sections: Coupling, Brakes / Air, Lights / Electrical,
+Body / Exterior, Tyres / Wheels, Load / Equipment.
+
+**DEFAULTS, declared per trailer type and per row, never inferred** (owner
+review, 2026-09-27):
+
+- **OK** — what every road trailer has, including landing legs (standard on the
+  common semi-trailer; a drawbar driver sets N/A) and the load bed, anchor
+  points and headboard (permanent structure, checked before loading).
+- **N/A, optional equipment** — spray suppression (DVSA: "if required"; the
+  vehicle lists are unchanged), curtains and sheets, twist locks ("where
+  fitted") and specialised equipment.
+- **N/A, needs a load on board** — the load secure and not moving, the straps,
+  chains and nets securing it, and hazard warning panels (dangerous goods
+  only). An empty trailer is normal, so these never start OK; the driver sets
+  them OK once checked.
+
+Standard: **26 OK / 7 N/A**. **Refrigerated differs in one row only** — a fridge
+unit IS specialised equipment (DVSA 27), so it starts OK: **27 / 6**. DVSA
+prescribes no fridge-specific walkaround item, so none is invented (no
+temperature, set point, hours or service row), and Fridge Diesel is not a
+check.
+
+**THE VEHICLE CHECK MODEL, UNCHANGED.** OK / N/A / DEFECT per row; a DEFECT
+needs a written description (≤500, not blank); opening writes nothing; a draft
+stores only the rows that differ from their defaults; defaults are never a
+check; **Complete Check** materialises every row with its section into an
+immutable certificate with a stable id, `completedAt` and `completedBy` (the
+signed-in driver), read afterwards from its own rows and never re-read through
+a later checklist. A completed certificate is never edited; a mistake in it
+is corrected by an appended revision (D36). One screen serves both,
+named for what is checked — "Trailer Checks", the trailer number and type.
+
+**ONE EXACT TRAILER USE.** A check belongs to the trailer use that opened it,
+named by its `startedAt`, never by trailer number. A new trailer use — including
+the same trailer taken again — starts with no check: nothing is inherited, draft
+or certificate. If the trailer is changed or handed back while the check is
+open, nothing is saved, not to it and not to a replacement with the same
+number. A vehicle change with the same trailer in use leaves the trailer's
+check exactly as it was.
+
+**INDEPENDENT OF THE VEHICLE CHECK AND OF FRIDGE DIESEL.** Completing the unit's
+check completes nothing on the trailer, and the reverse; recording fridge diesel
+neither needs nor changes a trailer check.
+
+**ON ACTIVE SHIFT** the trailer card shows its own check state (Not completed /
+In progress / Completed) and **Trailer Checks** — the filled action until done,
+then an outlined way back to the certificate — and folded, the trailer number
+over "Checks completed" or "Checks not completed" on the same subtle green or
+red ground as the vehicle card (D33).
+
+An ENDED trailer use's check state is shown on its USED THIS SHIFT row (D34).
+
+**A FORGOTTEN TRAILER CHECK CAN BE COMPLETED AFTERWARDS** (owner decision,
+2026-09-27). From an ended use's Trailer Use screen, Trailer Checks opens THAT
+use's check — its draft if one exists, otherwise a fresh one at its defaults —
+and Complete Check writes the same immutable certificate as any other, attached
+to that exact ended use. **`completedAt` is when the driver actually completed
+it — never backdated to the trailer's hours** — and `completedBy` is the
+signed-in driver. A completed certificate opens read-only, is never completed
+again, and is corrected only by revision (D36); completing one use's check leaves every other use, including
+another use of the same trailer, untouched.
+
+**NOT BUILT:** repeat checks on one trailer use; defect severity; and anything
+company-facing.
+
+### D36 — A completed walkaround check is corrected by an appended revision, never edited (2026-09-27)
+
+Owner decision. One model for Vehicle / Unit Checks and Trailer Checks. LOCAL
+only: nothing company-facing exists for checks or their revisions.
+
+**THE CERTIFICATE IS NEVER EDITED.** A completed check keeps its original rows,
+`completedAt` and `completedBy` exactly as certified. A mistake found later —
+Tyres marked OK that were cut — is put right with **Correct Check**, which
+appends a **revision** to the check: a COMPLETE snapshot of every row (result,
+section and any defect description), `revisedAt` (the device clock when the
+driver confirms it — never backdated) and `revisedBy` (the signed-in driver).
+Revisions are append-only; a later mistake is a later revision. **The last
+revision is the effective result** — what every screen shows; the original and
+every earlier revision stay readable as the correction history.
+
+**WHAT A CORRECTION MAY CHANGE:** each row's OK / N/A / DEFECT and its defect
+description, under the same rules as a completion (every row answered, every
+defect described, ≤500), against the checklist version the check was
+certified on. **NEVER:** the vehicle or trailer, class or trailer type, the
+use's `startedAt` / `endedAt`, mileage, Fuel / AdBlue / fridge diesel, the
+original completion time or completing driver. A correction that changes
+nothing writes nothing; one confirmed twice is one revision.
+
+**EXACT USE.** A correction names its use by `startedAt` and whether it is IN
+USE or ENDED, and lands on that one use's check only — never another use of
+the same plate or trailer number, never by plate or number. Available from a
+current vehicle's or trailer's check, and from an ended use's detail.
+
+**A FORGOTTEN VEHICLE / UNIT CHECK** on an ENDED vehicle use can be completed
+from its Vehicle Use detail, exactly as a trailer's (D35): its draft resumed or
+a fresh one, dated when actually completed, attributed to the signed-in driver.
+
+**LEGACY AND FAILURE.** A completed check stored before revisions existed has
+no `revisions` field: it loads as the original and zero revisions, and reading
+it rewrites nothing. Malformed revision data drops the check, as any unreadable
+check is dropped — it reads as not completed, never as a pass.
+
+**ON SCREEN.** Active Shift's cards keep saying "Checks completed" — history is
+not theirs to show. The check screen says **Corrected** with the time of the
+latest correction and lists the history (original, then each correction with
+the rows it changed); the Vehicle Use and Trailer Use details say "Completed ·
+corrected".
+
+### D37 — The open shift's file is never destroyed, never half-replaced, and no use ends before it began (2026-09-28)
+
+Owner decision, taken before Finish Shift. It hardens the local document D28
+put on the phone; it adds no store, no server and no framework.
+
+**AN UNREADABLE DAY IS KEPT, NEVER OVERWRITTEN.** When Start Shift finds a day
+file it cannot read, it first moves that file's exact bytes aside to a
+recovery file (`logisticbay-open-shift.recovery-unreadable-<time>-<id>.json`)
+and only then starts the new day. The name is collision-resistant, and a name
+already taken is refused rather than overwritten. If the move fails, Start
+Shift fails: the original stays exactly where it was, no new day is started,
+and the driver sees the failure. Recovery files exist so nothing is destroyed —
+the app never reads them back, and there is no recovery screen. The app deletes
+none of them; how long they are kept is part of O1 and not decided here.
+
+**EVERY WRITE IS A SAFE REPLACEMENT — NOT AN ATOMIC ONE.** The complete next
+state is serialised and checked against the reader first (a state the reader
+would refuse is never written), written in full to a temporary sibling
+(`logisticbay-open-shift.next.json`), read back and compared, and only then
+moved over the live file. A failed or short temporary write leaves the live
+file untouched and is reported as a failure; a failed move is reported too,
+never counted as saved. Expo's move-with-overwrite deletes the target and then
+renames, on iOS and Android alike, so **one crash window remains**: between
+those two steps. What survives it is the complete, verified next state in the
+temporary file and no live file — the app shows no open day, never a
+half-written one. The temporary file is **never read as the day**, even then,
+because nothing on the disk proves that write was ever confirmed to the driver.
+The next write moves any leftover temporary file aside as
+`logisticbay-open-shift.recovery-unfinished-<time>-<id>.json` rather than
+promoting or deleting it. Discard removes the live and temporary files — the
+day being thrown away — and leaves recovery files alone.
+
+**A FAILED SAVE IS NEVER DESCRIBED AS "NOTHING CHANGED".** Because a failed
+move may already have removed the old day file, every failure of the save's
+disk work is one typed error (`SafeSaveFailedError`) and the driver is told:
+"The change could not be saved safely. Your shift data has been preserved. Try
+again." A stale target, a refusal decided before anything was written, or a
+clock that went back keeps its own message, which is true in those cases. The
+screen decides by the error's type, never its text.
+
+**NO VEHICLE OR TRAILER USE ENDS BEFORE IT BEGAN.** Change Vehicle / Unit, No
+vehicle, Change Trailer and No trailer are refused when the phone's clock is
+earlier than the start of the use being ended. An end at the very instant of
+the start is allowed. Nothing is clamped, no clock is corrected, no other
+asset is ended: the day is left exactly as it was, and the driver is told the
+phone's clock is earlier than the start and to check the date and time. The
+reader refuses a saved ended use whose end precedes its start — the day fails
+closed, like any other malformed field.
 
 ## ❓ Open — ask the user, do not guess
 

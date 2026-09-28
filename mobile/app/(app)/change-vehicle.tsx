@@ -23,8 +23,17 @@ import { Alert } from "react-native";
 import { Redirect, router } from "expo-router";
 import { ChangeVehicleScreen, type VehicleChange } from "../../src/screens/ChangeVehicleScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { changeVehicle, endVehicleUse, readOpenShift, type LocalShift, type LocalVehicle } from "../../src/shift/localShift";
+import {
+  USAGE_STATE,
+  UseEndsBeforeItStartedError,
+  changeVehicle,
+  endVehicleUse,
+  readOpenShift,
+  type LocalShift,
+  type LocalVehicle,
+} from "../../src/shift/localShift";
 import { usedThisShift } from "../../src/shift/usedVehicles";
+import { saveFailureMessage } from "../../src/screens/format";
 
 export default function ChangeVehicleRoute() {
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
@@ -45,6 +54,7 @@ export default function ChangeVehicleRoute() {
     <ChangeVehicleScreen
       current={current}
       candidates={usedThisShift(shift)}
+      trailerInUse={shift.trailer?.trailerNumber ?? null}
       onLeave={() => { router.back(); }}
       onConfirm={change => confirm(shift, current, change)}
     />
@@ -80,12 +90,31 @@ async function confirm(shift: LocalShift, current: LocalVehicle, change: Vehicle
         });
     // The day was discarded or finished while this screen was open.
     if (day === null) { router.replace("/today"); return; }
-    if (change.performChecks) router.replace("/vehicle-check");
-    else router.dismissTo("/active-shift");
+    // The store applies a change only while the vehicle on screen is still the
+    // one in use; otherwise it returns the day untouched. Success is the named
+    // use having ended AT THIS PRESS — ended by something else is a screen that
+    // went stale, and the driver is told rather than shown success, or a check
+    // for another vehicle.
+    const endedHere = day.previousVehicles.some(use => use.startedAt === current.startedAt && use.endedAt === at.toISOString());
+    if (!endedHere) {
+      Alert.alert("Nothing was saved", `That ${noun} is no longer the one in use.`);
+      router.dismissTo("/active-shift");
+      return;
+    }
+    // The check opens for EXACTLY the use just begun.
+    if (change.performChecks && day.vehicle !== null) {
+      router.replace({ pathname: "/vehicle-check", params: { usage: day.vehicle.startedAt, usageState: USAGE_STATE.inUse } });
+    } else {
+      router.dismissTo("/active-shift");
+    }
   } catch (error: unknown) {
     Alert.alert(
       next === null ? `Couldn't end the ${noun}` : `Couldn't change the ${noun}`,
-      "Nothing was changed. Please try again.",
+      // The phone's clock went back since this use began. Never corrected
+      // here: the driver fixes the clock, and nothing was written.
+      error instanceof UseEndsBeforeItStartedError
+        ? `The phone's clock is earlier than when this ${noun} started. Nothing was changed. Check the phone's date and time, then try again.`
+        : saveFailureMessage(error),
     );
     throw error;
   }

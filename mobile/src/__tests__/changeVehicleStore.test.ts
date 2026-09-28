@@ -10,6 +10,7 @@
 import { File, Paths } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
+  SafeSaveFailedError,
   USAGE_STATE,
   addVehicleToOpenShift,
   changeVehicle,
@@ -59,7 +60,7 @@ async function completeCheckOnCurrent(shift: LocalShift, checkId: string): Promi
   const open = await readOpenShift();
   const vehicleStartedAt = open?.vehicle?.startedAt ?? "";
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt, checkId, startedAt: at(5, 40),
+    shiftId: shift.id, vehicleStartedAt, usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
     answers: allOk(open?.vehicle?.vehicleClass), completedAt: at(5, 50), completedBy: "user_1",
   });
 }
@@ -119,7 +120,7 @@ test("closing keeps the use's checks exactly as they were — a completed one AN
 
   // A draft left unfinished is kept as the unfinished draft it is.
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: day?.vehicle?.startedAt ?? "", checkId: "draft", startedAt: at(9, 5),
+    shiftId: shift.id, vehicleStartedAt: day?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "draft", startedAt: at(9, 5),
     answers: [{ key: "horn", result: "fail", note: "Horn silent" }],
   });
   const withDraft = (await readOpenShift())?.vehicle?.checks;
@@ -210,7 +211,7 @@ test("a check saved for an ENDED use is not written into the vehicle now in use"
   await changeFrom(shift, { endMileage: 100_120, next: XY34 });
 
   const stored = await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: morning, checkId: "late", startedAt: at(9, 1),
+    shiftId: shift.id, vehicleStartedAt: morning, usageState: USAGE_STATE.inUse, checkId: "late", startedAt: at(9, 1),
     answers: [{ key: "horn", result: "na", note: "" }],
   });
 
@@ -312,7 +313,8 @@ test("a change whose write FAILS leaves the day exactly as it was — and the ne
   const before = storedFile().textSync();
   jest.spyOn(File.prototype, "write").mockImplementationOnce(() => { throw new Error("disk full"); });
 
-  await expect(changeFrom(shift, { endMileage: 100_120, next: XY34 })).rejects.toThrow("disk full");
+  // Reported as a failed save (D37) — never as a success, never as "nothing changed".
+  await expect(changeFrom(shift, { endMileage: 100_120, next: XY34 })).rejects.toThrow(SafeSaveFailedError);
 
   // No half-change: the vehicle in use is still in use, with no end recorded.
   expect(storedFile().textSync()).toBe(before);

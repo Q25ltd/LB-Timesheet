@@ -1,9 +1,10 @@
 /**
  * How a mileage, a clock time, a quantity of fuel, a vehicle class and a
- * check's state are shown, wherever the app shows them.
+ * check's state are shown, wherever the app shows them — and what a failed
+ * save tells the driver.
  */
-import { VEHICLE_CLASSES, type VehicleClass } from "../shift/localShift";
-import type { VehicleCheckState } from "../shift/vehicleCheck";
+import { SafeSaveFailedError, VEHICLE_CLASSES, type VehicleClass } from "../shift/localShift";
+import { checkStateOf, isCorrected, latestCheck, type VehicleCheck, type VehicleCheckState } from "../shift/vehicleCheck";
 import type { FillSummary } from "../shift/vehicleFill";
 
 /** "class1" → "Class 1". */
@@ -40,6 +41,28 @@ export function formatMileageRange(from: number, to: number): string {
 
 function grouped(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * The time between two instants, in whole minutes: "8 min", "1 h 05 min",
+ * "3 h". Minutes are rounded down — the use lasted at least this long.
+ */
+export function formatDuration(fromIso: string, toIso: string): string {
+  const minutes = Math.max(0, Math.floor((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${String(rest)} min`;
+  return rest === 0 ? `${String(hours)} h` : `${String(hours)} h ${String(rest).padStart(2, "0")} min`;
+}
+
+/**
+ * A use's check state for a DETAIL screen: as `CHECK_STATE_LABEL`, and a
+ * completed check that has been corrected says so (D36). Active Shift's cards
+ * keep the plain "Checks completed" — revision history is not theirs to show.
+ */
+export function checkDetailLabel(checks: readonly VehicleCheck[]): string {
+  const state = checkStateOf(checks);
+  return state === "completed" && isCorrected(latestCheck(checks)) ? "Completed · corrected" : CHECK_STATE_LABEL[state];
 }
 
 /** An instant, as a plain local clock time: "05:42". */
@@ -91,4 +114,20 @@ export function fillSummaryText(summary: FillSummary): { amount: string; detail:
     amount: `${formatLitres(summary.knownLitres)} known`,
     detail: plural(summary.unknownCount, "amount unknown", "amounts unknown"),
   };
+}
+
+/** What most failed saves honestly say. */
+const NOTHING_CHANGED = "Nothing was changed. Please try again.";
+
+/** What a save that failed on the disk says (`SafeSaveFailedError`). Never "nothing was changed". */
+export const SAFE_SAVE_FAILED = "The change could not be saved safely. Your shift data has been preserved. Try again.";
+
+/**
+ * The body of a failed save's alert. `usual` is what that screen says when a
+ * refusal left the day untouched; a failure of the save itself says
+ * `SAFE_SAVE_FAILED` instead, because the old day file may already be gone.
+ * Decided by the error's type, never its text.
+ */
+export function saveFailureMessage(error: unknown, usual: string = NOTHING_CHANGED): string {
+  return error instanceof SafeSaveFailedError ? SAFE_SAVE_FAILED : usual;
 }

@@ -16,6 +16,7 @@ import { Redirect, router } from "expo-router";
 import { AddVehicleScreen } from "../../src/screens/AddVehicleScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { addVehicleToOpenShift, readOpenShift, type VehicleDetails } from "../../src/shift/localShift";
+import { saveFailureMessage } from "../../src/screens/format";
 
 type Where = "loading" | "no-shift" | "has-vehicle" | "ready";
 
@@ -49,12 +50,18 @@ export default function AddVehicleRoute() {
  */
 async function add(vehicle: VehicleDetails): Promise<void> {
   try {
-    const shift = await addVehicleToOpenShift({ vehicle, startedAt: new Date() });
+    const startedAt = new Date();
+    const shift = await addVehicleToOpenShift({ vehicle, startedAt });
     // The day was discarded or finished while this form was open.
     if (shift === null) { router.replace("/today"); return; }
+    // Add is not change: with a vehicle already there the store keeps it. Say
+    // so, rather than let the vehicle just typed vanish as if it were added.
+    if (shift.vehicle?.startedAt !== startedAt.toISOString()) {
+      Alert.alert("Nothing was saved", "A vehicle is already in use. Use Change to take another.");
+    }
     router.dismissTo("/active-shift");
   } catch (error: unknown) {
-    Alert.alert("Couldn't add the vehicle", "Nothing was changed. Please try again.");
+    Alert.alert("Couldn't add the vehicle", saveFailureMessage(error));
     throw error;
   }
 }

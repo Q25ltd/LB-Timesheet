@@ -18,6 +18,7 @@ import { Redirect, router, useFocusEffect, useLocalSearchParams } from "expo-rou
 import { VehicleUsageScreen } from "../../src/screens/VehicleUsageScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { USAGE_STATE, correctEndMileage, readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { saveFailureMessage } from "../../src/screens/format";
 
 export default function VehicleUsageRoute() {
   const { usage } = useLocalSearchParams<{ usage?: string }>();
@@ -42,6 +43,9 @@ export default function VehicleUsageRoute() {
     <VehicleUsageScreen
       use={use}
       onLeave={() => { router.back(); }}
+      onVehicleChecks={() => {
+        router.push({ pathname: "/vehicle-check", params: { usage: use.startedAt, usageState: USAGE_STATE.ended } });
+      }}
       onFills={type => {
         router.push({ pathname: "/vehicle-fill", params: { type, usage: use.startedAt, usageState: USAGE_STATE.ended } });
       }}
@@ -66,7 +70,7 @@ async function saveEndMileage(
     }
     show(day);
   } catch (error: unknown) {
-    Alert.alert("Couldn't save that", "Nothing was changed. Please try again.");
+    Alert.alert("Couldn't save that", saveFailureMessage(error));
     throw error;
   }
 }

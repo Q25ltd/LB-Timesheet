@@ -81,6 +81,8 @@ function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
     startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
     vehicle: null,
     previousVehicles: [],
+    trailer: null,
+    previousTrailers: [],
     status: "open",
     createdAt: new Date(2026, 8, 13, 5, 42).toISOString(),
     ...over,
@@ -94,7 +96,7 @@ function show(shift: LocalShift, onDiscard: () => void = () => undefined): Promi
     <SafeAreaProvider initialMetrics={METRICS}>
       <ActiveShiftScreen
         shift={shift} onDiscard={onDiscard} onAddVehicle={() => undefined}
-        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
       />
     </SafeAreaProvider>,
   );
@@ -318,12 +320,18 @@ test("a Class 1 is a UNIT; a van is not, because drivers do not call it one", as
   expect(van.getByTestId("change-vehicle").props.accessibilityLabel).toBe("Change Vehicle");
 });
 
-test("NO trailer is fabricated — not a number, not a state, not an empty row", async () => {
+test("NO trailer is fabricated — a unit with none says 'No trailer', never a number, a type or a state", async () => {
   // Class 1 is the tempting case: it pulls a trailer, and none was recorded.
-  const text = renderedText(await show(shiftWith({ vehicle: { ...LORRY, vehicleClass: "class1" } })));
+  // D34 replaced "nothing at all" with an honest "No trailer" and Add Trailer.
+  const view = await show(shiftWith({ vehicle: { ...LORRY, vehicleClass: "class1" } }));
+  const text = renderedText(view);
 
-  expect(text).not.toContain("Trailer");
-  expect(text).not.toContain("No trailer");
+  expect(view.queryByTestId("no-trailer")).not.toBeNull();
+  expect(view.queryByTestId("trailer-number-value")).toBeNull();
+  expect(view.queryByTestId("trailer-type-value")).toBeNull();
+  for (const invented of ["Trailer: None", "Standard", "Refrigerated", "Fridge Diesel", "Trailer checks", "Checks not completed"]) {
+    expect(text).not.toContain(invented);
+  }
 });
 
 test("there is no COMBINED vehicle-and-trailer check workflow", async () => {
@@ -618,7 +626,7 @@ function showWith(shift: LocalShift, handlers: Partial<{
         onVehicleChecks={handlers.onVehicleChecks ?? (() => undefined)}
         onChangeVehicle={handlers.onChangeVehicle ?? (() => undefined)}
         onFill={handlers.onFill ?? (() => undefined)}
-        onOpenUsage={handlers.onOpenUsage ?? (() => undefined)}
+        onOpenUsage={handlers.onOpenUsage ?? (() => undefined)} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
       />
     </SafeAreaProvider>,
   );
@@ -708,14 +716,14 @@ test("folding is screen state only: it survives a re-render of the same day, and
     <SafeAreaProvider initialMetrics={METRICS}>
       <ActiveShiftScreen
         shift={{ ...shift }} onDiscard={() => undefined} onAddVehicle={() => undefined}
-        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
       />
     </SafeAreaProvider>,
   );
 
   expect(isExpanded(view)).toBe(false);
   // Nothing about the card reached the day it renders.
-  expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "previousVehicles", "startedAt", "status", "vehicle", "workingFor"]);
+  expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "previousTrailers", "previousVehicles", "startedAt", "status", "trailer", "vehicle", "workingFor"]);
   expect(Object.keys(LORRY).sort()).toEqual(["checks", "fills", "numberPlate", "startMileage", "startedAt", "vehicleClass"]);
 });
 
@@ -728,7 +736,7 @@ test("a NEW vehicle use opens its card again, so its checks are the first thing 
     <SafeAreaProvider initialMetrics={METRICS}>
       <ActiveShiftScreen
         shift={shiftWith({ vehicle: next })} onDiscard={() => undefined} onAddVehicle={() => undefined}
-        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
+        onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
       />
     </SafeAreaProvider>,
   );

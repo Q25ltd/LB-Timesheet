@@ -16,12 +16,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Text, Pressable, View as RNView, ScrollView, TextInput, DeviceEventEmitter } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
-import { VehicleCheckScreen, revealOffset, visibleArea } from "../screens/VehicleCheckScreen";
+import { VehicleCheckScreen, revealOffset, vehicleCheckSubject, visibleArea } from "../screens/VehicleCheckScreen";
 import VehicleCheckRoute from "../../app/(app)/vehicle-check";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
 import { checklistFor, checklistItems } from "../shift/checklists";
 import * as localShift from "../shift/localShift";
 import {
+  USAGE_STATE,
   clearOpenShift,
   completeVehicleCheck,
   readOpenShift,
@@ -48,6 +49,8 @@ jest.mock("expo-router", () => {
       dismissTo: (href: string): void => { mockRouter.dismissTo(href); },
     },
     Redirect: ({ href }: { href: string }) => react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Vehicle Checks for the vehicle in use are opened with no parameters.
+    useLocalSearchParams: () => ({}),
     useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });
@@ -103,7 +106,7 @@ async function openScreen(details: VehicleDetails = UNIT, check: VehicleCheck | 
   const onExit = jest.fn(() => undefined);
   const view = await wrap(
     <VehicleCheckScreen
-      vehicle={vehicleOf(details)} checklist={checklistFor(details.vehicleClass)} check={check}
+      subject={vehicleCheckSubject(vehicleOf(details))} checklist={checklistFor(details.vehicleClass)} check={check}
       onSave={onSave} onComplete={onComplete} onExit={onExit}
     />,
   );
@@ -327,7 +330,7 @@ test("rapid repeated Complete taps complete ONCE, with every answer", async () =
   const onComplete: AnswersMock = jest.fn((_answers: CheckAnswer[]) => new Promise<void>(() => { /* in flight */ }));
   const view = await wrap(
     <VehicleCheckScreen
-      vehicle={vehicleOf()} checklist={checklistFor("class1")} check={null}
+      subject={vehicleCheckSubject(vehicleOf())} checklist={checklistFor("class1")} check={null}
       onSave={() => Promise.resolve()} onComplete={onComplete} onExit={() => undefined}
     />,
   );
@@ -808,7 +811,7 @@ test("completing stores the completion time, returns to the shift, and Active Sh
   const vehicleStartedAt = shift.vehicle?.startedAt ?? "";
   // Every row but one already answered, as a driver part-way through.
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt, checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleStartedAt, usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").filter(key => key !== "horn").map(key => ({ key, result: "pass", note: "" })),
   });
   const before = Date.now();
@@ -864,7 +867,7 @@ test("a draft carries no completion time and no driver — defaults on screen ch
 test("rapid Complete taps through the route store ONE completed check", async () => {
   const shift = await dayWith();
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })),
   });
   const view = await openRoute();
@@ -910,7 +913,7 @@ test("with no vehicle there is nothing to check — back to Active Shift; with n
 test("a COMPLETED check is still reachable from Active Shift — demoted, not disabled", async () => {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })), completedAt: new Date(), completedBy: "user_1",
   });
 
@@ -920,18 +923,19 @@ test("a COMPLETED check is still reachable from Active Shift — demoted, not di
   // It is no longer the filled next action, but the record stays openable.
   expect(stateOf(view, "vehicle-checks").disabled).toBe(false);
   await press(view, "vehicle-checks");
-  expect(mockRouter.push).toHaveBeenCalledWith("/vehicle-check");
+  // For EXACTLY the use in the card.
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.startedAt, usageState: "in-use" } });
 });
 
 test("Active Shift opens the check, and its row follows Not completed → In progress → Completed", async () => {
   const shift = await dayWith();
-  const target = { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", checkId: "c1", startedAt: STARTED_AT };
+  const target = { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT };
 
   const notYet = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(notYet.queryByTestId("vehicle-checks")).not.toBeNull(); });
   expect(text(notYet, "vehicle-checks-state")).toBe("Not completed");
   await press(notYet, "vehicle-checks");
-  expect(mockRouter.push).toHaveBeenCalledWith("/vehicle-check");
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.startedAt, usageState: "in-use" } });
   await notYet.unmount();
 
   // A real change: Horn starts at OK. (OK would be no change at all, and a

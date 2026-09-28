@@ -1,5 +1,8 @@
 /**
- * Add Fuel / Add AdBlue — what went into one vehicle use, and when.
+ * Add Fuel / Add AdBlue / Add Fridge Diesel — what went into one asset use,
+ * and when. The vehicle's Fuel and AdBlue and a refrigerated trailer's fridge
+ * diesel share this form and its rules, never a list: the caller says what is
+ * being recorded and hands over only that use's entries of that kind.
  *
  * ════════════════════════════════════════════════════════════════════════════
  * FAST FOR A DRIVER STANDING AT A PUMP
@@ -46,11 +49,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
   FILL_NOTE_MAX_LENGTH,
-  fillTypeLabel,
-  fillsOfType,
   parseLitres,
-  type FillType,
-  type VehicleFill,
+  type FillRecord,
 } from "../shift/vehicleFill";
 import {
   BackButton,
@@ -73,20 +73,25 @@ export interface FillEntry {
   note: string;
 }
 
-/** The one vehicle use this screen records against. */
+/** The one asset use this screen records against. */
 export interface FillUsage {
-  numberPlate: string;
+  /** The vehicle's plate or the trailer's number. */
+  name: string;
   /**
    * When an ENDED use ran — "05:30–10:00" — so a driver correcting one of two
    * uses of the same registration can see which. `null` for the vehicle in
    * use, which the plate alone names.
    */
   hours: string | null;
-  fills: readonly VehicleFill[];
+  /** This use's entries of the kind being recorded — nothing else. */
+  fills: readonly FillRecord[];
 }
 
 interface VehicleFillScreenProps {
-  type: FillType;
+  /** What is being recorded, as the driver reads it: "Fuel", "AdBlue", "Fridge Diesel". */
+  label: string;
+  /** What it went into, for the list heading: "vehicle" or "trailer". */
+  asset: string;
   usage: FillUsage;
   onLeave: () => void;
   /** Store the fill on this screen's use. Rejects if it could not be stored. */
@@ -97,10 +102,9 @@ interface VehicleFillScreenProps {
 
 type Amount = "known" | "unknown" | null;
 
-export function VehicleFillScreen({ type, usage, onLeave, onSave, onRemove }: VehicleFillScreenProps) {
+export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemove }: VehicleFillScreenProps) {
   const insets = useSafeAreaInsets();
-  const label = fillTypeLabel(type);
-  const recorded = fillsOfType(usage.fills, type);
+  const recorded = usage.fills;
 
   const time = useTimeOfDay(() => new Date());
   const [amount, setAmount] = useState<Amount>(null);
@@ -118,7 +122,7 @@ export function VehicleFillScreen({ type, usage, onLeave, onSave, onRemove }: Ve
   const litresInvalid = amount === "known" && litresText.trim() !== "" && litres === null;
   const complete = time.valid && (amount === "unknown" || (amount === "known" && litres !== null));
 
-  function edit(fill: VehicleFill) {
+  function edit(fill: FillRecord) {
     setEditing(fill.id);
     setEditingAt(new Date(fill.recordedAt));
     setAmount(fill.litres === null ? "unknown" : "known");
@@ -176,7 +180,7 @@ export function VehicleFillScreen({ type, usage, onLeave, onSave, onRemove }: Ve
           {editing === null ? `Add ${label}` : `Edit ${label}`}
         </Text>
         <Text style={styles.subtitle} testID="fill-vehicle">
-          {usage.hours === null ? usage.numberPlate : `${usage.numberPlate} · ${usage.hours}`}
+          {usage.hours === null ? usage.name : `${usage.name} · ${usage.hours}`}
         </Text>
 
         <FormSection label="TIME">
@@ -256,7 +260,7 @@ export function VehicleFillScreen({ type, usage, onLeave, onSave, onRemove }: Ve
 
         {recorded.length === 0 ? null : (
           <>
-            <Text style={styles.sectionLabel} testID="recorded-label">{`${label.toUpperCase()} ON THIS VEHICLE`}</Text>
+            <Text style={styles.sectionLabel} testID="recorded-label">{`${label.toUpperCase()} ON THIS ${asset.toUpperCase()}`}</Text>
             <View style={formStyles.card} testID="recorded-fills">
               {recorded.map((fill, index) => (
                 <Pressable

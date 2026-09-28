@@ -11,11 +11,13 @@
  * and the store would refuse a second anyway (`shift/localShift.ts`).
  */
 import { useEffect, useState } from "react";
+import { Alert } from "react-native";
 import { router } from "expo-router";
 import { StartShiftScreen } from "../../src/screens/StartShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
 import { readOpenShift, startLocalShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
+import { saveFailureMessage } from "../../src/screens/format";
 
 export default function StartShiftRoute() {
   const { account } = useAuth();
@@ -46,8 +48,13 @@ export default function StartShiftRoute() {
       onStart={(input: { workingFor: WorkingContext; startedAt: Date; vehicle: VehicleDetails | null }) => {
         // Local only: this cannot fail for want of a network, and it cannot
         // create a second day. `replace`, not `navigate` — the form must not
-        // be behind the back gesture once the shift is running.
-        void startLocalShift(input).then(() => { router.replace("/active-shift"); });
+        // be behind the back gesture once the shift is running. It CAN fail on
+        // the phone's own storage — an unreadable earlier day that could not
+        // be moved aside, or a failed save (D37) — and the driver is told.
+        void startLocalShift(input).then(
+          () => { router.replace("/active-shift"); },
+          (error: unknown) => { Alert.alert("Couldn't start the shift", saveFailureMessage(error)); },
+        );
       }}
     />
   );

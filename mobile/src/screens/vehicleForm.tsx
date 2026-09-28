@@ -135,6 +135,22 @@ export function VehicleFields({
   );
 }
 
+/**
+ * Why the final press is blocked: a trailer is in use, and what the driver
+ * chose would leave it with nothing to tow it — a van (D30), or no vehicle at
+ * all (D34). Shown instead of letting them press on, because the store would
+ * refuse — and handing the trailer back is the driver's own step, never a side
+ * effect of a vehicle action.
+ */
+export function HandBackTrailerFirst({ trailerNumber, because }: { trailerNumber: string; because: "van" | "no-vehicle" }) {
+  const why = because === "van" ? "A van can't tow a trailer." : "The trailer needs a vehicle to tow it.";
+  return (
+    <Text style={formStyles.blocked} testID={because === "van" ? "van-trailer-block" : "no-vehicle-trailer-block"}>
+      {`${why} Hand back ${trailerNumber} first: Change Trailer, then No trailer.`}
+    </Text>
+  );
+}
+
 export function BackButton({ testID, onPress }: { testID: string; onPress: () => void }) {
   return (
     <Pressable
@@ -269,4 +285,5 @@ export const formStyles = StyleSheet.create({
   },
 
   action: { marginTop: spacing.sm },
+  blocked: { ...typography.error, marginTop: -spacing.md, marginBottom: spacing.lg, marginHorizontal: spacing.xs },
 });

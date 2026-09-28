@@ -35,8 +35,8 @@ import {
   type LocalShift,
   type UsageState,
 } from "../../src/shift/localShift";
-import { FILL_TYPES, type FillType } from "../../src/shift/vehicleFill";
-import { formatClockTime } from "../../src/screens/format";
+import { FILL_TYPES, fillTypeLabel, fillsOfType, type FillType } from "../../src/shift/vehicleFill";
+import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
 
 export default function VehicleFillRoute() {
   const { type, usage, usageState } = useLocalSearchParams<{ type?: string; usage?: string; usageState?: string }>();
@@ -60,13 +60,14 @@ export default function VehicleFillRoute() {
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href="/today" />;
 
-  const target = fillUsage(shift, usage, state);
+  const target = fillUsage(shift, usage, state, fillType);
   if (target === null) return <Redirect href="/active-shift" />;
 
   const named = { shiftId: shift.id, vehicleStartedAt: usage, usageState: state };
   return (
     <VehicleFillScreen
-      type={fillType}
+      label={fillTypeLabel(fillType)}
+      asset="vehicle"
       usage={target}
       onLeave={() => { router.back(); }}
       onSave={entry => save(named, fillType, entry, setShift)}
@@ -79,18 +80,18 @@ export default function VehicleFillRoute() {
  * The use named, in the state the opener expected — or `null`. By `startedAt`
  * alone: a day may hold the same registration three times.
  */
-function fillUsage(shift: LocalShift, startedAt: string, state: UsageState): FillUsage | null {
+function fillUsage(shift: LocalShift, startedAt: string, state: UsageState, type: FillType): FillUsage | null {
   if (state === USAGE_STATE.inUse) {
     const current = shift.vehicle;
     if (current?.startedAt !== startedAt) return null;
-    return { numberPlate: current.numberPlate, hours: null, fills: current.fills };
+    return { name: current.numberPlate, hours: null, fills: fillsOfType(current.fills, type) };
   }
   const ended = shift.previousVehicles.find(use => use.startedAt === startedAt);
   if (ended === undefined) return null;
   return {
-    numberPlate: ended.numberPlate,
+    name: ended.numberPlate,
     hours: `${formatClockTime(ended.startedAt)}–${formatClockTime(ended.endedAt)}`,
-    fills: ended.fills,
+    fills: fillsOfType(ended.fills, type),
   };
 }
 
@@ -111,7 +112,7 @@ async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: S
     });
     settle(day, show);
   } catch (error: unknown) {
-    Alert.alert("Couldn't save that", "Nothing was changed. Please try again.");
+    Alert.alert("Couldn't save that", saveFailureMessage(error));
     throw error;
   }
 }
@@ -120,7 +121,7 @@ async function remove(named: NamedUsage, fillId: string, show: Show): Promise<vo
   try {
     settle(await removeVehicleFill({ ...named, fillId }), show);
   } catch (error: unknown) {
-    Alert.alert("Couldn't remove that", "Nothing was changed. Please try again.");
+    Alert.alert("Couldn't remove that", saveFailureMessage(error));
     throw error;
   }
 }

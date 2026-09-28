@@ -63,6 +63,11 @@
  * checklist that adds, retires, renames, re-sections or re-defaults a row
  * changes nothing about what an earlier certificate appears to contain.
  *
+ * A MISTAKE IS CORRECTED, NEVER OVERWRITTEN (D36). The certified rows,
+ * `completedAt` and `completedBy` stay as they are; a correction is appended
+ * to `revisions` as a complete snapshot of its own, and the latest one is the
+ * effective result every screen shows (`effectiveItems`).
+ *
  * Records completed before sections were stored keep their rows, labels,
  * results and order, and are shown as one list. Their sections are NOT
  * reconstructed from today's checklist: where a row sat when the driver signed
@@ -141,6 +146,43 @@ export interface VehicleCheck {
   completedBy: string | null;
   /** Answered items only, in checklist order. Unanswered is absence. */
   items: CheckItem[];
+  /**
+   * CORRECTIONS to a completed check, oldest first — append-only. Absent means
+   * none, and is how every check from before corrections existed is stored:
+   * it reads as the original snapshot and zero revisions, and is never
+   * rewritten to add an empty list. `items`, `completedAt` and `completedBy`
+   * stay exactly as first certified; the LAST revision is the effective result.
+   */
+  revisions?: CheckRevision[];
+}
+
+/**
+ * One confirmed correction of a completed check: a COMPLETE snapshot — every
+ * row, with its section and any defect description — and who made it, when.
+ * Never edited once written; a later mistake is corrected by the next one.
+ */
+export interface CheckRevision {
+  /** Stable id: a repeated confirmation of one correction is one revision. */
+  id: string;
+  /** The device clock when the driver confirmed the correction — never backdated. */
+  revisedAt: string;
+  /** The signed-in driver who made the correction. */
+  revisedBy: string;
+  items: CheckItem[];
+}
+
+/**
+ * What a completed check says NOW: its latest revision, or the original
+ * snapshot when it was never corrected. What every screen shows.
+ */
+export function effectiveItems(check: VehicleCheck): CheckItem[] {
+  const latest = check.revisions?.[check.revisions.length - 1];
+  return latest?.items ?? check.items;
+}
+
+/** Whether a completed check has been corrected at least once. */
+export function isCorrected(check: VehicleCheck | null): boolean {
+  return (check?.revisions?.length ?? 0) > 0;
 }
 
 /** One answer as the driver is giving it — the description as typed. */
@@ -150,7 +192,7 @@ export interface CheckAnswer {
   note: string;
 }
 
-const CHECKLIST_IDS: readonly string[] = ["hgv-unit", "hgv-rigid", "van"];
+const CHECKLIST_IDS: readonly string[] = ["hgv-unit", "hgv-rigid", "van", "trailer-standard", "trailer-refrigerated"];
 
 /**
  * Narrow stored data to a check, or reject it.
@@ -166,7 +208,7 @@ const CHECKLIST_IDS: readonly string[] = ["hgv-unit", "hgv-rigid", "van"];
  * were stored), each section one unbroken run of rows under one title. Any
  * other layout is not a record this app made, and is not shown as one.
  */
-export function asVehicleCheck(value: unknown): VehicleCheck | null {
+function asVehicleCheck(value: unknown): VehicleCheck | null {
   if (typeof value !== "object" || value === null) return null;
   const { id, checklist, checklistVersion, startedAt, status, completedAt, items } = value as Record<string, unknown>;
 
@@ -184,48 +226,29 @@ export function asVehicleCheck(value: unknown): VehicleCheck | null {
   } else if (completedAt !== null || (completedBy !== null && completedBy !== undefined)) {
     return null;
   }
-  if (!Array.isArray(items)) return null;
+  const parsed = parseItems(items, status === CHECK_STATUS.completed);
+  if (parsed === null) return null;
 
-  const parsed: CheckItem[] = [];
-  const seen = new Set<string>();
-  const sectionIds = new Set<string>();
-  let previous: CheckSection | null = null;
-  for (const raw of items) {
-    if (typeof raw !== "object" || raw === null) return null;
-    const { key, label, section, result, note } = raw as Record<string, unknown>;
-    if (typeof key !== "string" || key === "" || seen.has(key)) return null;
-    if (typeof label !== "string" || label === "") return null;
-    if (typeof result !== "string" || !RESULTS.includes(result)) return null;
-    if (result === CHECK_RESULT.defect) {
-      if (note !== null && typeof note !== "string") return null;
-      if (typeof note === "string" && note.length > DEFECT_NOTE_MAX_LENGTH) return null;
-      if (status === CHECK_STATUS.completed && (typeof note !== "string" || note.trim() === "")) return null;
-    } else if (note !== null) {
-      return null;
+  // Corrections belong to a COMPLETED check only, and each is itself a
+  // complete, sectioned snapshot with its own author and time.
+  const { revisions } = value as Record<string, unknown>;
+  let parsedRevisions: CheckRevision[] | undefined;
+  if (revisions !== undefined) {
+    if (status !== CHECK_STATUS.completed || !Array.isArray(revisions)) return null;
+    parsedRevisions = [];
+    const revisionIds = new Set<string>();
+    for (const raw of revisions) {
+      if (typeof raw !== "object" || raw === null) return null;
+      const { id: revisionId, revisedAt, revisedBy, items: revisedItems } = raw as Record<string, unknown>;
+      if (typeof revisionId !== "string" || revisionId === "" || revisionIds.has(revisionId)) return null;
+      if (typeof revisedAt !== "string" || Number.isNaN(Date.parse(revisedAt))) return null;
+      if (typeof revisedBy !== "string" || revisedBy === "") return null;
+      const snapshot = parseItems(revisedItems, true);
+      if (snapshot === null || snapshot.length === 0 || snapshot.some(item => item.section === undefined)) return null;
+      revisionIds.add(revisionId);
+      parsedRevisions.push({ id: revisionId, revisedAt, revisedBy, items: snapshot });
     }
-    seen.add(key);
-    const item: CheckItem = { key, label, result: result as CheckResult, note };
-
-    if (section !== undefined) {
-      if (status !== CHECK_STATUS.completed) return null;
-      if (typeof section !== "object" || section === null) return null;
-      const { id: sectionId, title } = section as Record<string, unknown>;
-      if (typeof sectionId !== "string" || sectionId === "") return null;
-      if (typeof title !== "string" || title === "") return null;
-      const recorded: CheckSection = { id: sectionId, title };
-      const continues = previous !== null && previous.id === sectionId;
-      if (continues && previous?.title !== title) return null;
-      if (!continues) {
-        if (sectionIds.has(sectionId)) return null;
-        sectionIds.add(sectionId);
-      }
-      item.section = recorded;
-      previous = recorded;
-    }
-    parsed.push(item);
   }
-  const sectioned = parsed.filter(item => item.section !== undefined).length;
-  if (sectioned !== 0 && sectioned !== parsed.length) return null;
 
   return {
     id,
@@ -236,7 +259,62 @@ export function asVehicleCheck(value: unknown): VehicleCheck | null {
     completedAt: status === CHECK_STATUS.completed ? completedAt : null,
     completedBy: status === CHECK_STATUS.completed && typeof completedBy === "string" ? completedBy : null,
     items: parsed,
+    ...(parsedRevisions === undefined ? {} : { revisions: parsedRevisions }),
   };
+}
+
+/**
+ * An asset use's checks — a vehicle's or a trailer's — keeping only those that
+ * can be read as what they are against THAT use's checklist.
+ *
+ * A DRAFT holds only the rows the driver CHANGED from the checklist's
+ * defaults, so it is read against the version it was written for: its items
+ * must be items of that checklist. A COMPLETED check holds every row with its
+ * own label and result and is read as it stands, whatever the checklist says
+ * now — a finished record is evidence, and a later change to a default must
+ * never reinterpret it.
+ *
+ * ABSENT means none — every build before Vehicle Checks stored vehicles
+ * without the field, and no check was ever made on them.
+ *
+ * A check that cannot be read is DROPPED, not repaired and not allowed to
+ * take the day with it. The safe direction is unambiguous: a lost check reads
+ * as "Not completed" and the driver checks again; a guessed one could read as
+ * a vehicle that passed. And unlike a broken vehicle, a broken check is no
+ * reason to report that the driver has no open day at all — that would let a
+ * new day overwrite this one, start time and all.
+ *
+ * Readable means: structurally a check (`asVehicleCheck`) for THIS vehicle's
+ * checklist. A draft must be for the current version, every item a real item
+ * of it; a completed check must carry rows of its own — all of them, if it
+ * claims the current version. A second check with an id already seen is
+ * dropped too.
+ */
+export function readChecksFor(value: unknown, checklist: Checklist): VehicleCheck[] {
+  if (!Array.isArray(value)) return [];
+  const keys = new Set(checklistItems(checklist).map(entry => entry.key));
+  const ids = new Set<string>();
+  const checks: VehicleCheck[] = [];
+  for (const raw of value) {
+    const check = asVehicleCheck(raw);
+    if (check === null || ids.has(check.id)) continue;
+    if (check.checklist !== checklist.id) continue;
+    if (check.status === CHECK_STATUS.completed) {
+      // Self-describing: every row, with the label and result recorded then.
+      if (check.items.length === 0) continue;
+      if (check.checklistVersion === checklist.version && check.items.length !== keys.size) continue;
+      // Every correction of it is complete in the same way.
+      if (check.checklistVersion === checklist.version && (check.revisions ?? []).some(revision => revision.items.length !== keys.size)) continue;
+    } else {
+      // Overrides, which only mean anything against the version they were
+      // written for.
+      if (check.checklistVersion !== checklist.version) continue;
+      if (!check.items.every(entry => keys.has(entry.key))) continue;
+    }
+    ids.add(check.id);
+    checks.push(check);
+  }
+  return checks;
 }
 
 /**
@@ -251,7 +329,8 @@ export function asVehicleCheck(value: unknown): VehicleCheck | null {
 export function resultsOf(checklist: Checklist, check: VehicleCheck | null): Map<string, CheckAnswer> {
   const answers = new Map<string, CheckAnswer>();
   if (check?.status === CHECK_STATUS.completed) {
-    for (const item of check.items) answers.set(item.key, { key: item.key, result: item.result, note: item.note ?? "" });
+    // The EFFECTIVE result: the latest correction, or the original.
+    for (const item of effectiveItems(check)) answers.set(item.key, { key: item.key, result: item.result, note: item.note ?? "" });
     return answers;
   }
   for (const entry of checklistItems(checklist)) {
@@ -295,7 +374,7 @@ export function sectionsOf(checklist: Checklist, check: VehicleCheck | null): Sh
     }));
   }
   const shown: ShownSection[] = [];
-  for (const item of check.items) {
+  for (const item of effectiveItems(check)) {
     const row = { key: item.key, label: item.label };
     const id = item.section?.id ?? UNSECTIONED;
     const last = shown[shown.length - 1];
@@ -390,4 +469,56 @@ export function checkStateOf(checks: readonly VehicleCheck[]): VehicleCheckState
   // A draft's rows ARE its overrides. One whose every change was put back
   // holds none, and a driver who changed nothing has nothing in progress.
   return latest.items.length > 0 ? "in-progress" : "not-started";
+}
+
+/**
+ * The rows of a check or of one of its revisions, or `null` if any is not a
+ * row this app wrote: unique keys, a known result, a description only on a
+ * defect (and never blank on a completed one), and — on a completed record —
+ * sections on every row or on none, each one unbroken run.
+ */
+function parseItems(items: unknown, completed: boolean): CheckItem[] | null {
+  const parsed: CheckItem[] = [];
+  const seen = new Set<string>();
+  const sectionIds = new Set<string>();
+  let previous: CheckSection | null = null;
+  if (!Array.isArray(items)) return null;
+  for (const raw of items) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const { key, label, section, result, note } = raw as Record<string, unknown>;
+    if (typeof key !== "string" || key === "" || seen.has(key)) return null;
+    if (typeof label !== "string" || label === "") return null;
+    if (typeof result !== "string" || !RESULTS.includes(result)) return null;
+    if (result === CHECK_RESULT.defect) {
+      if (note !== null && typeof note !== "string") return null;
+      if (typeof note === "string" && note.length > DEFECT_NOTE_MAX_LENGTH) return null;
+      if (completed && (typeof note !== "string" || note.trim() === "")) return null;
+    } else if (note !== null) {
+      return null;
+    }
+    seen.add(key);
+    const item: CheckItem = { key, label, result: result as CheckResult, note };
+
+    if (section !== undefined) {
+      if (!completed) return null;
+      if (typeof section !== "object" || section === null) return null;
+      const { id: sectionId, title } = section as Record<string, unknown>;
+      if (typeof sectionId !== "string" || sectionId === "") return null;
+      if (typeof title !== "string" || title === "") return null;
+      const recorded: CheckSection = { id: sectionId, title };
+      const continues = previous !== null && previous.id === sectionId;
+      if (continues && previous?.title !== title) return null;
+      if (!continues) {
+        if (sectionIds.has(sectionId)) return null;
+        sectionIds.add(sectionId);
+      }
+      item.section = recorded;
+      previous = recorded;
+    }
+    parsed.push(item);
+  }
+  const sectioned = parsed.filter(item => item.section !== undefined).length;
+  if (sectioned !== 0 && sectioned !== parsed.length) return null;
+
+  return parsed;
 }

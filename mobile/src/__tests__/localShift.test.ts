@@ -164,6 +164,10 @@ test("COLD START: a shift this module never created is recovered from the file a
     startedAt: STARTED_AT.toISOString(),
     vehicle: { ...LORRY, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] },
     previousVehicles: [],
+    // The current shape. A day saved before trailers existed is proven to
+    // load in `trailerStore.test.ts`.
+    trailer: null,
+    previousTrailers: [],
     status: "open",
     createdAt: STARTED_AT.toISOString(),
   };

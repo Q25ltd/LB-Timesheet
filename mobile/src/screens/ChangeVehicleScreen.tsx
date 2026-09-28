@@ -61,10 +61,12 @@ import {
   type VehicleDetails,
 } from "../shift/localShift";
 import type { UsedVehicle } from "../shift/usedVehicles";
+import { towsTrailers } from "../shift/trailer";
 import {
   BackButton,
   Choice,
   FormSection,
+  HandBackTrailerFirst,
   VehicleFields,
   formStyles,
   keyboardSafeScrollProps,
@@ -92,6 +94,11 @@ interface ChangeVehicleScreenProps {
   current: LocalVehicle;
   /** Vehicles used earlier today that it may be changed to. */
   candidates: readonly UsedVehicle[];
+  /**
+   * The number of the trailer in use, or `null`. While one is in use neither a
+   * van nor No vehicle may follow: the final press is blocked and says why (D34).
+   */
+  trailerInUse: string | null;
   /** Leave without changing anything. */
   onLeave: () => void;
   /** Store the change. Rejects if it could not be stored; the form stays open. */
@@ -109,7 +116,7 @@ function classLabel(id: VehicleClass): string {
   return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
 }
 
-export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }: ChangeVehicleScreenProps) {
+export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave, onConfirm }: ChangeVehicleScreenProps) {
   const insets = useSafeAreaInsets();
   const isUnit = current.vehicleClass === "class1";
   const noun = isUnit ? "unit" : "vehicle";
@@ -247,7 +254,8 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
   } else if (step.kind === "none") {
     // Nothing else to ask: the end mileage is already given, and there is no
     // vehicle to describe or to check.
-    const change: VehicleChange | null = endMileage === null
+    const trailerBlocks = trailerInUse !== null;
+    const change: VehicleChange | null = endMileage === null || trailerBlocks
       ? null
       : { endMileage, next: null, performChecks: false };
     body = (
@@ -269,6 +277,7 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
           This is not Finish Shift — that is still yours to do at the end of the day. Fuel and AdBlue need a
           vehicle, so they stay unavailable until you add one.
         </Text>
+        {trailerBlocks ? <HandBackTrailerFirst trailerNumber={trailerInUse} because="no-vehicle" /> : null}
         <View style={formStyles.action}>
           <PrimaryButton
             label="Continue Without a Vehicle"
@@ -285,8 +294,9 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
     // Named for the vehicle being taken, not the one being put down: a driver
     // in a unit may be going back to this morning's van.
     const nextIsUnit = vehicle.vehicleClass === "class1";
+    const vanBlocked = trailerInUse !== null && !towsTrailers(vehicle.vehicleClass);
     const startMileage = parseMileage(reuseMileage);
-    const change = endMileage !== null && startMileage !== null && performChecks !== null
+    const change = !vanBlocked && endMileage !== null && startMileage !== null && performChecks !== null
       ? {
           endMileage,
           next: { vehicleClass: vehicle.vehicleClass, numberPlate: vehicle.numberPlate, startMileage },
@@ -334,6 +344,7 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
         <Text style={styles.hint}>
           It may have been used or changed while you were away. An earlier check is not carried over.
         </Text>
+        {vanBlocked && trailerInUse !== null ? <HandBackTrailerFirst trailerNumber={trailerInUse} because="van" /> : null}
         <View style={formStyles.action}>
           <PrimaryButton
             label={title}
@@ -346,7 +357,8 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
       </>
     );
   } else {
-    const next = vehicleDetailsFrom(newClass, newPlate, newMileage);
+    const vanBlocked = trailerInUse !== null && newClass !== null && !towsTrailers(newClass);
+    const next = vanBlocked ? null : vehicleDetailsFrom(newClass, newPlate, newMileage);
     const change = endMileage !== null && next !== null ? { endMileage, next, performChecks: false } : null;
     body = (
       <>
@@ -358,6 +370,7 @@ export function ChangeVehicleScreen({ current, candidates, onLeave, onConfirm }:
           mileage={newMileage}
           onMileage={setNewMileage}
         />
+        {vanBlocked && trailerInUse !== null ? <HandBackTrailerFirst trailerNumber={trailerInUse} because="van" /> : null}
         <View style={formStyles.action}>
           <PrimaryButton
             label={title}

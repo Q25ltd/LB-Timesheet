@@ -30,7 +30,10 @@
  *                         checks, change, and Fuel / AdBlue as two tiles
  *                         INSIDE its card, because they are things done to
  *                         the vehicle in use and nothing else
- *   (the current trailer) its own card, directly below, when trailers exist
+ *   the current trailer   its own card, directly below: the trailer in use
+ *                         with Change Trailer and, on a refrigerated one,
+ *                         Fridge Diesel — or "No trailer" and Add Trailer
+ *                         behind a vehicle that tows one (D34)
  *   used this shift       compact rows, one per ENDED use; history, never
  *                         the workspace, so it sits below every live action
  *   below a rule          the end of the day
@@ -46,10 +49,11 @@
  * never read a field nothing writes). The fuel and AdBlue tiles DO carry a
  * total for the vehicle in use, because the driver entered one: litres they
  * gave, beside a count of the fills whose amount nobody knows. An unknown
- * amount is never shown as 0 L and never joins the litres. There is no
- * trailer either: a Class 1 pulls a semi-trailer and a Class 2 may pull a
- * drawbar, but no trailer has ever been captured, so inventing
- * "Trailer: None" would state a fact nobody established.
+ * amount is never shown as 0 L and never joins the litres. A refrigerated
+ * trailer's Fridge Diesel tile is the same arithmetic over the trailer use's
+ * own entries, and never joins the vehicle's Fuel. The trailer's check state
+ * is its OWN use's (D35), read from its own stored checks exactly as the
+ * vehicle's is — never the unit's, never an earlier use's.
  *
  * Checks are shown as the stored checks say — Not completed, In progress or
  * Completed — and never more. "Passed", "Roadworthy" and "Safe" are claims
@@ -65,8 +69,8 @@
  * A towing vehicle and its trailer are checked independently, on separate
  * screens, and either can be swapped without touching the other's state. So
  * the asset section below is ONE self-contained block — heading, identity,
- * facts, then its own actions — and the trailer becomes a second block of the
- * same shape directly beneath it when trailer data exists. Nothing above or
+ * facts, then its own actions — and the trailer is a second block of the same
+ * shape directly beneath it. Nothing above or
  * below has to move, and no combined "vehicle & trailer checks" control is
  * introduced here, because that workflow is never going to exist.
  *
@@ -81,8 +85,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
 import type { EndedVehicle, LocalShift, LocalVehicle, VehicleClass } from "../shift/localShift";
-import { checkStateOf } from "../shift/vehicleCheck";
-import { FILL_TYPES, summariseFills, type FillSummary, type FillType } from "../shift/vehicleFill";
+import { checkStateOf, type VehicleCheckState } from "../shift/vehicleCheck";
+import { FILL_TYPES, summariseFills, summariseRecords, type FillSummary, type FillType } from "../shift/vehicleFill";
+import { TRAILER_TYPE, towsTrailers, trailerTypeLabel, type EndedTrailer, type LocalTrailer } from "../shift/trailer";
 import { usageDistance, usageHistory } from "../shift/usedVehicles";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatMileage, formatMileageRange } from "./format";
@@ -122,9 +127,22 @@ interface ActiveShiftScreenProps {
   onFill: (type: FillType, usageStartedAt: string) => void;
   /** Open one ended use — named by its `startedAt`, never by plate — to read or correct. */
   onOpenUsage: (usageStartedAt: string) => void;
+  /** Open the flow that puts a trailer into a day with none in use. */
+  onAddTrailer: () => void;
+  /** Open the flow that hands the trailer in use back, for another or none. */
+  onChangeTrailer: () => void;
+  /** Record fridge diesel on the refrigerated trailer in use — named by its use's `startedAt`. */
+  onFridgeDiesel: (trailerStartedAt: string) => void;
+  /** Open the walkaround for the trailer in use — named by its use's `startedAt`. */
+  onTrailerChecks: (trailerStartedAt: string) => void;
+  /** Open one ENDED trailer use — named by its `startedAt`, never by number. */
+  onOpenTrailerUsage: (trailerStartedAt: string) => void;
 }
 
-export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage }: ActiveShiftScreenProps) {
+export function ActiveShiftScreen({
+  shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage,
+  onAddTrailer, onChangeTrailer, onFridgeDiesel, onTrailerChecks, onOpenTrailerUsage,
+}: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
   const words = assetWords(vehicle?.vehicleClass ?? null);
@@ -136,6 +154,32 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
   const [foldedUse, setFoldedUse] = useState<string | null>(null);
   const expanded = vehicle !== null && foldedUse !== vehicle.startedAt;
 
+  /** The same, for the trailer card: a NEW trailer use always opens expanded. */
+  const { trailer } = shift;
+  const [foldedTrailer, setFoldedTrailer] = useState<string | null>(null);
+  const trailerExpanded = trailer !== null && foldedTrailer !== trailer.startedAt;
+
+  /**
+   * A TRAILER JUST TAKEN folds the vehicle card, so the trailer is in view
+   * (D33). "Just taken" means a trailer use this screen has not shown before —
+   * added, or changed to — and never the one the screen opened with: a
+   * restart, or backing out of Add Trailer, folds nothing. Adjusted during
+   * render, as React recommends for state derived from a changed prop, so the
+   * folded card is the first thing drawn.
+   */
+  const trailerStart = trailer?.startedAt ?? null;
+  const [seenTrailer, setSeenTrailer] = useState(trailerStart);
+  if (trailerStart !== seenTrailer) {
+    setSeenTrailer(trailerStart);
+    if (trailerStart !== null && vehicle !== null) setFoldedUse(vehicle.startedAt);
+  }
+  /**
+   * A trailer section exists behind a vehicle that tows one. A trailer in use
+   * always has one: the day never holds a trailer with a van or with no
+   * vehicle (D34).
+   */
+  const showTrailer = vehicle !== null && towsTrailers(vehicle.vehicleClass);
+
   /**
    * Focus moving to ANOTHER section of the screen folds the current vehicle
    * card, so what the driver turned to is not pushed down by it (D33). The
@@ -143,7 +187,9 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
    */
   function focusElsewhere() {
     if (vehicle !== null) setFoldedUse(vehicle.startedAt);
+    if (trailer !== null) setFoldedTrailer(trailer.startedAt);
   }
+
   const startedAt = formatClockTime(shift.startedAt);
 
   /**
@@ -249,15 +295,45 @@ export function ActiveShiftScreen({ shift, onDiscard, onAddVehicle, onVehicleChe
             )}
         </View>
 
-        {/* ── CURRENT TRAILER goes here ──────────────────────────────────────
-            A second block of exactly the shape above: its own section label,
-            its own card, its own Trailer Checks and Change Trailer actions,
-            and its own independent check state. It is absent rather than empty
-            because no trailer has ever been recorded. */}
+        {/* CURRENT TRAILER — a second block of the shape above, its own
+            asset (D34). Absent behind a van, which tows none (D30), and with
+            no vehicle. Its check state is its own use's (D35). */}
+        {showTrailer ? (
+          <>
+            <Text style={styles.sectionLabel} testID="current-trailer-label">CURRENT TRAILER</Text>
+            <View
+              testID="current-trailer-card"
+              style={[
+                styles.card,
+                // Folded, the trailer card says whether THIS trailer use's
+                // checks are done, exactly as the vehicle card does.
+                trailer !== null && !trailerExpanded
+                  ? [styles.clipped, checkStateOf(trailer.checks) === "completed" ? styles.cardChecksDone : styles.cardChecksToDo]
+                  : null,
+              ]}
+            >
+              {trailer === null
+                ? <NoTrailer onAddTrailer={onAddTrailer} />
+                : (
+                  <CurrentTrailer
+                    trailer={trailer}
+                    expanded={trailerExpanded}
+                    onToggle={() => { setFoldedTrailer(trailerExpanded ? trailer.startedAt : null); }}
+                    onTrailerChecks={() => { onTrailerChecks(trailer.startedAt); }}
+                    onChangeTrailer={onChangeTrailer}
+                    onFridgeDiesel={() => { onFridgeDiesel(trailer.startedAt); }}
+                  />
+                )}
+            </View>
+          </>
+        ) : null}
 
         <UsedThisShift
           usages={usageHistory(shift)}
+          // Newest ended first — a reversed COPY; the day keeps its order.
+          trailers={[...shift.previousTrailers].reverse()}
           onOpenUsage={usage => { focusElsewhere(); onOpenUsage(usage); }}
+          onOpenTrailerUsage={usage => { focusElsewhere(); onOpenTrailerUsage(usage); }}
         />
 
         {/* The end of the day, held apart by a rule and a full gap so it is
@@ -333,12 +409,7 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
         <Text style={styles.collapsedPlate} testID="vehicle-plate-value" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
           {vehicle.numberPlate}
         </Text>
-        <View style={styles.collapsedStatus}>
-          {done ? <View style={styles.pillTick} /> : null}
-          <Text style={[styles.collapsedStatusText, done ? styles.pillTextDone : styles.collapsedStatusToDo]} testID="collapsed-checks-state">
-            {status}
-          </Text>
-        </View>
+        <CollapsedCheckLine done={done} testID="collapsed-checks-state" />
         <View style={[styles.disclosure, styles.disclosureClosed]} testID="current-vehicle-chevron" />
       </Pressable>
     );
@@ -382,20 +453,7 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
           </Text>
         </FactRow>
         <FactRow label="Vehicle checks">
-          {/* Read from the stored checks. Neutral while the check is still to
-              do: nothing is wrong with a shift whose checks are still to be
-              done, and a warning colour here would cry wolf every morning. Only
-              a completed check is marked — by a small tick in the check's own
-              restrained green. */}
-          <View style={[styles.pill, checkState === "completed" ? styles.pillDone : null]}>
-            {checkState === "completed" ? <View style={styles.pillTick} /> : null}
-            <Text
-              style={[styles.pillText, checkState === "completed" ? styles.pillTextDone : null]}
-              testID="vehicle-checks-state"
-            >
-              {CHECK_STATE_LABEL[checkState]}
-            </Text>
-          </View>
+          <CheckStatePill state={checkState} testID="vehicle-checks-state" />
         </FactRow>
       </View>
 
@@ -421,6 +479,132 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
           />
         ))}
       </View>
+    </View>
+  );
+}
+
+/**
+ * A check's state on an open card — read from the stored checks. Neutral while
+ * the check is still to do: nothing is wrong with a shift whose checks are
+ * still to be done, and a warning colour here would cry wolf every morning.
+ * Only a completed check is marked — by a small tick in the check's own
+ * restrained green. Vehicle and trailer alike.
+ */
+function CheckStatePill({ state, testID }: { state: VehicleCheckState; testID: string }) {
+  const done = state === "completed";
+  return (
+    <View style={[styles.pill, done ? styles.pillDone : null]}>
+      {done ? <View style={styles.pillTick} /> : null}
+      <Text style={[styles.pillText, done ? styles.pillTextDone : null]} testID={testID}>
+        {CHECK_STATE_LABEL[state]}
+      </Text>
+    </View>
+  );
+}
+
+/** The one-line check status under a folded card's name. A draft is "not completed". */
+function CollapsedCheckLine({ done, testID }: { done: boolean; testID: string }) {
+  return (
+    <View style={styles.collapsedStatus}>
+      {done ? <View style={styles.pillTick} /> : null}
+      <Text style={[styles.collapsedStatusText, done ? styles.pillTextDone : styles.collapsedStatusToDo]} testID={testID}>
+        {done ? "Checks completed" : "Checks not completed"}
+      </Text>
+    </View>
+  );
+}
+
+/** No trailer is a complete answer — never a warning, never a missing step. */
+function NoTrailer({ onAddTrailer }: { onAddTrailer: () => void }) {
+  return (
+    <View style={[styles.cardBody, styles.noTrailer]} testID="no-trailer">
+      <Text style={styles.noTrailerText}>No trailer</Text>
+      <View style={styles.noTrailerAction}>
+        <SecondaryAction label="Add Trailer" onPress={onAddTrailer} testID="add-trailer" />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The trailer in use: its number, its kind, its own check state, and what may
+ * be done to it. Collapsible exactly like the vehicle card — folded to its
+ * number over a one-line check status, on the same subtle red or green ground.
+ */
+function CurrentTrailer({ trailer, expanded, onToggle, onTrailerChecks, onChangeTrailer, onFridgeDiesel }: {
+  trailer: LocalTrailer;
+  expanded: boolean;
+  onToggle: () => void;
+  onTrailerChecks: () => void;
+  onChangeTrailer: () => void;
+  onFridgeDiesel: () => void;
+}) {
+  // THIS trailer use's checks only (D35) — never the unit's, never an
+  // earlier use of the same trailer's.
+  const checkState = checkStateOf(trailer.checks);
+  const done = checkState === "completed";
+  if (!expanded) {
+    return (
+      <Pressable
+        testID="current-trailer-toggle"
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={`Trailer ${trailer.trailerNumber}. ${done ? "Checks completed" : "Checks not completed"}`}
+        accessibilityHint="Shows this trailer's actions"
+        accessibilityState={{ expanded: false }}
+        style={({ pressed }) => [styles.collapsed, pressed ? styles.collapsedPressed : null]}
+      >
+        <Text style={styles.collapsedPlate} testID="trailer-number-value" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+          {trailer.trailerNumber}
+        </Text>
+        <CollapsedCheckLine done={done} testID="collapsed-trailer-checks-state" />
+        <View style={[styles.disclosure, styles.disclosureClosed]} testID="current-trailer-chevron" />
+      </Pressable>
+    );
+  }
+  const refrigerated = trailer.trailerType === TRAILER_TYPE.refrigerated;
+  return (
+    <View style={styles.cardBody} testID="active-trailer">
+      <Pressable
+        testID="current-trailer-toggle"
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={`Trailer ${trailer.trailerNumber}`}
+        accessibilityHint="Hides this trailer's actions"
+        accessibilityState={{ expanded: true }}
+        style={({ pressed }) => [styles.platePanel, pressed ? styles.tilePressed : null]}
+      >
+        <Text style={styles.plate} testID="trailer-number-value" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+          {trailer.trailerNumber}
+        </Text>
+        <View style={[styles.disclosure, styles.disclosureOpen]} />
+      </Pressable>
+      <Text style={styles.class} testID="trailer-type-value">{trailerTypeLabel(trailer.trailerType)}</Text>
+
+      <View style={styles.facts}>
+        <FactRow label="Trailer checks">
+          <CheckStatePill state={checkState} testID="trailer-checks-state" />
+        </FactRow>
+      </View>
+      {/* The same rank as the vehicle's: the next thing to do until it is
+          done, then an outlined way back to the record. */}
+      {done
+        ? <SecondaryAction label="Trailer Checks" onPress={onTrailerChecks} testID="trailer-checks" />
+        : <PrimaryButton label="Trailer Checks" onPress={onTrailerChecks} testID="trailer-checks" />}
+      <View style={styles.secondarySlot}>
+        <SecondaryAction label="Change Trailer" onPress={onChangeTrailer} testID="change-trailer" />
+      </View>
+      {/* The fridge unit's own diesel — never the unit's Fuel. */}
+      {refrigerated ? (
+        <View style={styles.tiles}>
+          <FillTile
+            testID="fridge-diesel"
+            label="Fridge Diesel"
+            summary={summariseRecords(trailer.reeferDiesel)}
+            onPress={onFridgeDiesel}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -493,26 +677,80 @@ function SecondaryAction({ label, onPress, testID }: { label: string; onPress: (
  * corrected. Every number is stored or subtracted from two stored numbers.
  *
  * Openable whether or not a vehicle is in use now (D31).
+ *
+ * ENDED TRAILER USES FOLLOW, under their own heading (D34, owner correction
+ * 2026-09-27): one row per use, newest ended first, never grouped by number —
+ * TR23 handed back twice is two rows. The trailer in use is never among them.
+ * Each says its number, type, hours and its OWN check state, and opens THAT
+ * use — by its `startedAt` — where a forgotten Trailer Check can be completed
+ * and a fridge trailer's diesel corrected.
  */
-function UsedThisShift({ usages, onOpenUsage }: {
+function UsedThisShift({ usages, trailers, onOpenUsage, onOpenTrailerUsage }: {
   usages: readonly EndedVehicle[];
+  trailers: readonly EndedTrailer[];
   onOpenUsage: (usageStartedAt: string) => void;
+  onOpenTrailerUsage: (trailerStartedAt: string) => void;
 }) {
-  if (usages.length === 0) return null;
+  if (usages.length === 0 && trailers.length === 0) return null;
   return (
     <>
       <Text style={styles.sectionLabel} testID="used-this-shift-label">USED THIS SHIFT</Text>
-      <View testID="used-this-shift" style={[styles.card, styles.clipped]}>
-        {usages.map((use, index) => (
-          <UsedRow
-            key={use.startedAt}
-            use={use}
-            last={index === usages.length - 1}
-            onPress={() => { onOpenUsage(use.startedAt); }}
-          />
-        ))}
-      </View>
+      {usages.length === 0 ? null : (
+        <>
+          <Text style={styles.usedGroupLabel} testID="used-vehicles-label">VEHICLES</Text>
+          <View testID="used-this-shift" style={[styles.card, styles.clipped, trailers.length === 0 ? null : styles.usedGroupCard]}>
+            {usages.map((use, index) => (
+              <UsedRow
+                key={use.startedAt}
+                use={use}
+                last={index === usages.length - 1}
+                onPress={() => { onOpenUsage(use.startedAt); }}
+              />
+            ))}
+          </View>
+        </>
+      )}
+      {trailers.length === 0 ? null : (
+        <>
+          <Text style={styles.usedGroupLabel} testID="used-trailers-label">TRAILERS</Text>
+          <View testID="used-trailers" style={[styles.card, styles.clipped]}>
+            {trailers.map((use, index) => (
+              <UsedTrailerRow
+                key={use.startedAt}
+                use={use}
+                last={index === trailers.length - 1}
+                onPress={() => { onOpenTrailerUsage(use.startedAt); }}
+              />
+            ))}
+          </View>
+        </>
+      )}
     </>
+  );
+}
+
+/** One ended trailer use: number, type and hours, its own check state — and the way into it. */
+function UsedTrailerRow({ use, last, onPress }: { use: EndedTrailer; last: boolean; onPress: () => void }) {
+  const done = checkStateOf(use.checks) === "completed";
+  const hours = `${formatClockTime(use.startedAt)}–${formatClockTime(use.endedAt)}`;
+  return (
+    <Pressable
+      testID={`trailer-usage-${use.startedAt}`}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Trailer ${use.trailerNumber}, ${trailerTypeLabel(use.trailerType)}, ${hours}. ${done ? "Checks completed" : "Checks not completed"}`}
+      accessibilityHint="Opens this trailer use"
+      style={({ pressed }) => [styles.usedRow, last ? null : styles.usedDivided, pressed ? styles.tilePressed : null]}
+    >
+      <View style={styles.usedText}>
+        <Text style={styles.usedPlate} numberOfLines={1} testID={`trailer-usage-number-${use.startedAt}`}>{use.trailerNumber}</Text>
+        <Text style={styles.usedMeta} testID={`trailer-usage-meta-${use.startedAt}`}>
+          {`${trailerTypeLabel(use.trailerType)} · ${hours}`}
+        </Text>
+      </View>
+      <CollapsedCheckLine done={done} testID={`trailer-usage-checks-${use.startedAt}`} />
+      <View style={styles.usedChevron} testID={`trailer-usage-chevron-${use.startedAt}`} />
+    </Pressable>
   );
 }
 
@@ -755,6 +993,10 @@ const styles = StyleSheet.create({
   usedDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   usedText: { flex: 1, gap: 2 },
   usedTitle: { fontSize: 15, color: colors.textMuted },
+  // Sub-headings inside USED THIS SHIFT: quieter than a section label, so the
+  // two lists read as one history in two parts.
+  usedGroupLabel: { ...typography.label, fontSize: 12, letterSpacing: 0.8, marginBottom: spacing.xs, marginLeft: spacing.xs },
+  usedGroupCard: { marginBottom: spacing.lg },
   usedPlate: { fontSize: 17, fontWeight: "800", color: colors.text, letterSpacing: 0.5 },
   usedMeta: { fontSize: 14, color: colors.textMuted },
   usedChevron: {
@@ -783,6 +1025,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
   },
   absentWithNote: { paddingBottom: spacing.xs },
+  // Compact: a label and one bordered action, not a second workspace.
+  noTrailer: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
+  noTrailerText: { flex: 1, fontSize: 17, fontWeight: "700", color: colors.textMuted },
+  noTrailerAction: { minWidth: 150 },
   absentNote: { ...typography.subtitle, textAlign: "center", marginBottom: spacing.lg },
 
   secondarySlot: { marginTop: spacing.md },
