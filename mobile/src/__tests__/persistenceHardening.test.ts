@@ -16,6 +16,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
   OPEN_SHIFT_TEMP_FILE,
+  DiscardIncompleteError,
   RECOVERY_FILE_PREFIX,
   SafeSaveFailedError,
   UseEndsBeforeItStartedError,
@@ -382,4 +383,135 @@ test("CONTROL: the same ended uses, in order, load", async () => {
   }));
 
   expect(await readOpenShift()).not.toBeNull();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Discard: truthful at every deletion stage (2026-09-28)
+//
+// Discard removes the live day file FIRST, then the temporary file. A failure
+// before anything is removed leaves the day exactly as it was; a failure
+// after the live file is gone — or one where that cannot be known — is a
+// DiscardIncompleteError, which must never be reported as "nothing changed".
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A day, a leftover temporary file and a recovery file: every file Discard might meet. */
+async function everyFile(): Promise<{ recoveryName: string; recoveryBytes: string }> {
+  await dayWith();
+  writeRaw(temp(), bytes().replace("AB12 CDE", "UNCONFIRMED"));
+  const recoveryName = `${RECOVERY_FILE_PREFIX}unreadable-1-keep.json`;
+  const recoveryBytes = "not a day, kept on purpose";
+  writeRaw(new File(Paths.document, recoveryName), recoveryBytes);
+  return { recoveryName, recoveryBytes };
+}
+const isTemp = (file: File) => file.uri.endsWith(OPEN_SHIFT_TEMP_FILE);
+
+test("a successful Discard removes the day and its temporary file, and leaves every recovery file byte-for-byte", async () => {
+  const { recoveryName, recoveryBytes } = await everyFile();
+
+  await clearOpenShift();
+
+  expect(live().exists).toBe(false);
+  expect(temp().exists).toBe(false);
+  expect(recoveries().get(recoveryName)).toBe(recoveryBytes);
+  expect(await readOpenShift()).toBeNull();
+});
+
+test("Discard failing BEFORE anything is removed is an ordinary failure: the day is exactly as it was, and reads back after a restart", async () => {
+  await everyFile();
+  const before = bytes();
+  const leftover = temp().textSync();
+  jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
+
+  const failure = clearOpenShift();
+
+  await expect(failure).rejects.toThrow("busy");
+  await expect(failure).rejects.not.toBeInstanceOf(DiscardIncompleteError);
+  jest.restoreAllMocks();
+  expect(bytes()).toBe(before);
+  expect(temp().textSync()).toBe(leftover);
+  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE");
+});
+
+test("live file REMOVED, then the temporary file fails: DiscardIncompleteError — never 'nothing changed' — and a restart shows no day", async () => {
+  const { recoveryName, recoveryBytes } = await everyFile();
+  const leftover = temp().textSync();
+  // The temporary file cannot even be looked at once the live file is gone.
+  jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
+    if (isTemp(this)) throw new Error("busy");
+    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+  });
+
+  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+
+  jest.restoreAllMocks();
+  // What is genuinely there: no live day, the leftover as it was, recovery untouched.
+  expect(live().exists).toBe(false);
+  expect(temp().textSync()).toBe(leftover);
+  expect(recoveries().get(recoveryName)).toBe(recoveryBytes);
+  expect(await readOpenShift()).toBeNull();
+});
+
+test("a delete that throws AFTER removing the live file is incomplete too — the disk, not the error, decides", async () => {
+  await everyFile();
+  const leftover = temp().textSync();
+  jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => {
+    // Gone from its path, then the call reports failure. (Moved through its own
+    // handle: the mock's move re-points the handle it is called on.)
+    live().moveSync(new File(Paths.document, `${RECOVERY_FILE_PREFIX}test-moved-away.json`));
+    throw new Error("busy");
+  });
+
+  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+
+  jest.restoreAllMocks();
+  expect(live().exists).toBe(false);
+  expect(temp().textSync()).toBe(leftover);
+  expect(await readOpenShift()).toBeNull();
+});
+
+test("with NO day open, a temporary file that cannot be removed is an ordinary failure — nothing was removed", async () => {
+  await dayWith();
+  await clearOpenShift();
+  writeRaw(temp(), "leftover");
+  jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
+
+  const failure = clearOpenShift();
+
+  await expect(failure).rejects.toThrow("busy");
+  await expect(failure).rejects.not.toBeInstanceOf(DiscardIncompleteError);
+});
+
+test("a Discard that failed part-way does not poison the queue: the next Discard finishes the job", async () => {
+  await everyFile();
+  jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
+    if (isTemp(this)) throw new Error("busy");
+    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+  });
+  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+  jest.restoreAllMocks();
+
+  await clearOpenShift();
+
+  expect(live().exists).toBe(false);
+  expect(temp().exists).toBe(false);
+});
+
+test("a write queued behind a Discard that failed part-way does not resurrect the day", async () => {
+  const shift = await dayWith();
+  writeRaw(temp(), "leftover");
+  jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
+    if (isTemp(this)) throw new Error("busy");
+    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+  });
+  const discard = clearOpenShift();
+  const write = recordVehicleFill({
+    shiftId: shift.id, vehicleStartedAt: STARTED_AT.toISOString(), usageState: USAGE_STATE.inUse,
+    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 10, note: "",
+  });
+
+  await expect(discard).rejects.toBeInstanceOf(DiscardIncompleteError);
+  expect(await write).toBeNull();
+  jest.restoreAllMocks();
+  expect(live().exists).toBe(false);
+  expect(await readOpenShift()).toBeNull();
 });

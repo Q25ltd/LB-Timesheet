@@ -1598,7 +1598,30 @@ function reefer(target: TrailerTarget | null): TrailerTarget | null {
   return target !== null && target.use.trailerType === TRAILER_TYPE.refrigerated ? target : null;
 }
 
-/** Forget the open shift. The end of a day, and the reset a test needs. */
+/**
+ * Thrown when Discard failed AFTER it had removed something — or when whether
+ * it had cannot be known. The day may be gone while its temporary file is
+ * still there, so the driver must never be told "nothing was changed". An
+ * error thrown by Discard that is NOT this one left the files exactly as they
+ * were.
+ */
+export class DiscardIncompleteError extends Error {
+  constructor(cause: unknown) {
+    super("The shift could not be discarded completely", { cause });
+    this.name = "DiscardIncompleteError";
+  }
+}
+
+/**
+ * Forget the open shift. The end of a day, and the reset a test needs.
+ *
+ * The live day file is removed FIRST, then the temporary file; each only if
+ * it is there. A failure before anything was removed is rethrown as it is —
+ * the day is exactly as it was. A failure after the live file was removed, or
+ * where a delete threw and the file is no longer there to prove otherwise,
+ * is a `DiscardIncompleteError`. Nothing is put back: what is on the disk is
+ * what the next read reports.
+ */
 export function clearOpenShift(): Promise<void> {
   // Through the same queue as every write: a write already in flight finishes
   // first, and cannot then re-create the file after it was deleted — a
@@ -1607,9 +1630,29 @@ export function clearOpenShift(): Promise<void> {
   // later kept as recovery. Recovery files are left alone: they are not the
   // day being discarded.
   return queued(() => {
+    let removedAny = false;
     for (const file of [openShiftFile(), new File(Paths.document, OPEN_SHIFT_TEMP_FILE)]) {
-      if (file.exists) file.delete();
+      let deleting = false;
+      try {
+        if (file.exists) {
+          deleting = true;
+          file.delete();
+          removedAny = true;
+        }
+      } catch (error: unknown) {
+        if (!removedAny && (!deleting || stillThere(file))) throw error;
+        throw new DiscardIncompleteError(error);
+      }
     }
     return Promise.resolve();
   });
+}
+
+/** Whether a file whose delete just threw is provably still there. Unknown counts as gone. */
+function stillThere(file: File): boolean {
+  try {
+    return file.exists;
+  } catch {
+    return false;
+  }
 }

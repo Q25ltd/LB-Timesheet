@@ -16,7 +16,7 @@ import { Alert } from "react-native";
 import { Redirect, router, useFocusEffect } from "expo-router";
 import { ActiveShiftScreen } from "../../src/screens/ActiveShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { USAGE_STATE, clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { DiscardIncompleteError, USAGE_STATE, clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
 
 export default function ActiveShiftRoute() {
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
@@ -77,14 +77,21 @@ export default function ActiveShiftRoute() {
  * NAVIGATION WAITS FOR THE DELETE. Leaving first and deleting afterwards
  * would send a driver to Home while the shift was still open, and the next
  * press of Start Shift would walk them straight back into the day they just
- * discarded. If the delete fails the shift is untouched and they are told,
- * rather than being moved somewhere that implies it worked.
+ * discarded. If the delete fails they are told, rather than being moved
+ * somewhere that implies it worked — and told the truth: "nothing was
+ * changed" only when nothing was removed. A discard that failed part-way
+ * (`DiscardIncompleteError`) may already have removed the day.
  */
 function discard(): void {
   void clearOpenShift().then(
     () => { router.replace("/today"); },
-    () => {
-      Alert.alert("Couldn't discard the shift", "Nothing was changed. Please try again.");
+    (error: unknown) => {
+      Alert.alert(
+        "Couldn't discard the shift",
+        error instanceof DiscardIncompleteError
+          ? "The shift could not be discarded safely. Check your current shift before trying again."
+          : "Nothing was changed. Please try again.",
+      );
     },
   );
 }

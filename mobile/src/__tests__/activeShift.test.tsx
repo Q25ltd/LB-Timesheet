@@ -29,7 +29,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, StyleSheet } from "react-native";
 import { ActiveShiftScreen } from "../screens/ActiveShiftScreen";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
-import { clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
+import { Directory, File, Paths } from "expo-file-system";
+import { OPEN_SHIFT_TEMP_FILE, clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
 import type { LocalShift, LocalVehicle, VehicleClass, WorkingContext } from "../shift/localShift";
 import { checklistFor } from "../shift/checklists";
 import { CHECK_RESULT, CHECK_STATUS, type VehicleCheck } from "../shift/vehicleCheck";
@@ -891,6 +892,7 @@ describe("the Active Shift route", () => {
     await clearOpenShift();
     mockRouter.replace.mockClear();
   });
+  afterEach(() => { jest.restoreAllMocks(); });
 
   async function openRoute() {
     const view = await render(
@@ -926,6 +928,46 @@ describe("the Active Shift route", () => {
     expect(await readOpenShift()).toEqual(started);
     expect(mockRouter.replace).not.toHaveBeenCalled();
     alert.mockRestore();
+  });
+
+  test("a Discard that fails before anything is removed says nothing was changed — and stays on the day", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+    const view = await openRoute();
+    jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
+
+    await fireEvent.press(view.getByTestId("discard-shift"));
+    confirmButton(alert)?.onPress?.();
+
+    await waitFor(() => { expect(alert).toHaveBeenCalledWith("Couldn't discard the shift", "Nothing was changed. Please try again."); });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    jest.restoreAllMocks();
+    expect(await readOpenShift()).not.toBeNull();
+  });
+
+  test("a Discard that fails PART-WAY never says nothing was changed — the driver is told to check the shift", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+    const temp = new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+    temp.create({ overwrite: true });
+    temp.write("leftover");
+    const view = await openRoute();
+    // The live day file goes; the temporary file then cannot be dealt with.
+    jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
+      if (this.uri.endsWith(OPEN_SHIFT_TEMP_FILE)) throw new Error("busy");
+      return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+    });
+
+    await fireEvent.press(view.getByTestId("discard-shift"));
+    confirmButton(alert)?.onPress?.();
+
+    await waitFor(() => {
+      expect(alert).toHaveBeenCalledWith("Couldn't discard the shift", "The shift could not be discarded safely. Check your current shift before trying again.");
+    });
+    expect(alert.mock.calls.some(([, body]) => typeof body === "string" && /nothing was changed/i.test(body))).toBe(false);
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    jest.restoreAllMocks();
+    expect(await readOpenShift()).toBeNull();
   });
 
   test("after discarding, Start Shift is free to begin a NEW day", async () => {
