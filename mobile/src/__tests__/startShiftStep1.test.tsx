@@ -49,6 +49,8 @@ jest.mock("expo-router", () => {
     },
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Home and Timesheets re-read the phone on focus; mounting is the focus here.
+    useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });
 

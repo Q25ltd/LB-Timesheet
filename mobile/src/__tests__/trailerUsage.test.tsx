@@ -38,6 +38,7 @@ import {
 } from "../shift/localShift";
 import { TRAILER_TYPE, type EndedTrailer, type TrailerDetails } from "../shift/trailer";
 import { CHECK_RESULT, checkStateOf, type CheckAnswer } from "../shift/vehicleCheck";
+import { trailerUseAt } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { usage?: string; trailer?: string; usageState?: string } = {};
@@ -103,7 +104,7 @@ async function trailerDay(): Promise<{ shift: LocalShift; first: string; box: st
   const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
   await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const change = (from: Date, next: TrailerDetails, when: Date) =>
-    changeTrailer({ shiftId: shift.id, endingStartedAt: from.toISOString(), next, changedAt: when });
+    changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(from.toISOString()), next, changedAt: when });
   await change(at(5, 30), BOX, at(10, 5));
   await change(at(10, 5), TR23, at(10, 13));
   await change(at(10, 13), { trailerNumber: "JGG", trailerType: TRAILER_TYPE.standard }, at(11));
@@ -118,9 +119,13 @@ const ended = async (startedAt: string): Promise<EndedTrailer | undefined> =>
 const answers = (): CheckAnswer[] =>
   checklistItems(trailerChecklistFor(TRAILER_TYPE.refrigerated)).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" }));
 
+/** Fridge diesel on the trailer use that started at `trailerStartedAt`, by its stored identity. */
+const textInputs = (view: View): string[] =>
+  [...JSON.stringify(view.toJSON()).matchAll(/"type":"TextInput","props":\{[^}]*?"testID":"([^"]+)"/g)].map(match => match[1] ?? "");
+
 async function dieselOn(shift: LocalShift, trailerStartedAt: string, usageState: UsageState, over: { fillId?: string; litres?: number | null } = {}) {
   return recordReeferDiesel({
-    shiftId: shift.id, trailerStartedAt, usageState, fillId: over.fillId ?? newLocalId(),
+    shiftId: shift.id, trailerUseId: trailerUseAt(trailerStartedAt), usageState, fillId: over.fillId ?? newLocalId(),
     recordedAt: at(10, 0), litres: over.litres === undefined ? 50 : over.litres, note: "",
   });
 }
@@ -150,7 +155,7 @@ test("an ended use's diesel can be added, corrected, set UNKNOWN (null, never 0)
   expect((await ended(first))?.reeferDiesel).toMatchObject([{ id, litres: null }]);
   expect(bytes()).toContain('"litres":null');
 
-  await removeReeferDiesel({ shiftId: shift.id, trailerStartedAt: first, usageState: USAGE_STATE.ended, fillId: id });
+  await removeReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: id });
   expect((await ended(first))?.reeferDiesel).toEqual([]);
 });
 
@@ -175,7 +180,7 @@ test.each([
 
   const diesel = await dieselOn(days.shift, target, state);
   const check = await completeTrailerCheck({
-    shiftId: days.shift.id, trailerStartedAt: target, usageState: state, checkId: newLocalId(),
+    shiftId: days.shift.id, trailerUseId: trailerUseAt(target), usageState: state, checkId: newLocalId(),
     startedAt: new Date(), answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
 
@@ -191,7 +196,7 @@ test("ADVERSARIAL: a day saved with two trailer uses sharing one start is refuse
 
   expect(await readOpenShift()).toBeNull();
   const result = await recordReeferDiesel({
-    shiftId: "any", trailerStartedAt: first, usageState: USAGE_STATE.ended, fillId: newLocalId(), recordedAt: at(10), litres: 5, note: "",
+    shiftId: "any", trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(), recordedAt: at(10), litres: 5, note: "",
   });
   expect(result).toBeNull();
   expect(bytes()).toBe(before);
@@ -202,7 +207,7 @@ test("a forgotten check completed on ENDED usage A completes A only — B, the o
   const b = JSON.stringify(await ended(second));
 
   await completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: first, usageState: USAGE_STATE.ended, checkId: newLocalId(),
+    shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(),
     startedAt: new Date(), answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
 
@@ -213,11 +218,11 @@ test("a forgotten check completed on ENDED usage A completes A only — B, the o
 
 test("the CURRENT trailer's protection is unchanged: a check begun in use cannot save once the trailer has ended", async () => {
   const { shift, current } = await trailerDay();
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: current, next: null, changedAt: at(12) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(current), next: null, changedAt: at(12) });
   const before = bytes();
 
   const stale = await saveTrailerCheckDraft({
-    shiftId: shift.id, trailerStartedAt: current, usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(11, 5),
+    shiftId: shift.id, trailerUseId: trailerUseAt(current), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(11, 5),
     answers: [{ key: "doors", result: CHECK_RESULT.defect, note: "x" }],
   });
 
@@ -235,7 +240,7 @@ async function mount(node: React.ReactElement): Promise<View> {
   return view;
 }
 async function openUse(usage: string): Promise<View> {
-  params.usage = usage;
+  params.usage = trailerUseAt(usage);
   return mount(<TrailerUsageRoute />);
 }
 
@@ -244,9 +249,9 @@ test("tapping a TRAILERS row opens that exact use — the two TR23 rows open two
   const view = await mount(<ActiveShiftRoute />);
 
   await press(view, `trailer-usage-${second}`);
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-usage", params: { usage: second } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-usage", params: { usage: trailerUseAt(second) } });
   await press(view, `trailer-usage-${first}`);
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-usage", params: { usage: first } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-usage", params: { usage: trailerUseAt(first) } });
   expect(view.queryByTestId(`trailer-usage-chevron-${first}`)).not.toBeNull();
 });
 
@@ -266,7 +271,7 @@ test("the detail states number, type, start, end and duration of THAT use", asyn
   expect(text(later, "trailer-usage-duration")).toBe("47 min");
 });
 
-test("a STANDARD use shows no Fridge Diesel and offers no Edit — there is nothing it may edit", async () => {
+test("a STANDARD use shows no Fridge Diesel, and its Edit offers only its start and end times (D42)", async () => {
   const { box } = await trailerDay();
 
   const view = await openUse(box);
@@ -274,7 +279,9 @@ test("a STANDARD use shows no Fridge Diesel and offers no Edit — there is noth
   expect(text(view, "trailer-usage-type-hours")).toBe("Standard · 10:05–10:13");
   expect(view.queryByTestId("trailer-usage-diesel")).toBeNull();
   expect(view.queryByTestId("trailer-usage-diesel-none")).toBeNull();
-  expect(view.queryByTestId("trailer-usage-edit")).toBeNull();
+  await press(view, "trailer-usage-edit");
+  expect(textInputs(view)).toEqual(["trailer-usage-start-time-hours", "trailer-usage-start-time-minutes", "trailer-usage-end-time-hours", "trailer-usage-end-time-minutes"]);
+  expect(view.queryByTestId("trailer-usage-edit-diesel")).toBeNull();
 });
 
 test("a REFRIGERATED use lists its diesel, and Edit offers only its Fridge Diesel — opened for THIS ended use", async () => {
@@ -285,10 +292,10 @@ test("a REFRIGERATED use lists its diesel, and Edit offers only its Fridge Diese
   expect(JSON.stringify(view.toJSON())).toContain("120 L");
   await press(view, "trailer-usage-edit");
   expect(text(view, "screen-title")).toBe("Edit Trailer Use");
-  // Nothing to type: number, type and times are stated, never inputs.
-  expect(JSON.stringify(view.toJSON())).not.toContain('"type":"TextInput"');
+  // Only its times are typed here: number and type are stated, never inputs.
+  expect(textInputs(view)).toEqual(["trailer-usage-start-time-hours", "trailer-usage-start-time-minutes", "trailer-usage-end-time-hours", "trailer-usage-end-time-minutes"]);
   await press(view, "trailer-usage-edit-diesel");
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-diesel", params: { trailer: second, usageState: "ended" } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-diesel", params: { trailer: trailerUseAt(second), usageState: "ended" } });
 });
 
 test.each([["a trailer number", "TR23"], ["the trailer in use", "current"], ["nothing", ""]])("Trailer Use is not a screen for %s", async (_why, name) => {
@@ -303,7 +310,7 @@ test.each([["a trailer number", "TR23"], ["the trailer in use", "current"], ["no
 
 test("the Fridge Diesel form for an ENDED use names it by number AND hours, and adds to it alone", async () => {
   const { first, second } = await trailerDay();
-  params.trailer = second;
+  params.trailer = trailerUseAt(second);
   params.usageState = USAGE_STATE.ended;
   const view = await mount(<TrailerDieselRoute />);
 
@@ -320,7 +327,7 @@ test("an existing ended entry is corrected and removed on its form, keeping its 
   const { shift, second } = await trailerDay();
   const id = newLocalId();
   await dieselOn(shift, second, USAGE_STATE.ended, { fillId: id, litres: 30 });
-  params.trailer = second;
+  params.trailer = trailerUseAt(second);
   params.usageState = USAGE_STATE.ended;
   const view = await mount(<TrailerDieselRoute />);
 
@@ -349,7 +356,7 @@ function SignedIn({ children }: { children: React.ReactNode }) {
   );
 }
 async function openEndedCheck(usage: string): Promise<View> {
-  params.trailer = usage;
+  params.trailer = trailerUseAt(usage);
   params.usageState = USAGE_STATE.ended;
   const view = await render(
     <SafeAreaProvider initialMetrics={METRICS}>
@@ -372,7 +379,7 @@ test("an ended use with no completed check says so, and Trailer Checks opens THA
   expect(text(view, "trailer-usage-check-missing")).toBe("Not completed");
   await press(view, "trailer-usage-checks-open");
 
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-check", params: { trailer: first, usageState: "ended" } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/trailer-check", params: { trailer: trailerUseAt(first), usageState: "ended" } });
 });
 
 test("a fresh forgotten check opens at its defaults, writing nothing", async () => {
@@ -430,13 +437,13 @@ test("a forgotten check completed AFTER the trailer ended is dated when it was a
 test("once completed, the historical check is read-only and cannot be completed again", async () => {
   const { shift, first } = await trailerDay();
   await completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: first, usageState: USAGE_STATE.ended, checkId: "forgotten", startedAt: new Date(),
+    shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: "forgotten", startedAt: new Date(),
     answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
   const before = bytes();
 
   const again = await completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: first, usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
+    shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
     answers: answers(), completedAt: new Date(), completedBy: "someone_else",
   });
   expect(again?.id).toBe("forgotten");
@@ -452,7 +459,7 @@ test("once completed, the historical check is read-only and cannot be completed 
 test("after completion the detail shows it completed, and Active Shift marks ONLY that row", async () => {
   const { shift, first, second } = await trailerDay();
   await completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: first, usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
+    shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
     answers: answers().map(answer => (answer.key === "doors" ? { ...answer, result: CHECK_RESULT.defect, note: "Seal torn" } : answer)),
     completedAt: new Date(), completedBy: DRIVER.user.id,
   });

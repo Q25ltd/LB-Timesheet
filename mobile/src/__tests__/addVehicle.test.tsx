@@ -338,7 +338,7 @@ test("Add Vehicle on a no-vehicle Active Shift opens the flow", async () => {
   const onAddVehicle = jest.fn();
   const view = await wrap(
     <ActiveShiftScreen
-      shift={noVehicleShift()} onDiscard={() => undefined} onAddVehicle={onAddVehicle}
+      shift={noVehicleShift()} onDiscard={() => undefined} onFinish={() => undefined} onCorrectPlate={() => undefined} onCorrectTrailerNumber={() => undefined} onAddVehicle={onAddVehicle}
       onVehicleChecks={() => undefined} onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined} onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined} onTrailerChecks={() => undefined} onOpenTrailerUsage={() => undefined}
     />,
   );

@@ -35,6 +35,7 @@ import {
 } from "../shift/localShift";
 import { TRAILER_TYPE, type EndedTrailer, type LocalTrailer, type TrailerDetails } from "../shift/trailer";
 import { checklistItems, trailerChecklistFor } from "../shift/checklists";
+import { trailerUseAt } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { trailer?: string; usageState?: string } = {};
@@ -100,11 +101,11 @@ afterEach(() => { jest.restoreAllMocks(); });
 // ═══════════════════════════════════════════════════════════════════════════
 
 function vehicleOf(details: VehicleDetails): LocalVehicle {
-  return { ...details, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] };
+  return { ...details, useId: "use-vehicle", startedAt: STARTED_AT.toISOString(), checks: [], fills: [] };
 }
 function trailerOf(details: TrailerDetails, startedAt = at(5, 35), litres: (number | null)[] = []): LocalTrailer {
   return {
-    ...details, startedAt: startedAt.toISOString(),
+    ...details, useId: `use-trailer-${startedAt.toISOString()}`, startedAt: startedAt.toISOString(),
     reeferDiesel: litres.map((amount, index) => ({ id: `f${index}`, recordedAt: at(7).toISOString(), litres: amount, note: null })),
     checks: [],
   };
@@ -137,7 +138,7 @@ function handlers(): Handlers {
 function screen(shift: LocalShift, on: Handlers): React.ReactElement {
   return (
     <SafeAreaProvider initialMetrics={METRICS}>
-      <ActiveShiftScreen shift={shift} onDiscard={() => undefined} onAddVehicle={() => undefined} {...on} />
+      <ActiveShiftScreen shift={shift} onDiscard={() => undefined} onFinish={() => undefined} onCorrectPlate={() => undefined} onCorrectTrailerNumber={() => undefined} onAddVehicle={() => undefined} {...on} />
     </SafeAreaProvider>
   );
 }
@@ -166,7 +167,7 @@ test("a VAN shows no trailer section at all", async () => {
 });
 
 test("the trailer section sits between the vehicle card and USED THIS SHIFT", async () => {
-  const ended = { ...vehicleOf(UNIT), startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
+  const ended = { ...vehicleOf(UNIT), useId: "use-ended-vehicle", startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
   const view = await show(day({ previousVehicles: [ended], trailer: trailerOf(BOX) }));
 
   const order = ["current-asset-label", "current-trailer-label", "used-this-shift-label", "finish-shift"];
@@ -195,7 +196,7 @@ test("a REFRIGERATED trailer: its number, 'Refrigerated', Change Trailer and Fri
   expect(text(view, "fridge-diesel-amount")).toBe("80 L known");
   expect(text(view, "fridge-diesel-detail")).toBe("1 amount unknown");
   await fireEvent.press(view.getByTestId("fridge-diesel"));
-  expect(on.onFridgeDiesel).toHaveBeenCalledWith(trailer.startedAt);
+  expect(on.onFridgeDiesel).toHaveBeenCalledWith(trailer.useId);
   // The unit's own Fuel tile knows nothing of it.
   expect(view.queryByTestId("fuel-amount")).toBeNull();
 });
@@ -242,13 +243,13 @@ test("the card actions do their own jobs and fold nothing", async () => {
 });
 
 test("pressing a USED THIS SHIFT row folds BOTH cards", async () => {
-  const ended = { ...vehicleOf(UNIT), startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
+  const ended = { ...vehicleOf(UNIT), useId: "use-ended-vehicle", startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
   const on = handlers();
   const view = await show(day({ previousVehicles: [ended], trailer: trailerOf(FRIDGE) }), on);
 
   await fireEvent.press(view.getByTestId(`usage-${ended.startedAt}`));
 
-  expect(on.onOpenUsage).toHaveBeenCalledWith(ended.startedAt);
+  expect(on.onOpenUsage).toHaveBeenCalledWith(ended.useId);
   expect(isExpanded(view, "current-vehicle-toggle")).toBe(false);
   expect(isExpanded(view, "current-trailer-toggle")).toBe(false);
 });
@@ -258,7 +259,7 @@ test("pressing a USED THIS SHIFT row folds BOTH cards", async () => {
 function endedTrailer(details: TrailerDetails, from: Date, to: Date, checks: EndedTrailer["checks"] = []): EndedTrailer {
   return { ...trailerOf(details, from), checks, endedAt: to.toISOString() };
 }
-const ENDED_VEHICLE = { ...vehicleOf(UNIT), startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
+const ENDED_VEHICLE = { ...vehicleOf(UNIT), useId: "use-ended-vehicle", startedAt: at(4).toISOString(), endMileage: 100_000, endedAt: STARTED_AT.toISOString() };
 const certificate = (status: "completed" | "draft") => [{
   id: `c-${status}`, checklist: "trailer-standard" as const, checklistVersion: 1, startedAt: at(10, 6).toISOString(), status,
   completedAt: status === "completed" ? at(10, 10).toISOString() : null, completedBy: status === "completed" ? "user_1" : null,
@@ -314,9 +315,9 @@ test("each trailer row is a way in, with a chevron, opening EXACTLY its own use 
     expect(view.queryByTestId(`trailer-usage-chevron-${use.startedAt}`)).not.toBeNull();
   }
   await fireEvent.press(view.getByTestId(`trailer-usage-${tr23b.startedAt}`));
-  expect(on.onOpenTrailerUsage).toHaveBeenLastCalledWith(tr23b.startedAt);
+  expect(on.onOpenTrailerUsage).toHaveBeenLastCalledWith(tr23b.useId);
   await fireEvent.press(view.getByTestId(`trailer-usage-${tr23a.startedAt}`));
-  expect(on.onOpenTrailerUsage).toHaveBeenLastCalledWith(tr23a.startedAt);
+  expect(on.onOpenTrailerUsage).toHaveBeenLastCalledWith(tr23a.useId);
   // Still no fridge diesel on the compact row.
   expect(within(view.getByTestId("used-trailers")).queryByText(/Diesel|80 L/)).toBeNull();
   // Opening a trailer use is focus elsewhere: the current cards fold.
@@ -471,7 +472,7 @@ test("a DIFFERENT trailer: the one in use ends, the new one begins — the vehic
 
 test("Change Trailer offers ONLY a different trailer or No trailer — no trailer used earlier is listed", async () => {
   const shift = await withTrailer(FRIDGE);
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: at(5, 35).toISOString(), next: BOX, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: BOX, changedAt: at(9) });
 
   const view = await mount(<ChangeTrailerRoute />);
 
@@ -486,13 +487,13 @@ test("Change Trailer offers ONLY a different trailer or No trailer — no traile
 test("typing a trailer used EARLIER is a NEW use — new start, no fridge diesel, no Trailer Check inherited", async () => {
   const shift = await withTrailer(FRIDGE);
   const morning = at(5, 35).toISOString();
-  await recordReeferDiesel({ shiftId: shift.id, trailerStartedAt: morning, usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), litres: 50, note: "" });
+  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), litres: 50, note: "" });
   await completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: morning, usageState: USAGE_STATE.inUse, checkId: "morning-check", startedAt: at(5, 40),
+    shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, checkId: "morning-check", startedAt: at(5, 40),
     answers: checklistItems(trailerChecklistFor(TRAILER_TYPE.refrigerated)).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: morning, next: BOX, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(9) });
   const view = await mount(<ChangeTrailerRoute />);
 
   await press(view, "use-different-trailer");
@@ -545,7 +546,7 @@ test("backing out of Change Trailer writes nothing", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function openDiesel(): Promise<View> {
-  params.trailer = (await readOpenShift())?.trailer?.startedAt ?? "";
+  params.trailer = (await readOpenShift())?.trailer?.useId ?? "";
   params.usageState = USAGE_STATE.inUse;
   return mount(<TrailerDieselRoute />);
 }
@@ -598,7 +599,7 @@ test("STALE: the trailer was changed while the form was open — nothing is save
   await type(view, "litres", "70");
 
   // Behind the form, TR1234 is swapped for ANOTHER refrigerated TR1234 use.
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: at(5, 35).toISOString(), next: FRIDGE, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
   await press(view, "fill-save");
 
@@ -615,11 +616,11 @@ test.each([
   ["a trailer number", async (): Promise<string> => { await withTrailer(FRIDGE); return "TR1234"; }],
   ["a use that has ended", async (): Promise<string> => {
     const shift = await withTrailer(FRIDGE);
-    await changeTrailer({ shiftId: shift.id, endingStartedAt: at(5, 35).toISOString(), next: null, changedAt: at(9) });
+    await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
     return at(5, 35).toISOString();
   }],
 ] as const)("Fridge Diesel is not a screen for %s", async (_what, name) => {
-  params.trailer = await name();
+  params.trailer = trailerUseAt(await name());
 
   const view = await mount(<TrailerDieselRoute />);
 
@@ -656,7 +657,7 @@ test("Change Vehicle to a NEW van with a trailer in use: blocked, told why, and 
 test("Change Vehicle BACK to a van used earlier, with a trailer in use: blocked the same way", async () => {
   const shift = await dayWith(VAN);
   const open = await readOpenShift();
-  await endVehicleUse({ shiftId: shift.id, endingStartedAt: open?.vehicle?.startedAt ?? "", endMileage: 9_100, endedAt: at(6) });
+  await endVehicleUse({ shiftId: shift.id, endingUseId: open?.vehicle?.useId ?? "", endMileage: 9_100, endedAt: at(6) });
   // A unit is taken, then a trailer behind it.
   await addVehicleToOpenShift({ vehicle: UNIT, startedAt: at(7) });
   await addTrailerToOpenShift({ shiftId: shift.id, trailer: FRIDGE, startedAt: at(7, 30) });
@@ -691,7 +692,7 @@ test("Change Vehicle to NO VEHICLE with a trailer in use: blocked, told to hand 
 
 test("after No trailer, Change Vehicle to No vehicle goes through", async () => {
   const shift = await withTrailer(FRIDGE);
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: at(5, 35).toISOString(), next: null, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100100");
   await press(view, "change-continue");

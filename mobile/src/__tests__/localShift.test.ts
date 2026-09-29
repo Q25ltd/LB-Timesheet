@@ -25,6 +25,7 @@
 import { File, Paths } from "expo-file-system";
 import { addVehicleToOpenShift, clearOpenShift, readOpenShift, startLocalShift, OPEN_SHIFT_FILE } from "../shift/localShift";
 import type { VehicleDetails, WorkingContext } from "../shift/localShift";
+import { ANY_USE_ID } from "./useIdAt";
 
 const PERSONAL: WorkingContext = { kind: "personal" };
 const NORTHGATE: WorkingContext = {
@@ -76,7 +77,7 @@ test("a shift started WITH a vehicle persists exactly what the driver entered", 
   const recovered = await readOpenShift();
   // A vehicle given at Start Shift began its use when the day did — the SAME
   // instant as the shift's declared start, not a second clock reading.
-  expect(recovered?.vehicle).toEqual({ ...LORRY, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
+  expect(recovered?.vehicle).toEqual({ ...LORRY, useId: ANY_USE_ID, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
   expect(recovered?.vehicle?.startedAt).toBe(recovered?.startedAt);
   expect(recovered?.workingFor).toEqual(NORTHGATE);
 });
@@ -162,7 +163,7 @@ test("COLD START: a shift this module never created is recovered from the file a
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: NORTHGATE,
     startedAt: STARTED_AT.toISOString(),
-    vehicle: { ...LORRY, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] },
+    vehicle: { ...LORRY, useId: "use-lorry", startedAt: STARTED_AT.toISOString(), checks: [], fills: [] },
     previousVehicles: [],
     // The current shape. A day saved before trailers existed is proven to
     // load in `trailerStore.test.ts`.
@@ -203,7 +204,7 @@ test("a day saved BEFORE vehicles carried a start time is still the driver's ope
   const recovered = await readOpenShift();
 
   expect(recovered).not.toBeNull();
-  expect(recovered?.vehicle).toEqual({ ...LORRY, startedAt: "2026-09-13T05:42:00+01:00", checks: [], fills: [] });
+  expect(recovered?.vehicle).toEqual({ ...LORRY, useId: "legacy-vehicle-2026-09-13T05:42:00+01:00", startedAt: "2026-09-13T05:42:00+01:00", checks: [], fills: [] });
   expect(recovered?.id).toBe(legacy.id);
   // Reading is not writing: the file on disk is left exactly as it was.
   expect(file.textSync()).toBe(bytes);
@@ -323,9 +324,9 @@ test("an ADDED vehicle's use starts when it is added — not when the day did", 
 
   const updated = await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
 
-  expect(updated?.vehicle).toEqual({ ...VAN, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
+  expect(updated?.vehicle).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
   expect(updated?.vehicle?.startedAt).not.toBe(updated?.startedAt);
-  expect((await readOpenShift())?.vehicle).toEqual({ ...VAN, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
+  expect((await readOpenShift())?.vehicle).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
 });
 
 test("every class can be added — Class 1, Class 2 and Van", async () => {
@@ -358,7 +359,7 @@ test("the added vehicle survives a COLD START — it is in the file, not in memo
 
   // Read straight off the filesystem, bypassing the module: what a relaunch sees.
   const onDisk: unknown = JSON.parse(storedFile().textSync());
-  expect(onDisk).toEqual({ ...before, vehicle: { ...VAN, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] } });
+  expect(onDisk).toEqual({ ...before, vehicle: { ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] } });
 });
 
 test("a day that ALREADY has a vehicle is not overwritten — Add is not Change", async () => {
@@ -369,7 +370,7 @@ test("a day that ALREADY has a vehicle is not overwritten — Add is not Change"
   // Replacing a vehicle means an end mileage for the old one — that is the
   // Change flow's job, and a stray Add must never silently do it instead.
   expect(result).toEqual(started);
-  expect((await readOpenShift())?.vehicle).toEqual({ ...LORRY, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
+  expect((await readOpenShift())?.vehicle).toEqual({ ...LORRY, useId: ANY_USE_ID, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
 });
 
 test("rapid repeated adds leave ONE vehicle — the first — and never a second", async () => {
@@ -382,7 +383,7 @@ test("rapid repeated adds leave ONE vehicle — the first — and never a second
   ]);
 
   const stored = (await readOpenShift())?.vehicle;
-  expect(stored).toEqual({ ...VAN, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
+  expect(stored).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
   for (const result of results) expect(result?.vehicle).toEqual(stored);
 });
 

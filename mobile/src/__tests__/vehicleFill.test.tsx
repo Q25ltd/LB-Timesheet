@@ -32,6 +32,7 @@ import {
   type VehicleDetails,
 } from "../shift/localShift";
 import { FILL_TYPE } from "../shift/vehicleFill";
+import { vehicleUseAt } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { type?: string; usage?: string; usageState?: string } = { type: "fuel" };
@@ -94,7 +95,7 @@ async function recorded(litres: number | null, over: { type?: "fuel" | "adblue";
   const open = await readOpenShift();
   const fillId = newLocalId();
   await recordVehicleFill({
-    shiftId: open?.id ?? "", vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId,
+    shiftId: open?.id ?? "", vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId,
     type: over.type ?? FILL_TYPE.fuel, recordedAt: over.recordedAt ?? at(9), litres, note: over.note ?? "",
   });
   return fillId;
@@ -103,7 +104,7 @@ async function recorded(litres: number | null, over: { type?: "fuel" | "adblue";
 /** The fill screen as Fuel / AdBlue in the current card opens it: for the use in the card. */
 async function openFill(which: "fuel" | "adblue" = "fuel"): Promise<View> {
   params.type = which;
-  params.usage = (await readOpenShift())?.vehicle?.startedAt ?? "";
+  params.usage = (await readOpenShift())?.vehicle?.useId ?? "";
   params.usageState = USAGE_STATE.inUse;
   const view = await wrap(<VehicleFillRoute />);
   await waitFor(() => { expect(view.queryByTestId("screen-title")).not.toBeNull(); });
@@ -132,10 +133,10 @@ test("Active Shift opens Fuel and AdBlue for the EXACT use in the card, as the o
   await waitFor(() => { expect(active.queryByTestId("fuel")).not.toBeNull(); });
 
   await press(active, "fuel");
-  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-fill", params: { type: "fuel", usage: current, usageState: "in-use" } });
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-fill", params: { type: "fuel", usage: vehicleUseAt(current), usageState: "in-use" } });
 
   await press(active, "adblue");
-  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-fill", params: { type: "adblue", usage: current, usageState: "in-use" } });
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-fill", params: { type: "adblue", usage: vehicleUseAt(current), usageState: "in-use" } });
 });
 
 test("the screen names the type and the vehicle the fill will belong to", async () => {
@@ -149,7 +150,7 @@ test("the screen names the type and the vehicle the fill will belong to", async 
 
 test("with NO vehicle in use there is nowhere to put fuel — back to Active Shift", async () => {
   await dayWith(null);
-  params.usage = STARTED_AT.toISOString();
+  params.usage = vehicleUseAt(STARTED_AT.toISOString());
   params.usageState = USAGE_STATE.inUse;
 
   const view = await wrap(<VehicleFillRoute />);
@@ -158,7 +159,7 @@ test("with NO vehicle in use there is nowhere to put fuel — back to Active Shi
 });
 
 test("with no open day at all it goes Home", async () => {
-  params.usage = STARTED_AT.toISOString();
+  params.usage = vehicleUseAt(STARTED_AT.toISOString());
   params.usageState = USAGE_STATE.inUse;
   const view = await wrap(<VehicleFillRoute />);
 
@@ -168,7 +169,7 @@ test("with no open day at all it goes Home", async () => {
 test("a type that is not one of the two is not a screen", async () => {
   const shift = await dayWith();
   params.type = "petrol";
-  params.usage = shift.vehicle?.startedAt ?? "";
+  params.usage = shift.vehicle?.useId ?? "";
   params.usageState = USAGE_STATE.inUse;
 
   const view = await wrap(<VehicleFillRoute />);
@@ -374,7 +375,7 @@ test("Cancel leaves the entry exactly as it was", async () => {
 test("recording a fill leaves the vehicle, its check and the day's history untouched", async () => {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: DRIVER.user.id,
   });
@@ -452,7 +453,7 @@ test("changing vehicle leaves the old use's fuel on it, and the new use empty", 
   const shift = await dayWith();
   await recorded(300);
   await changeVehicle({
-    shiftId: shift.id, endingStartedAt: shift.vehicle?.startedAt ?? "",
+    shiftId: shift.id, endingUseId: shift.vehicle?.useId ?? "",
     endMileage: 100_120, changedAt: at(11), next: XY34,
   });
 
@@ -467,12 +468,12 @@ test("returning to a plate used earlier shows NO fuel carried over", async () =>
   const shift = await dayWith();
   await recorded(300);
   await changeVehicle({
-    shiftId: shift.id, endingStartedAt: shift.vehicle?.startedAt ?? "",
+    shiftId: shift.id, endingUseId: shift.vehicle?.useId ?? "",
     endMileage: 100_120, changedAt: at(11), next: XY34,
   });
   const second = await readOpenShift();
   await changeVehicle({
-    shiftId: shift.id, endingStartedAt: second?.vehicle?.startedAt ?? "",
+    shiftId: shift.id, endingUseId: second?.vehicle?.useId ?? "",
     endMileage: 220_050, changedAt: at(13), next: { ...AB12, startMileage: 100_400 },
   });
 
@@ -525,7 +526,7 @@ async function changeTo(next: VehicleDetails, hour: number, endMileage?: number)
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await changeVehicle({
-    shiftId: open.id, endingStartedAt: open.vehicle.startedAt,
+    shiftId: open.id, endingUseId: open.vehicle.useId,
     endMileage: endMileage ?? open.vehicle.startMileage + 120, changedAt: at(hour), next,
   });
 }
@@ -535,7 +536,7 @@ async function endWithNoVehicle(hour: number): Promise<void> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await endVehicleUse({
-    shiftId: open.id, endingStartedAt: open.vehicle.startedAt,
+    shiftId: open.id, endingUseId: open.vehicle.useId,
     endMileage: open.vehicle.startMileage + 10, endedAt: at(hour),
   });
 }
@@ -565,7 +566,7 @@ const fillsOfUsage = async (startedAt: string) =>
 /** The fill screen as a used vehicle's Edit opens it: for that ended use. */
 async function openEndedFills(usage: string, which: "fuel" | "adblue" = "fuel"): Promise<View> {
   params.type = which;
-  params.usage = usage;
+  params.usage = vehicleUseAt(usage);
   params.usageState = USAGE_STATE.ended;
   const view = await wrap(<VehicleFillRoute />);
   await waitFor(() => { expect(view.queryByTestId("screen-title")).not.toBeNull(); });
@@ -675,7 +676,7 @@ test("opening the current fill screen for a use that has ENDED is not a screen �
   const { first } = await threeUseDay();
 
   params.type = "fuel";
-  params.usage = first;
+  params.usage = vehicleUseAt(first);
   params.usageState = USAGE_STATE.inUse;
   const view = await wrap(<VehicleFillRoute />);
 
@@ -689,7 +690,7 @@ test.each([
 ])("%s is not a screen — nothing falls back to the vehicle in use", async (_why, namesUse, usageState) => {
   const shift = await dayWith();
   params.type = "fuel";
-  if (namesUse) params.usage = shift.vehicle?.startedAt ?? "";
+  if (namesUse) params.usage = shift.vehicle?.useId ?? "";
   if (usageState !== undefined) params.usageState = usageState;
 
   const view = await wrap(<VehicleFillRoute />);
@@ -801,7 +802,7 @@ test.each([
   await threeUseDay();
 
   params.type = "fuel";
-  params.usage = usage;
+  params.usage = vehicleUseAt(usage);
   params.usageState = USAGE_STATE.ended;
   const view = await wrap(<VehicleFillRoute />);
 
@@ -812,7 +813,7 @@ test("the vehicle IN USE is not history: an ended-use screen naming it is refuse
   await threeUseDay();
 
   params.type = "fuel";
-  params.usage = (await readOpenShift())?.vehicle?.startedAt ?? "";
+  params.usage = (await readOpenShift())?.vehicle?.useId ?? "";
   params.usageState = USAGE_STATE.ended;
   const view = await wrap(<VehicleFillRoute />);
 

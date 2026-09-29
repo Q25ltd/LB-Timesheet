@@ -37,11 +37,12 @@ export default function ActiveShiftRoute() {
     <ActiveShiftScreen
       shift={shift}
       onDiscard={discard}
+      onFinish={() => { router.push("/finish-shift"); }}
       onAddVehicle={() => { router.push("/add-vehicle"); }}
       // Vehicle Checks name the EXACT use in the card, as Trailer Checks do.
       onVehicleChecks={() => {
         if (shift.vehicle !== null) {
-          router.push({ pathname: "/vehicle-check", params: { usage: shift.vehicle.startedAt, usageState: USAGE_STATE.inUse } });
+          router.push({ pathname: "/vehicle-check", params: { usage: shift.vehicle.useId, usageState: USAGE_STATE.inUse } });
         }
       }}
       onChangeVehicle={() => { router.push("/change-vehicle"); }}
@@ -57,6 +58,9 @@ export default function ActiveShiftRoute() {
       onOpenTrailerUsage={usage => { router.push({ pathname: "/trailer-usage", params: { usage } }); }}
       onAddTrailer={() => { router.push("/add-trailer"); }}
       onChangeTrailer={() => { router.push("/change-trailer"); }}
+      // A typing mistake in the plate or trailer number, by the EXACT use in the card.
+      onCorrectPlate={usage => { router.push({ pathname: "/correct-name", params: { asset: "vehicle", usage, usageState: USAGE_STATE.inUse } }); }}
+      onCorrectTrailerNumber={usage => { router.push({ pathname: "/correct-name", params: { asset: "trailer", usage, usageState: USAGE_STATE.inUse } }); }}
       // Fridge Diesel names the EXACT trailer use in the card; if it has been
       // handed back by the time the driver saves, nothing is written (D34).
       onFridgeDiesel={trailer => { router.push({ pathname: "/trailer-diesel", params: { trailer, usageState: USAGE_STATE.inUse } }); }}

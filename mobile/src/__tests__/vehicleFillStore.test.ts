@@ -27,6 +27,7 @@ import { checklistFor, checklistItems } from "../shift/checklists";
 import { FILL_TYPE, summariseFills, type VehicleFill } from "../shift/vehicleFill";
 import { usageDistance, usageHistory } from "../shift/usedVehicles";
 import { fillSummaryText } from "../screens/format";
+import { vehicleUseAt } from "./useIdAt";
 
 /** Exactly these fields, and no others — the id is checked separately. */
 const FILL_FIELDS = ["id", "litres", "note", "recordedAt", "type"];
@@ -47,7 +48,7 @@ async function fill(shift: LocalShift, over: Partial<RecordVehicleFillInput> = {
   const open = (await readOpenShift()) ?? shift;
   return recordVehicleFill({
     shiftId: shift.id,
-    vehicleStartedAt: open.vehicle?.startedAt ?? "",
+    vehicleUseId: open.vehicle?.useId ?? "",
     usageState: USAGE_STATE.inUse,
     fillId: newLocalId(),
     type: FILL_TYPE.fuel,
@@ -64,7 +65,7 @@ async function changeTo(shift: LocalShift, next: VehicleDetails, hour: number): 
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await changeVehicle({
-    shiftId: shift.id, endingStartedAt: open.vehicle.startedAt,
+    shiftId: shift.id, endingUseId: open.vehicle.useId,
     endMileage: open.vehicle.startMileage + 120, changedAt: at(hour), next,
   });
 }
@@ -287,7 +288,7 @@ test("a NEW fill may be recorded against a use that has ENDED, and lands only th
   const before = await readOpenShift();
 
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: endedAt, usageState: USAGE_STATE.ended, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(endedAt), usageState: USAGE_STATE.ended, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(10, 45), litres: 300, note: "Before I handed it back",
   });
 
@@ -307,12 +308,12 @@ test("a retrospective fill is refused when the use does not exist — no fallbac
   const before = storedFile().textSync();
 
   const missing = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: "2026-09-19T04:00:00.000Z", usageState: USAGE_STATE.ended, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt("2026-09-19T04:00:00.000Z"), usageState: USAGE_STATE.ended, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(12), litres: 100, note: "",
   });
   // A plate is not a use identity, and must not be read as one.
   const byPlate = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: "AB12 CDE", usageState: USAGE_STATE.ended, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(12), litres: 100, note: "",
   });
 
@@ -324,7 +325,7 @@ test("the OLDEST use of a repeated plate can be targeted — the newest one is n
   const { shift, first, second } = await dayOfThreeUses();
 
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.ended, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(),
     type: FILL_TYPE.adblue, recordedAt: at(8, 30), litres: null, note: "",
   });
 
@@ -338,7 +339,7 @@ test("a day with NO vehicle cannot hold a fill", async () => {
   const before = storedFile().textSync();
 
   const result = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(""), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(9), litres: 100, note: "",
   });
 
@@ -367,7 +368,7 @@ test("the vehicle in use CHANGED before the save: nothing is written — not to 
   const before = storedFile().textSync();
 
   const result = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: opened, usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(10, 50), litres: 300, note: "",
   });
 
@@ -381,14 +382,14 @@ test("the vehicle in use CHANGED before the save: nothing is written — not to 
 test("the vehicle in use was handed back with NO vehicle to follow: the save is refused", async () => {
   const shift = await dayWith();
   const opened = (await readOpenShift())?.vehicle?.startedAt ?? "";
-  await endVehicleUse({ shiftId: shift.id, endingStartedAt: opened, endMileage: 100_050, endedAt: at(13) });
+  await endVehicleUse({ shiftId: shift.id, endingUseId: vehicleUseAt(opened), endMileage: 100_050, endedAt: at(13) });
   const before = storedFile().textSync();
 
   const result = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: opened, usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.adblue, recordedAt: at(12), litres: null, note: "",
   });
-  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: opened, usageState: USAGE_STATE.inUse, fillId: "any" });
+  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: "any" });
 
   expect([result, removed]).toEqual([null, null]);
   expect(storedFile().textSync()).toBe(before);
@@ -402,8 +403,8 @@ test("a correction begun under the vehicle in use cannot rewrite its entry once 
   await changeTo(shift, XY34, 11);
   const before = storedFile().textSync();
 
-  const edited = await fill(shift, { vehicleStartedAt: opened, fillId: id, litres: 30 });
-  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: opened, usageState: USAGE_STATE.inUse, fillId: id });
+  const edited = await fill(shift, { vehicleUseId: vehicleUseAt(opened), fillId: id, litres: 30 });
+  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: id });
 
   expect([edited, removed]).toEqual([null, null]);
   expect(storedFile().textSync()).toBe(before);
@@ -415,7 +416,7 @@ test("the vehicle in use is not history: an ENDED-use write naming it is refused
   const before = storedFile().textSync();
 
   const result = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: current, usageState: USAGE_STATE.ended, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(current), usageState: USAGE_STATE.ended, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(9), litres: 100, note: "",
   });
 
@@ -428,7 +429,7 @@ test("CONTROL: the same use, while still in use, takes the fill", async () => {
   const opened = (await readOpenShift())?.vehicle?.startedAt ?? "";
 
   const result = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: opened, usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(10, 50), litres: 300, note: "",
   });
 
@@ -476,7 +477,7 @@ test("removing an entry takes ONLY that one", async () => {
   await fill(shift, { fillId: third, litres: 60 });
   const open = await readOpenShift();
 
-  await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId: second });
+  await removeVehicleFill({ shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: second });
 
   expect((await fillsOn()).map(entry => entry.id)).toEqual([first, third]);
 });
@@ -487,7 +488,7 @@ test("removing one that is not there changes nothing — a second press cannot t
   const open = await readOpenShift();
   const before = storedFile().textSync();
 
-  const day = await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId: "never-existed" });
+  const day = await removeVehicleFill({ shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: "never-existed" });
 
   expect(day?.vehicle?.fills).toHaveLength(1);
   expect(storedFile().textSync()).toBe(before);
@@ -497,7 +498,7 @@ test("rapid repeated recording of ONE entry leaves one entry", async () => {
   const shift = await dayWith();
   const open = await readOpenShift();
   const once = {
-    shiftId: shift.id, vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.fuel, recordedAt: at(9), litres: 300, note: "",
   };
 
@@ -509,7 +510,7 @@ test("rapid repeated recording of ONE entry leaves one entry", async () => {
 test("recording a fill leaves the checks, the mileages and the day's history untouched", async () => {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
@@ -578,7 +579,7 @@ test("an old day can be filled, and only then gains the field", async () => {
   storedFile().write(JSON.stringify(legacy));
 
   await recordVehicleFill({
-    shiftId: "shift_legacy", vehicleStartedAt: STARTED_AT.toISOString(), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: "shift_legacy", vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type: FILL_TYPE.adblue, recordedAt: at(9), litres: null, note: "",
   });
 
@@ -683,7 +684,7 @@ test("an ENDED use's fill can be corrected, and only that use changes", async ()
   const before = await readOpenShift();
 
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
     type: FILL_TYPE.fuel, recordedAt: at(8), litres: 30, note: "Was 300, actually 30",
   });
 
@@ -701,7 +702,7 @@ test("correcting the FIRST use of a plate never touches the second — targeting
   const { shift, first, second, fills } = await dayOfThreeUses();
 
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: second, usageState: USAGE_STATE.ended, fillId: fills.second ?? "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(second), usageState: USAGE_STATE.ended, fillId: fills.second ?? "",
     type: FILL_TYPE.adblue, recordedAt: at(13), litres: 20, note: "",
   });
 
@@ -713,7 +714,7 @@ test("correcting the FIRST use of a plate never touches the second — targeting
 test("an ENDED use's fill can be removed, and only that one goes", async () => {
   const { shift, first, second, fills } = await dayOfThreeUses();
 
-  await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.ended, fillId: fills.first ?? "" });
+  await removeVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: fills.first ?? "" });
 
   expect(await usageFills(first)).toEqual([]);
   expect(await usageFills(second)).toHaveLength(1);
@@ -723,7 +724,7 @@ test("a completed CHECK on an ended use survives a fill correction", async () =>
   const shift = await dayWith();
   const first = shift.vehicle?.startedAt ?? "";
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
@@ -733,7 +734,7 @@ test("a completed CHECK on an ended use survives a fill correction", async () =>
   const certificate = (await readOpenShift())?.previousVehicles[0]?.checks;
 
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.ended, fillId, type: FILL_TYPE.fuel, recordedAt: at(8), litres: 310, note: "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId, type: FILL_TYPE.fuel, recordedAt: at(8), litres: 310, note: "",
   });
 
   const after = (await readOpenShift())?.previousVehicles[0];
@@ -746,14 +747,14 @@ test("a use that answers to no name is not corrected — nothing anywhere change
   const before = storedFile().textSync();
 
   const missing = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: "2026-09-19T23:59:00.000Z", usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt("2026-09-19T23:59:00.000Z"), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
     type: FILL_TYPE.fuel, recordedAt: at(8), litres: 1, note: "",
   });
   const empty = await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: "", usageState: USAGE_STATE.inUse, fillId: fills.first ?? "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(""), usageState: USAGE_STATE.inUse, fillId: fills.first ?? "",
     type: FILL_TYPE.fuel, recordedAt: at(8), litres: 1, note: "",
   });
-  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleStartedAt: "AB12 CDE", usageState: USAGE_STATE.ended, fillId: fills.first ?? "" });
+  const removed = await removeVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: fills.first ?? "" });
 
   expect([missing, empty, removed]).toEqual([null, null, null]);
   expect(storedFile().textSync()).toBe(before);
@@ -762,7 +763,7 @@ test("a use that answers to no name is not corrected — nothing anywhere change
 test("a corrected historical fill survives a COLD START", async () => {
   const { shift, first, fills } = await dayOfThreeUses();
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: first, usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
     type: FILL_TYPE.fuel, recordedAt: at(8), litres: 275.5, note: "Corrected",
   });
 
@@ -788,7 +789,7 @@ test("an equal start and end is a real use — it travelled 0 mi", async () => {
   const shift = await dayWith();
   const open = await readOpenShift();
   await changeVehicle({
-    shiftId: shift.id, endingStartedAt: open?.vehicle?.startedAt ?? "",
+    shiftId: shift.id, endingUseId: open?.vehicle?.useId ?? "",
     endMileage: 100_000, changedAt: at(9), next: XY34,
   });
 

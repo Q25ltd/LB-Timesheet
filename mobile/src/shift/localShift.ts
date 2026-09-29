@@ -34,6 +34,10 @@
  * cannot read is never written over: Start Shift moves it aside for recovery
  * first (`preserveForRecovery`).
  *
+ * A FINISHED DAY LEAVES THIS FILE. Finish Shift files it as its own
+ * completed record and only then removes the open day (`finishOpenShift`):
+ * the open file only ever holds the day being worked.
+ *
  * NOT persisted here: anything the requirements have not asked for — no note
  * field waiting for a later step to fill in (CLAUDE.md — never invent a field
  * nothing writes). Vehicle checks and their
@@ -44,8 +48,10 @@
  * ONE VEHICLE AT A TIME, AND EVERY EARLIER ONE KEPT. A day holds the vehicle
  * in use (`vehicle`) and, once the driver has changed vehicle, each earlier
  * USE of a vehicle, closed with the mileage and time it ended at
- * (`previousVehicles`). A use is identified by when it began, `startedAt` —
- * never by its plate: returning to a truck used this morning is a NEW use,
+ * (`previousVehicles`). A use is identified by its `useId` — given once,
+ * when the use is created, and never changed (D42) — never by its plate, and
+ * never by when it began: `startedAt` is a business time the driver may
+ * correct, not a name. Returning to a truck used this morning is a NEW use,
  * with its own start mileage, its own checks and its own fills, and the
  * morning's record is left exactly as it was.
  *
@@ -64,7 +70,9 @@
  * here — and nothing reading it — may treat the classes already used as a
  * constraint on the next one.
  */
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
+import { USE_ENDED_BY, asUseEndedBy, type UseEndedBy } from "./useEnd";
+import { readUseId } from "./useIdentity";
 import { checklistFor, checklistItems, trailerChecklistFor, type Checklist } from "./checklists";
 import {
   FILL_TYPES,
@@ -122,8 +130,11 @@ export interface VehicleDetails {
 }
 
 export interface LocalVehicle extends VehicleDetails {
+  /** This use's identity — immutable, never its start or plate (`useIdentity.ts`, D42). */
+  useId: string;
   /**
-   * When this vehicle's use in the day BEGAN. One meaning, whichever way the
+   * When this vehicle's use in the day BEGAN — business time, correctable
+   * under the day's chronology (D42); NOT its identity. One meaning, whichever way the
    * vehicle arrived:
    *
    *   given at Start Shift   the shift's declared `startedAt` — the same
@@ -162,6 +173,8 @@ export interface EndedVehicle extends LocalVehicle {
   endMileage: number;
   /** The device clock at the change — the same instant the next use began. */
   endedAt: string;
+  /** Present only when the day's Finish Shift ended it (`useEnd.ts`). */
+  endedBy?: UseEndedBy;
 }
 
 /**
@@ -251,6 +264,13 @@ export function normalisePlate(raw: string): string {
   return raw.trim().toUpperCase();
 }
 
+/**
+ * Every status a local day can have: OPEN while it is being worked, and
+ * COMPLETED once the driver has finished it (`finishOpenShift`). Nothing here
+ * is a server status — a completed day has been sent nowhere (D28).
+ */
+export const LOCAL_SHIFT_STATUS = { open: "open", completed: "completed" } as const;
+
 export interface LocalShift {
   /**
    * This device's identity for the day.
@@ -288,7 +308,7 @@ export interface LocalShift {
    * same trailer may appear more than once, each a separate use.
    */
   previousTrailers: EndedTrailer[];
-  status: "open";
+  status: typeof LOCAL_SHIFT_STATUS.open;
   createdAt: string;
 }
 
@@ -387,15 +407,24 @@ function persist(next: LocalShift): LocalShift {
     throw new Error("Refusing to store a day the reader would refuse");
   }
 
+  storeSafely(serialised, openShiftFile(), { overwrite: true });
+  return next;
+}
+
+/**
+ * Steps 2 and 3 of `persist`, for any file the day is saved to: the live
+ * day, or a finished day's record (`finishOpenShift`), which never overwrites.
+ * Every failure is a `SafeSaveFailedError`.
+ */
+function storeSafely(serialised: string, target: File, options: { overwrite: boolean }): void {
   try {
     const temp = new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
     // Left by an interrupted write: kept, never promoted, never overwritten.
     if (temp.exists) preserveForRecovery(temp, "unfinished");
-    writeVerified(serialised).moveSync(openShiftFile(), { overwrite: true });
+    writeVerified(serialised).moveSync(target, options);
   } catch (error: unknown) {
     throw new SafeSaveFailedError(error);
   }
-  return next;
 }
 
 /**
@@ -426,7 +455,7 @@ function asLocalShift(value: unknown): LocalShift | null {
   if (typeof id !== "string" || id === "") return null;
   if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
   if (typeof createdAt !== "string" || Number.isNaN(Date.parse(createdAt))) return null;
-  if (status !== "open") return null;
+  if (status !== LOCAL_SHIFT_STATUS.open) return null;
 
   const context = asWorkingContext(workingFor);
   if (context === null) return null;
@@ -438,17 +467,20 @@ function asLocalShift(value: unknown): LocalShift | null {
 
   const previous = asPreviousVehicles(record["previousVehicles"]);
   if (previous === null) return null;
-  // One use, one start: `startedAt` is what identifies a use, so no two share it.
-  const starts = [...previous, ...(asVehicle === null ? [] : [asVehicle])].map(use => use.startedAt);
-  if (new Set(starts).size !== starts.length) return null;
+  // Nothing on a day still being worked was ended by its finish.
+  if (previous.some(use => use.endedBy !== undefined)) return null;
+  // One vehicle at a time, so no two uses share a start; and each use its own id.
+  const vehicleUses = [...previous, ...(asVehicle === null ? [] : [asVehicle])];
+  if (!distinct(vehicleUses.map(use => use.startedAt)) || !distinct(vehicleUses.map(use => use.useId))) return null;
 
   const trailers = asTrailers(record["trailer"], record["previousTrailers"]);
   if (trailers === null) return null;
+  if (trailers.previousTrailers.some(use => use.endedBy !== undefined)) return null;
   // A trailer in use requires a vehicle in use that tows it (D34). A day that
   // says otherwise was not written by this app, and is not guessed at.
   if (trailers.trailer !== null && (asVehicle === null || !towsTrailers(asVehicle.vehicleClass))) return null;
 
-  return { id, workingFor: context, startedAt, vehicle: asVehicle, previousVehicles: previous, ...trailers, status: "open", createdAt };
+  return { id, workingFor: context, startedAt, vehicle: asVehicle, previousVehicles: previous, ...trailers, status: LOCAL_SHIFT_STATUS.open, createdAt };
 }
 
 /**
@@ -478,8 +510,8 @@ function asTrailers(current: unknown, previous: unknown): { trailer: LocalTraile
     }
   }
 
-  const starts = [...previousTrailers, ...(trailer === null ? [] : [trailer])].map(use => use.startedAt);
-  if (new Set(starts).size !== starts.length) return null;
+  const trailerUses = [...previousTrailers, ...(trailer === null ? [] : [trailer])];
+  if (!distinct(trailerUses.map(use => use.startedAt)) || !distinct(trailerUses.map(use => use.useId))) return null;
   return { trailer, previousTrailers };
 }
 
@@ -529,7 +561,9 @@ function asEndedVehicle(value: unknown): EndedVehicle | null {
   // A use cannot end before it began; the store refuses to write one
   // (`UseEndsBeforeItStartedError`), so a day claiming one fails closed.
   if (Date.parse(endedAt) < Date.parse(use.startedAt)) return null;
-  return { ...use, endMileage, endedAt };
+  const endedBy = asUseEndedBy(record["endedBy"]);
+  if (endedBy === null) return null;
+  return endedBy === undefined ? { ...use, endMileage, endedAt } : { ...use, endMileage, endedAt, endedBy };
 }
 
 function asWorkingContext(value: unknown): WorkingContext | null {
@@ -575,7 +609,9 @@ function asLocalVehicle(value: unknown, shiftStartedAt: string): LocalVehicle | 
   const fills = readFills(record["fills"]);
   if (fills === null) return null;
 
-  return { ...vehicle, startedAt: usageStartedAt, checks: readChecks(record["checks"], vehicle.vehicleClass), fills };
+  const useId = readUseId(record["useId"], "vehicle", usageStartedAt);
+  if (useId === null) return null;
+  return { ...vehicle, useId, startedAt: usageStartedAt, checks: readChecks(record["checks"], vehicle.vehicleClass), fills };
 }
 
 /**
@@ -616,7 +652,12 @@ export async function readOpenShift(): Promise<LocalShift | null> {
   if (!file.exists) return null;
 
   try {
-    return asLocalShift(JSON.parse(await file.text()));
+    const shift = asLocalShift(JSON.parse(await file.text()));
+    // Already filed as finished: the leftover of a finish that could not
+    // remove the open file (`finishOpenShift`). Not open, and never finished
+    // twice.
+    if (shift !== null && readCompletedSync(shift.id) !== null) return null;
+    return shift;
   } catch {
     // Unreadable. Reported as "no open shift" — the safe direction, since the
     // alternative is an app that cannot open. The file is left in place, and
@@ -671,11 +712,11 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
     workingFor: input.workingFor,
     startedAt,
     // A vehicle given at the start began with the day: the same instant.
-    vehicle:    vehicle === null ? null : { ...vehicle, startedAt, checks: [], fills: [] },
+    vehicle:    vehicle === null ? null : { ...vehicle, useId: newLocalId(), startedAt, checks: [], fills: [] },
     previousVehicles: [],
     trailer:          null,
     previousTrailers: [],
-    status:     "open",
+    status:     LOCAL_SHIFT_STATUS.open,
     createdAt:  new Date().toISOString(),
   };
 
@@ -683,7 +724,11 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
   // It is never written over: its exact bytes are moved aside first, and if
   // that fails this throws and no new day is started.
   const live = openShiftFile();
-  if (live.exists) preserveForRecovery(live, "unreadable");
+  if (live.exists) {
+    // A finished day's leftover holds nothing its completed record does not.
+    if (isFinishedLeftover(live)) live.delete();
+    else preserveForRecovery(live, "unreadable");
+  }
 
   return persist(shift);
 }
@@ -740,15 +785,15 @@ async function addIfNoVehicle({ vehicle: entered, startedAt }: AddVehicleInput):
     throw new Error("Refusing a vehicle use that starts at the same instant as another");
   }
 
-  const updated: LocalShift = { ...open, vehicle: { ...vehicle, startedAt: at, checks: [], fills: [] } };
+  const updated: LocalShift = { ...open, vehicle: { ...vehicle, useId: newLocalId(), startedAt: at, checks: [], fills: [] } };
   return persist(updated);
 }
 
 export interface ChangeVehicleInput {
   /** The day being changed. */
   shiftId: string;
-  /** The use being ended, by its `startedAt` — the vehicle the driver saw on screen. */
-  endingStartedAt: string;
+  /** The use being ended, by its `useId` — the vehicle the driver saw on screen. */
+  endingUseId: string;
   /** The odometer reading as the driver hands that vehicle back. */
   endMileage: number;
   /** The vehicle taken next, as entered or chosen. */
@@ -775,7 +820,7 @@ export interface ChangeVehicleInput {
  * begun. A failed write leaves the file as it was.
  *
  * ONCE, however many presses. A change applies only while the vehicle in use
- * is still the one named by `endingStartedAt`; a second press finds the new
+ * is still the one named by `endingUseId`; a second press finds the new
  * vehicle there and returns the day unchanged. Resolves to the day as it now
  * stands, or `null` when that day is no longer the one open.
  *
@@ -792,7 +837,7 @@ export function changeVehicle(input: ChangeVehicleInput): Promise<LocalShift | n
   return queued(() => changeIfCurrent(input));
 }
 
-async function changeIfCurrent({ shiftId, endingStartedAt, endMileage, next: entered, changedAt }: ChangeVehicleInput): Promise<LocalShift | null> {
+async function changeIfCurrent({ shiftId, endingUseId, endMileage, next: entered, changedAt }: ChangeVehicleInput): Promise<LocalShift | null> {
   const next = checkedVehicle(entered, "Refusing an invalid vehicle change");
   if (!Number.isSafeInteger(endMileage) || endMileage < 0 || Number.isNaN(changedAt.getTime())) {
     throw new Error("Refusing an invalid vehicle change");
@@ -802,7 +847,7 @@ async function changeIfCurrent({ shiftId, endingStartedAt, endMileage, next: ent
   if (open === null || open.id !== shiftId) return null;
   const current = open.vehicle;
   // Already changed — by an earlier press — or nothing to change from.
-  if (current?.startedAt !== endingStartedAt) return open;
+  if (current?.useId !== endingUseId) return open;
 
   const at = changedAt.toISOString();
   assertEndsAfterStart(current.startedAt, at);
@@ -815,7 +860,7 @@ async function changeIfCurrent({ shiftId, endingStartedAt, endMileage, next: ent
   const ended: EndedVehicle = { ...current, endMileage, endedAt: at };
   const updated: LocalShift = {
     ...open,
-    vehicle: { ...next, startedAt: at, checks: [], fills: [] },
+    vehicle: { ...next, useId: newLocalId(), startedAt: at, checks: [], fills: [] },
     previousVehicles: [...open.previousVehicles, ended],
   };
   return persist(updated);
@@ -824,8 +869,8 @@ async function changeIfCurrent({ shiftId, endingStartedAt, endMileage, next: ent
 export interface EndVehicleUseInput {
   /** The day being changed. */
   shiftId: string;
-  /** The use being ended, by its `startedAt` — the vehicle the driver saw on screen. */
-  endingStartedAt: string;
+  /** The use being ended, by its `useId` — the vehicle the driver saw on screen. */
+  endingUseId: string;
   /** The odometer reading as the driver hands that vehicle back. */
   endMileage: number;
   /**
@@ -855,7 +900,7 @@ export interface EndVehicleUseInput {
  * `endedAt` is never rewritten to meet it, so the real gap survives.
  *
  * ONCE, however many presses — the same rule as a change: it applies only
- * while the vehicle in use is still the one named by `endingStartedAt`, so a
+ * while the vehicle in use is still the one named by `endingUseId`, so a
  * second press finds none there and returns the day unchanged. Resolves to the
  * day as it now stands, or `null` when that day is not the one open.
  *
@@ -868,7 +913,7 @@ export function endVehicleUse(input: EndVehicleUseInput): Promise<LocalShift | n
   return queued(() => endIfCurrent(input));
 }
 
-async function endIfCurrent({ shiftId, endingStartedAt, endMileage, endedAt }: EndVehicleUseInput): Promise<LocalShift | null> {
+async function endIfCurrent({ shiftId, endingUseId, endMileage, endedAt }: EndVehicleUseInput): Promise<LocalShift | null> {
   if (!Number.isSafeInteger(endMileage) || endMileage < 0 || Number.isNaN(endedAt.getTime())) {
     throw new Error("Refusing an invalid end of a vehicle use");
   }
@@ -877,7 +922,7 @@ async function endIfCurrent({ shiftId, endingStartedAt, endMileage, endedAt }: E
   if (open === null || open.id !== shiftId) return null;
   const current = open.vehicle;
   // Already ended — by an earlier press — or nothing to end.
-  if (current?.startedAt !== endingStartedAt) return open;
+  if (current?.useId !== endingUseId) return open;
 
   const at = endedAt.toISOString();
   assertEndsAfterStart(current.startedAt, at);
@@ -893,8 +938,8 @@ async function endIfCurrent({ shiftId, endingStartedAt, endMileage, endedAt }: E
 export interface VehicleCheckWrite {
   /** The day the check belongs to. */
   shiftId: string;
-  /** The vehicle use being checked, by its `startedAt`. */
-  vehicleStartedAt: string;
+  /** The vehicle use being checked, by its `useId`. */
+  vehicleUseId: string;
   /**
    * Whether that use is expected to be the vehicle IN USE, or one that has
    * ENDED — a check forgotten before the vehicle was handed back. The use must
@@ -955,10 +1000,10 @@ export interface CompleteVehicleCheckInput extends VehicleCheckWrite {
 }
 
 async function writeCheck(input: VehicleCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
-  const open = await readOpenShift();
-  if (open === null || open.id !== input.shiftId) return null;
+  const open = await readDayOfUses(input.shiftId);
+  if (open === null) return null;
   // Exactly the use named, in the state named — never by plate (`locateUsage`).
-  const target = locateUsage(open, input.vehicleStartedAt, input.usageState);
+  const target = locateUsage(open, input.vehicleUseId, input.usageState);
   if (target === null) return null;
   const result = nextChecks(target.use.checks, checklistFor(target.use.vehicleClass), input, certification);
   if (result.checks === null) return result.check;
@@ -1062,8 +1107,8 @@ function nextChecks(
 export interface RecordVehicleFillInput {
   /** The day the fill belongs to. */
   shiftId: string;
-  /** The vehicle USE it went into, by its `startedAt`. */
-  vehicleStartedAt: string;
+  /** The vehicle USE it went into, by its `useId`. */
+  vehicleUseId: string;
   /** Whether that use is expected to be the one in use, or one that has ended. */
   usageState: UsageState;
   /**
@@ -1084,7 +1129,7 @@ export interface RecordVehicleFillInput {
 /**
  * Record fuel or AdBlue on a vehicle use, or correct one already recorded.
  *
- * IT LANDS ON THE USE NAMED BY `vehicleStartedAt`, AND NOWHERE ELSE. A fill is
+ * IT LANDS ON THE USE NAMED BY `vehicleUseId`, AND NOWHERE ELSE. A fill is
  * never matched by number plate: a day may hold three uses of AB12 CDE, and
  * correcting the morning's fuel must not touch the afternoon's
  * (`locateUsage`). A name that matches no use writes nothing at all.
@@ -1112,14 +1157,14 @@ export function recordVehicleFill(input: RecordVehicleFillInput): Promise<LocalS
   return queued(() => writeFill(input));
 }
 
-async function writeFill({ shiftId, vehicleStartedAt, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
+async function writeFill({ shiftId, vehicleUseId, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
   if (fillId === "") throw new Error("Refusing a fill with no id");
   if (!FILL_TYPES.some(entry => entry.id === type)) throw new Error("Refusing a fill of an unknown type");
   const described = checkedFillNote({ fillId, recordedAt, litres, note });
 
-  const open = await readOpenShift();
-  if (open === null || open.id !== shiftId) return null;
-  const target = locateUsage(open, vehicleStartedAt, usageState);
+  const open = await readDayOfUses(shiftId);
+  if (open === null) return null;
+  const target = locateUsage(open, vehicleUseId, usageState);
   if (target === null) return null;
 
   const fill: VehicleFill = { id: fillId, type, recordedAt: recordedAt.toISOString(), litres, note: described };
@@ -1127,9 +1172,9 @@ async function writeFill({ shiftId, vehicleStartedAt, usageState, fillId, type, 
 }
 
 /**
- * The one use a `startedAt` names, in the state the caller expects, or `null`.
+ * The one use a `useId` names, in the state the caller expects, or `null`.
  *
- * `startedAt` IS the identity of a use (see the module header), and no two in
+ * `useId` IS the identity of a use (see the module header, D42), and no two in
  * a day may share one, so this can never be ambiguous. An unknown name — an
  * empty string, a use from another day, a plate mistaken for a time — matches
  * nothing and the caller writes nothing, rather than falling back to the
@@ -1137,12 +1182,12 @@ async function writeFill({ shiftId, vehicleStartedAt, usageState, fillId, type, 
  * is no longer in the expected state: the vehicle a screen was opened for has
  * been handed back since.
  */
-function locateUsage(open: LocalShift, startedAt: string, state: UsageState): { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number } | null {
-  if (startedAt === "") return null;
+function locateUsage(open: LocalShift, useId: string, state: UsageState): { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number } | null {
+  if (useId === "") return null;
   if (state === USAGE_STATE.inUse) {
-    return open.vehicle !== null && open.vehicle.startedAt === startedAt ? { use: open.vehicle, ended: false } : null;
+    return open.vehicle !== null && open.vehicle.useId === useId ? { use: open.vehicle, ended: false } : null;
   }
-  const index = open.previousVehicles.findIndex(use => use.startedAt === startedAt);
+  const index = open.previousVehicles.findIndex(use => use.useId === useId);
   const ended = open.previousVehicles[index];
   return ended === undefined ? null : { use: ended, ended: true, index };
 }
@@ -1159,21 +1204,21 @@ function writeFills(
   return writeVehicleUse(open, target, { fills });
 }
 
-/** The day with one vehicle use's fills or checks replaced, and NOTHING else touched. */
+/** The day with one vehicle use's fills, checks or plate replaced, and NOTHING else touched. */
 function writeVehicleUse(
   open: LocalShift,
   target: { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number },
-  patch: Partial<Pick<LocalVehicle, "fills" | "checks">>,
+  patch: Partial<Pick<LocalVehicle, "fills" | "checks" | "numberPlate" | "startMileage">>,
 ): LocalShift {
   const updated: LocalShift = target.ended
     ? { ...open, previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, ...patch } : use)) }
     : { ...open, vehicle: { ...target.use, ...patch } };
-  return persist(updated);
+  return saveDay(open, updated);
 }
 
 export interface RemoveVehicleFillInput {
   shiftId: string;
-  vehicleStartedAt: string;
+  vehicleUseId: string;
   /** Whether that use is expected to be the one in use, or one that has ended. */
   usageState: UsageState;
   fillId: string;
@@ -1186,17 +1231,17 @@ export interface RemoveVehicleFillInput {
  * Only that one goes: every other fill, the checks, the mileages, the times
  * and the day's other uses are untouched. Removing one that is not there
  * returns the day unchanged, so a repeated press cannot take a second entry
- * with it, and a `vehicleStartedAt` naming no use — or a use no longer in the
+ * with it, and a `vehicleUseId` naming no use — or a use no longer in the
  * expected state — removes nothing anywhere.
  */
 export function removeVehicleFill(input: RemoveVehicleFillInput): Promise<LocalShift | null> {
   return queued(() => deleteFill(input));
 }
 
-async function deleteFill({ shiftId, vehicleStartedAt, usageState, fillId }: RemoveVehicleFillInput): Promise<LocalShift | null> {
-  const open = await readOpenShift();
-  if (open === null || open.id !== shiftId) return null;
-  const target = locateUsage(open, vehicleStartedAt, usageState);
+async function deleteFill({ shiftId, vehicleUseId, usageState, fillId }: RemoveVehicleFillInput): Promise<LocalShift | null> {
+  const open = await readDayOfUses(shiftId);
+  if (open === null) return null;
+  const target = locateUsage(open, vehicleUseId, usageState);
   if (target === null) return null;
   if (!target.use.fills.some(stored => stored.id === fillId)) return open;
 
@@ -1205,8 +1250,8 @@ async function deleteFill({ shiftId, vehicleStartedAt, usageState, fillId }: Rem
 
 export interface CorrectEndMileageInput {
   shiftId: string;
-  /** The ENDED use being corrected, by its `startedAt`. */
-  vehicleStartedAt: string;
+  /** The ENDED use being corrected, by its `useId`. */
+  vehicleUseId: string;
   /** The odometer reading the driver meant to enter when they handed it back. */
   endMileage: number;
 }
@@ -1231,12 +1276,12 @@ export function correctEndMileage(input: CorrectEndMileageInput): Promise<LocalS
   return queued(() => rewriteEndMileage(input));
 }
 
-async function rewriteEndMileage({ shiftId, vehicleStartedAt, endMileage }: CorrectEndMileageInput): Promise<LocalShift | null> {
+async function rewriteEndMileage({ shiftId, vehicleUseId, endMileage }: CorrectEndMileageInput): Promise<LocalShift | null> {
   if (!Number.isSafeInteger(endMileage) || endMileage < 0) throw new Error("Refusing an invalid end mileage");
 
-  const open = await readOpenShift();
-  if (open === null || open.id !== shiftId) return null;
-  const target = locateUsage(open, vehicleStartedAt, USAGE_STATE.ended);
+  const open = await readDayOfUses(shiftId);
+  if (open === null) return null;
+  const target = locateUsage(open, vehicleUseId, USAGE_STATE.ended);
   if (target === null || !target.ended) return null;
   if (endMileage < target.use.startMileage) throw new Error("Refusing an end mileage below the start mileage");
 
@@ -1244,7 +1289,7 @@ async function rewriteEndMileage({ shiftId, vehicleStartedAt, endMileage }: Corr
     ...open,
     previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, endMileage } : use)),
   };
-  return persist(updated);
+  return saveDay(open, updated);
 }
 
 /** A trailer as entered, normalised — or a refusal. */
@@ -1294,14 +1339,14 @@ async function addIfNoTrailer({ shiftId, trailer, startedAt }: AddTrailerInput):
     throw new Error("Refusing a trailer use that starts at the same instant as another");
   }
 
-  const updated: LocalShift = { ...open, trailer: { ...details, startedAt: at, reeferDiesel: [], checks: [] } };
+  const updated: LocalShift = { ...open, trailer: { ...details, useId: newLocalId(), startedAt: at, reeferDiesel: [], checks: [] } };
   return persist(updated);
 }
 
 export interface ChangeTrailerInput {
   shiftId: string;
-  /** The trailer use being ended, by its `startedAt` — the one the driver saw on screen. */
-  endingStartedAt: string;
+  /** The trailer use being ended, by its `useId` — the one the driver saw on screen. */
+  endingUseId: string;
   /** The trailer taken next, or `null` to carry on with NO TRAILER. */
   next: TrailerDetails | null;
   /** The moment of the change, from the device clock. The press, not the write. */
@@ -1321,21 +1366,21 @@ export interface ChangeTrailerInput {
  * that tows one (D30); ending one is always allowed.
  *
  * ONCE, however many presses: it applies only while the trailer in use is
- * still the one named by `endingStartedAt`; otherwise the day is returned
+ * still the one named by `endingUseId`; otherwise the day is returned
  * unchanged. Resolves to `null` when that day is not the one open.
  */
 export function changeTrailer(input: ChangeTrailerInput): Promise<LocalShift | null> {
   return queued(() => changeTrailerIfCurrent(input));
 }
 
-async function changeTrailerIfCurrent({ shiftId, endingStartedAt, next, changedAt }: ChangeTrailerInput): Promise<LocalShift | null> {
+async function changeTrailerIfCurrent({ shiftId, endingUseId, next, changedAt }: ChangeTrailerInput): Promise<LocalShift | null> {
   const details = next === null ? null : checkedTrailer(next);
   if (Number.isNaN(changedAt.getTime())) throw new Error("Refusing an invalid trailer change");
 
   const open = await readOpenShift();
   if (open === null || open.id !== shiftId) return null;
   const current = open.trailer;
-  if (current?.startedAt !== endingStartedAt) return open;
+  if (current?.useId !== endingUseId) return open;
 
   assertEndsAfterStart(current.startedAt, changedAt.toISOString());
   if (details !== null && (open.vehicle === null || !towsTrailers(open.vehicle.vehicleClass))) {
@@ -1349,7 +1394,7 @@ async function changeTrailerIfCurrent({ shiftId, endingStartedAt, next, changedA
   const ended: EndedTrailer = { ...current, endedAt: at };
   const updated: LocalShift = {
     ...open,
-    trailer: details === null ? null : { ...details, startedAt: at, reeferDiesel: [], checks: [] },
+    trailer: details === null ? null : { ...details, useId: newLocalId(), startedAt: at, reeferDiesel: [], checks: [] },
     previousTrailers: [...open.previousTrailers, ended],
   };
   return persist(updated);
@@ -1358,8 +1403,8 @@ async function changeTrailerIfCurrent({ shiftId, endingStartedAt, next, changedA
 export interface TrailerCheckWrite {
   /** The day the check belongs to. */
   shiftId: string;
-  /** The trailer use being checked, by its `startedAt`. */
-  trailerStartedAt: string;
+  /** The trailer use being checked, by its `useId`. */
+  trailerUseId: string;
   /**
    * Whether that use is expected to be the trailer IN USE, or one that has
    * ENDED — a check forgotten before the trailer was handed back (D35). The
@@ -1407,8 +1452,8 @@ export function completeTrailerCheck(input: CompleteTrailerCheckInput): Promise<
 }
 
 async function writeTrailerCheck(input: TrailerCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
-  const open = await readOpenShift();
-  const target = locateTrailer(open, input.shiftId, input.trailerStartedAt, input.usageState);
+  const open = await readDayOfUses(input.shiftId);
+  const target = locateTrailer(open, input.shiftId, input.trailerUseId, input.usageState);
   if (open === null || target === null) return null;
   const result = nextChecks(target.use.checks, trailerChecklistFor(target.use.trailerType), input, certification);
   if (result.checks === null) return result.check;
@@ -1424,29 +1469,29 @@ type TrailerTarget = { use: LocalTrailer; ended: false } | { use: EndedTrailer; 
  * or `null`. Never by trailer number, never a fallback to the trailer in use,
  * and an ended use must match exactly once: anything ambiguous is refused.
  */
-function locateTrailer(open: LocalShift | null, shiftId: string, startedAt: string, state: UsageState): TrailerTarget | null {
-  if (open === null || open.id !== shiftId || startedAt === "") return null;
+function locateTrailer(open: LocalShift | null, shiftId: string, useId: string, state: UsageState): TrailerTarget | null {
+  if (open === null || open.id !== shiftId || useId === "") return null;
   if (state === USAGE_STATE.inUse) {
-    return open.trailer !== null && open.trailer.startedAt === startedAt ? { use: open.trailer, ended: false } : null;
+    return open.trailer !== null && open.trailer.useId === useId ? { use: open.trailer, ended: false } : null;
   }
-  const matches = open.previousTrailers.flatMap((use, index) => (use.startedAt === startedAt ? [{ use, index }] : []));
+  const matches = open.previousTrailers.flatMap((use, index) => (use.useId === useId ? [{ use, index }] : []));
   const [only] = matches;
   return matches.length === 1 && only !== undefined ? { use: only.use, ended: true, index: only.index } : null;
 }
 
-/** The day with one trailer use's checks or fridge diesel replaced, and NOTHING else touched. */
-function writeTrailerUse(open: LocalShift, target: TrailerTarget, patch: Partial<Pick<LocalTrailer, "checks" | "reeferDiesel">>): LocalShift {
+/** The day with one trailer use's checks, fridge diesel or number replaced, and NOTHING else touched. */
+function writeTrailerUse(open: LocalShift, target: TrailerTarget, patch: Partial<Pick<LocalTrailer, "checks" | "reeferDiesel" | "trailerNumber">>): LocalShift {
   const updated: LocalShift = target.ended
     ? { ...open, previousTrailers: open.previousTrailers.map((use, index) => (index === target.index ? { ...use, ...patch } : use)) }
     : { ...open, trailer: { ...target.use, ...patch } };
-  return persist(updated);
+  return saveDay(open, updated);
 }
 
 /** A correction of a COMPLETED walkaround check — a vehicle's or a trailer's. */
 export interface CheckRevisionWrite {
   shiftId: string;
-  /** The use the check is on, by its `startedAt` — never a plate or a trailer number. */
-  usageStartedAt: string;
+  /** The use the check is on, by its `useId` — never a plate or a trailer number. */
+  useId: string;
   /** Whether that use is expected to be the one in use, or one that has ended. */
   usageState: UsageState;
   /** The completed check being corrected. */
@@ -1466,9 +1511,9 @@ export interface CheckRevisionWrite {
  */
 export function reviseVehicleCheck(input: CheckRevisionWrite): Promise<VehicleCheck | null> {
   return queued(async () => {
-    const open = await readOpenShift();
-    if (open === null || open.id !== input.shiftId) return null;
-    const target = locateUsage(open, input.usageStartedAt, input.usageState);
+    const open = await readDayOfUses(input.shiftId);
+    if (open === null) return null;
+    const target = locateUsage(open, input.useId, input.usageState);
     if (target === null) return null;
     const result = reviseCheck(target.use.checks, checklistFor(target.use.vehicleClass), input);
     if (result.checks !== null) writeVehicleUse(open, target, { checks: result.checks });
@@ -1481,8 +1526,8 @@ export function reviseVehicleCheck(input: CheckRevisionWrite): Promise<VehicleCh
  */
 export function reviseTrailerCheck(input: CheckRevisionWrite): Promise<VehicleCheck | null> {
   return queued(async () => {
-    const open = await readOpenShift();
-    const target = locateTrailer(open, input.shiftId, input.usageStartedAt, input.usageState);
+    const open = await readDayOfUses(input.shiftId);
+    const target = locateTrailer(open, input.shiftId, input.useId, input.usageState);
     if (open === null || target === null) return null;
     const result = reviseCheck(target.use.checks, trailerChecklistFor(target.use.trailerType), input);
     if (result.checks !== null) writeTrailerUse(open, target, { checks: result.checks });
@@ -1533,8 +1578,8 @@ function reviseCheck(
 
 export interface RecordReeferDieselInput {
   shiftId: string;
-  /** The trailer use it went into, by its `startedAt`. */
-  trailerStartedAt: string;
+  /** The trailer use it went into, by its `useId`. */
+  trailerUseId: string;
   /** Whether that use is expected to be the trailer in use, or one that has ended. */
   usageState: UsageState;
   /** A second write with the same id corrects that entry. */
@@ -1563,11 +1608,11 @@ export function recordReeferDiesel(input: RecordReeferDieselInput): Promise<Loca
   return queued(() => writeReeferDiesel(input));
 }
 
-async function writeReeferDiesel({ shiftId, trailerStartedAt, usageState, fillId, recordedAt, litres, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
+async function writeReeferDiesel({ shiftId, trailerUseId, usageState, fillId, recordedAt, litres, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
   const described = checkedFillNote({ fillId, recordedAt, litres, note });
 
-  const open = await readOpenShift();
-  const target = reefer(locateTrailer(open, shiftId, trailerStartedAt, usageState));
+  const open = await readDayOfUses(shiftId);
+  const target = reefer(locateTrailer(open, shiftId, trailerUseId, usageState));
   if (open === null || target === null) return null;
 
   const fill: FillRecord = { id: fillId, recordedAt: recordedAt.toISOString(), litres, note: described };
@@ -1576,7 +1621,7 @@ async function writeReeferDiesel({ shiftId, trailerStartedAt, usageState, fillId
 
 export interface RemoveReeferDieselInput {
   shiftId: string;
-  trailerStartedAt: string;
+  trailerUseId: string;
   /** Whether that use is expected to be the trailer in use, or one that has ended. */
   usageState: UsageState;
   fillId: string;
@@ -1585,8 +1630,8 @@ export interface RemoveReeferDieselInput {
 /** Remove one fridge-diesel entry from the refrigerated trailer use named — only that one. */
 export function removeReeferDiesel(input: RemoveReeferDieselInput): Promise<LocalShift | null> {
   return queued(async () => {
-    const open = await readOpenShift();
-    const target = reefer(locateTrailer(open, input.shiftId, input.trailerStartedAt, input.usageState));
+    const open = await readDayOfUses(input.shiftId);
+    const target = reefer(locateTrailer(open, input.shiftId, input.trailerUseId, input.usageState));
     if (open === null || target === null) return null;
     if (!target.use.reeferDiesel.some(stored => stored.id === input.fillId)) return open;
     return writeTrailerUse(open, target, { reeferDiesel: target.use.reeferDiesel.filter(stored => stored.id !== input.fillId) });
@@ -1596,6 +1641,1080 @@ export function removeReeferDiesel(input: RemoveReeferDieselInput): Promise<Loca
 /** The target, if it is a refrigerated trailer: a standard one has no fridge unit. */
 function reefer(target: TrailerTarget | null): TrailerTarget | null {
   return target !== null && target.use.trailerType === TRAILER_TYPE.refrigerated ? target : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Correcting what was typed: a use's plate or trailer number (D39, D40)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface CorrectUseNameInput {
+  /** The day: the open one, or a finished one. */
+  shiftId: string;
+  /** The use being corrected, by its `useId` — never by the name being corrected. */
+  useId: string;
+  /** Whether that use is expected to be in use, or ended. Nothing on a finished day is in use. */
+  usageState: UsageState;
+  /** As typed; trimmed and upper-cased as every entry of it is. */
+  value: string;
+}
+
+/**
+ * Correct the number plate of ONE vehicle use — in use, ended earlier today,
+ * or on a finished day — when it was typed wrong. Found by the use's
+ * identity, never by its plate: another use of the same wrong plate is
+ * untouched. ONLY the plate changes: the use keeps its identity, class,
+ * mileage, times, fills and checks. Resolves to the day, or `null` —
+ * writing nothing — when that use is not found in the state named. Refuses
+ * an empty plate. Replaces the value, like a fill correction: an unsent day
+ * is the driver's own record (D40).
+ */
+export function correctNumberPlate({ shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    const numberPlate = normalisePlate(value);
+    if (numberPlate === "") throw new Error("Refusing an empty number plate");
+    const open = await readDayOfUses(shiftId);
+    if (open === null) return null;
+    const target = locateUsage(open, useId, usageState);
+    if (target === null) return null;
+    if (target.use.numberPlate === numberPlate) return open;
+    return writeVehicleUse(open, target, { numberPlate });
+  });
+}
+
+/**
+ * Correct the number of ONE trailer use — the same rule as the plate: only
+ * the number changes, never its type, identity, times, fridge diesel or
+ * checks, and never another use of the same number.
+ */
+export function correctTrailerNumber({ shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    const trailerNumber = normaliseTrailerNumber(value);
+    if (trailerNumber === "") throw new Error("Refusing an empty trailer number");
+    const open = await readDayOfUses(shiftId);
+    const target = locateTrailer(open, shiftId, useId, usageState);
+    if (open === null || target === null) return null;
+    if (target.use.trailerNumber === trailerNumber) return open;
+    return writeTrailerUse(open, target, { trailerNumber });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Correcting the open day before it is finished (D41)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface CorrectStartMileageInput {
+  /** The day: the open one, or a finished one. */
+  shiftId: string;
+  /** The use, by its `useId` — never by its plate. */
+  vehicleUseId: string;
+  usageState: UsageState;
+  /** Whole miles, as the driver now reads it. */
+  startMileage: number;
+}
+
+/**
+ * Correct the start mileage of ONE vehicle use, typed wrong. ONLY that
+ * mileage changes; an ended use's end mileage may not then be below it
+ * (refused, never adjusted). Resolves to the day, or `null` — writing
+ * nothing — when that use is not found in the state named.
+ */
+export function correctStartMileage({ shiftId, vehicleUseId, usageState, startMileage }: CorrectStartMileageInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    if (!Number.isSafeInteger(startMileage) || startMileage < 0) throw new Error("Refusing an invalid start mileage");
+    const open = await readDayOfUses(shiftId);
+    if (open === null) return null;
+    const target = locateUsage(open, vehicleUseId, usageState);
+    if (target === null) return null;
+    if (target.ended && target.use.endMileage < startMileage) throw new Error("Refusing a start mileage above the end mileage");
+    if (target.use.startMileage === startMileage) return open;
+    return writeVehicleUse(open, target, { startMileage });
+  });
+}
+
+// ─── A use's own start and end (D42) ──────────────────────────────────────
+
+export interface CorrectUseTimesInput {
+  /** The day: the open one, or a finished one. */
+  shiftId: string;
+  /** The use, by its identity — never its start, plate or number. */
+  useId: string;
+  usageState: UsageState;
+  startedAt: Date;
+  /** The corrected end — `null` exactly when the use is still in use. */
+  endedAt: Date | null;
+}
+
+/** Why a use's corrected times cannot stand. */
+export type UseTimesProblem =
+  | { kind: "end-before-start" }
+  | { kind: "before-shift-start"; at: string }
+  | { kind: "after-shift-finish"; at: string }
+  | { kind: "overlaps"; name: string; startedAt: string; endedAt: string | null }
+  | { kind: "trailer-untowed"; name: string };
+
+/** Thrown — writing nothing — for use times the day cannot hold (`UseTimesProblem`). */
+export class UseTimesError extends Error {
+  readonly problem: UseTimesProblem;
+  constructor(problem: UseTimesProblem) {
+    super("Refusing use times the day cannot hold");
+    this.name = "UseTimesError";
+    this.problem = problem;
+  }
+}
+
+/**
+ * Correct when ONE vehicle use started and — once it has ended — when it
+ * ended, found by its identity (D42). Resolves to the day, or `null` —
+ * writing nothing — when that use is not found in the state named.
+ *
+ * INDEPENDENT BOUNDARIES. A change of vehicle stored the old use's end and
+ * the next use's start as two values; they are two facts, and correcting one
+ * never moves the other. The corrected day must still hold: the end not
+ * before the start; not before the shift began, nor after it finished; no
+ * two vehicle uses overlapping (a gap is a time with no vehicle — D32); and
+ * no trailer left without a towing vehicle it had before. Anything else is
+ * refused (`UseTimesError`) with the rule, and no other use moves.
+ *
+ * A use the day's FINISH ended (`endedBy: "finish"`) whose end is corrected
+ * becomes a use with its own end — the mark is dropped, because it no longer
+ * ends at the finish (D40). Its identity, plate, class, mileage, fills and
+ * checks never change here.
+ */
+export function correctVehicleUseTimes(input: CorrectUseTimesInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    const open = await readDayOfUses(input.shiftId);
+    if (open === null) return null;
+    const target = locateUsage(open, input.useId, input.usageState);
+    if (target === null) return null;
+    const next = retimed(target.use, input);
+    if (next === null) return open;
+    const updated: LocalShift = target.ended
+      ? { ...open, previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? next as EndedVehicle : use)) }
+      : { ...open, vehicle: next };
+    throwIfUnheld(open, updated, "vehicle", input.useId);
+    return saveDay(open, updated);
+  });
+}
+
+/** Correct when ONE trailer use started and ended — the same rules as a vehicle's. */
+export function correctTrailerUseTimes(input: CorrectUseTimesInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    const open = await readDayOfUses(input.shiftId);
+    const target = locateTrailer(open, input.shiftId, input.useId, input.usageState);
+    if (open === null || target === null) return null;
+    const next = retimed(target.use, input);
+    if (next === null) return open;
+    const updated: LocalShift = target.ended
+      ? { ...open, previousTrailers: open.previousTrailers.map((use, index) => (index === target.index ? next as EndedTrailer : use)) }
+      : { ...open, trailer: next };
+    throwIfUnheld(open, updated, "trailer", input.useId);
+    return saveDay(open, updated);
+  });
+}
+
+/**
+ * The use with its corrected times — or `null` when they change nothing.
+ * Refuses an in-use use given an end, an ended one given none, and invalid times.
+ */
+function retimed<T extends { startedAt: string; endedAt?: string; endedBy?: UseEndedBy }>(use: T, { startedAt, endedAt }: CorrectUseTimesInput): T | null {
+  if (Number.isNaN(startedAt.getTime()) || (endedAt !== null && Number.isNaN(endedAt.getTime()))) throw new Error("Refusing an invalid time");
+  const ended = use.endedAt !== undefined;
+  if (ended !== (endedAt !== null)) throw new Error(ended ? "Refusing to take the end from an ended use" : "Refusing an end for a use still in use");
+  const start = startedAt.toISOString();
+  const end = endedAt === null ? undefined : endedAt.toISOString();
+  if (start === use.startedAt && end === use.endedAt) return null;
+  if (end === undefined) return { ...use, startedAt: start };
+  if (end === use.endedAt) return { ...use, startedAt: start };
+  // Its own end now: no longer the finish's (D40).
+  const { endedBy: _finish, ...own } = use;
+  return { ...own, startedAt: start, endedAt: end } as T;
+}
+
+/** An interval of a use: an open end (still in use) runs on for ever. */
+interface Span { useId: string; name: string; start: number; end: number; startedAt: string; endedAt: string | null; tows: boolean }
+
+function spans(day: LocalShift, kind: "vehicle" | "trailer"): Span[] {
+  const span = (use: { useId: string; startedAt: string; endedAt?: string }, name: string, tows: boolean): Span => ({
+    useId: use.useId, name, tows,
+    start: Date.parse(use.startedAt),
+    end: use.endedAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(use.endedAt),
+    startedAt: use.startedAt, endedAt: use.endedAt ?? null,
+  });
+  if (kind === "vehicle") {
+    return [...day.previousVehicles, ...(day.vehicle === null ? [] : [day.vehicle])]
+      .map(use => span(use, use.numberPlate, towsTrailers(use.vehicleClass)));
+  }
+  return [...day.previousTrailers, ...(day.trailer === null ? [] : [day.trailer])]
+    .map(use => span(use, `trailer ${use.trailerNumber}`, false));
+}
+
+/** The trailer uses NOT covered, end to end, by uses of vehicles that tow. */
+function untowedTrailers(day: LocalShift): string[] {
+  const towing = spans(day, "vehicle").filter(span => span.tows).sort((a, b) => a.start - b.start);
+  return spans(day, "trailer").filter(trailer => {
+    let reached = trailer.start;
+    for (const vehicle of towing) {
+      if (vehicle.start > reached) break;
+      reached = Math.max(reached, vehicle.end);
+      if (reached >= trailer.end) return false;
+    }
+    return reached < trailer.end;
+  }).map(trailer => trailer.useId);
+}
+
+/** Refuse the corrected day unless it holds (see `correctVehicleUseTimes`). */
+function throwIfUnheld(before: LocalShift, after: LocalShift, kind: "vehicle" | "trailer", useId: string): void {
+  const own = spans(after, kind).find(span => span.useId === useId);
+  if (own === undefined) throw new Error("Refusing a correction that loses its use");
+  if (own.end < own.start) throw new UseTimesError({ kind: "end-before-start" });
+  if (own.start < Date.parse(after.startedAt)) throw new UseTimesError({ kind: "before-shift-start", at: after.startedAt });
+  const finished = finishedBehind.get(before);
+  if (finished !== undefined) {
+    const finish = effectiveFacts(finished).endedAt;
+    const byFinish = kind === "vehicle"
+      ? after.previousVehicles.find(use => use.useId === useId)?.endedBy === USE_ENDED_BY.finish
+      : after.previousTrailers.find(use => use.useId === useId)?.endedBy === USE_ENDED_BY.finish;
+    if ((byFinish ? own.start : own.end) > Date.parse(finish)) throw new UseTimesError({ kind: "after-shift-finish", at: finish });
+  }
+  // One vehicle — one trailer — at a time: touching is a change, overlapping is
+  // two at once — and so is starting at the same instant, even for no time at all.
+  const clash = spans(after, kind).find(other => other.useId !== useId && (other.start === own.start || (other.start < own.end && own.start < other.end)));
+  if (clash !== undefined) throw new UseTimesError({ kind: "overlaps", name: clash.name, startedAt: clash.startedAt, endedAt: clash.endedAt });
+  // No trailer left without a towing vehicle it had before (D30, D34).
+  const untowedBefore = new Set(untowedTrailers(before));
+  const newlyUntowed = untowedTrailers(after).find(trailer => !untowedBefore.has(trailer));
+  if (newlyUntowed !== undefined) {
+    throw new UseTimesError({ kind: "trailer-untowed", name: spans(after, "trailer").find(span => span.useId === newlyUntowed)?.name ?? "the trailer" });
+  }
+}
+
+export interface CorrectOpenShiftInput {
+  shiftId: string;
+  workingFor: WorkingContext;
+  /** The declared start, as the driver now gives it. */
+  startedAt: Date;
+}
+
+/**
+ * Correct who the OPEN day is worked for and when it started — from the
+ * Finish Review, before the day is finished (D41). Choosing a company sends
+ * nothing (D28). The start may not be after any use of the day began
+ * (`TimesheetBoundsError`): no use is moved to fit it — a use's start is its
+ * own business time, corrected on its own page. An EARLIER start moves
+ * nothing: a shift may start before its first use (D42). Resolves to the
+ * day, or `null` when it is not the open one.
+ */
+export function correctOpenShift({ shiftId, workingFor: entered, startedAt }: CorrectOpenShiftInput): Promise<LocalShift | null> {
+  return queued(async () => {
+    const workingFor = asWorkingContext(entered);
+    if (workingFor === null) throw new Error("Refusing an unknown working context");
+    if (Number.isNaN(startedAt.getTime())) throw new Error("Refusing an invalid start");
+    const open = await readOpenShift();
+    if (open === null || open.id !== shiftId) return null;
+    const at = startedAt.toISOString();
+    const uses = [
+      ...open.previousVehicles.map(use => ({ name: use.numberPlate, startedAt: use.startedAt })),
+      ...(open.vehicle === null ? [] : [{ name: open.vehicle.numberPlate, startedAt: open.vehicle.startedAt }]),
+      ...open.previousTrailers.map(use => ({ name: `trailer ${use.trailerNumber}`, startedAt: use.startedAt })),
+      ...(open.trailer === null ? [] : [{ name: `trailer ${open.trailer.trailerNumber}`, startedAt: open.trailer.startedAt }]),
+    ];
+    const first = uses.filter(use => Date.parse(use.startedAt) < Date.parse(at)).sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))[0];
+    if (first !== undefined) throw new TimesheetBoundsError({ kind: "start-after-use", name: first.name, at: first.startedAt });
+    if (open.startedAt === at && JSON.stringify(open.workingFor) === JSON.stringify(workingFor)) return open;
+    return persist({ ...open, workingFor, startedAt: at });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Finishing the day
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Where a finished day is filed: one file per day, named by its local id,
+ * beside the open day's file and never read as it. A finished day is still
+ * the driver's own local record — nothing is sent when it is filed (D28).
+ */
+export const COMPLETED_SHIFT_FILE_PREFIX = "logisticbay-completed-shift-";
+
+/** Driver notes on a finished day: the app's bound for a free-text note, as fills and defects use. */
+export const SHIFT_NOTES_MAX_LENGTH = 500;
+
+/**
+ * A FINISHED working day, as the phone keeps it.
+ *
+ * The open day's own facts, carried unchanged, plus what finishing adds. At
+ * the finish every use has ended, so there is no vehicle or trailer IN USE:
+ * the one in use when the driver finished is the last entry of
+ * `previousVehicles` / `previousTrailers`, ended at `endedAt` — the same
+ * lists, the same shapes, the same meaning as on the open day.
+ */
+export interface CompletedShift {
+  id: string;
+  workingFor: WorkingContext;
+  startedAt: string;
+  /** The finish the driver DECLARED — named as the server's `Shift.endedAt`. */
+  endedAt: string;
+  /** Whether the driver had a night out. A fact on the timesheet, nothing more (D18). */
+  nightOut: boolean;
+  /** Trimmed; `null` when the driver wrote none — named as `Shift.notes`. */
+  notes: string | null;
+  previousVehicles: EndedVehicle[];
+  previousTrailers: EndedTrailer[];
+  status: typeof LOCAL_SHIFT_STATUS.completed;
+  createdAt: string;
+  /**
+   * CORRECTIONS of the day's own facts after the finish, oldest first —
+   * append-only (D39). The fields above stay exactly as the day was
+   * finished; the latest correction is what the day says now
+   * (`effectiveFacts`). Absent means none.
+   */
+  corrections?: ShiftCorrection[];
+  /**
+   * For a company's timesheet: the VERSION the driver last declared correct
+   * (`timesheetVersion`), with when and by whom (D42). Any later change makes
+   * the day's version differ, and the declaration no longer applies to it —
+   * the driver reviews and declares again. Never set on a Personal day.
+   */
+  declaration?: TimesheetDeclaration;
+}
+
+export interface TimesheetDeclaration {
+  version: string;
+  declaredAt: string;
+  declaredBy: string;
+}
+
+/**
+ * The driver's "I confirm all details are correct", as pressed: when, and who.
+ * `version` is the version the screen SHOWED (`timesheetVersion`); a save
+ * that would store any other version stores nothing.
+ */
+export interface Declared {
+  at: Date;
+  by: string;
+  version: string;
+}
+
+/**
+ * A fingerprint of everything a finished day SAYS — its facts and its uses,
+ * as they now read — so a declaration can be bound to exactly one version.
+ * Not a security hash: it tells versions apart, nothing more.
+ */
+export function timesheetVersion(shift: CompletedShift): string {
+  const said = JSON.stringify({ id: shift.id, facts: effectiveFacts(shift), uses: effectiveUses(shift) });
+  // cyrb53: a small, well-spread 53-bit string hash.
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < said.length; index += 1) {
+    const code = said.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * Where a finished day stands with its declaration (D42):
+ *   not-required  a Personal day — it needs none
+ *   confirmed     a company's day whose valid declaration is of this version
+ *   unconfirmed   a company's day with NO valid declaration — never recorded
+ *                 (a day finished before declarations were stored) or not
+ *                 trusted (damaged); nothing says it was ever confirmed
+ *   changed       a company's day with a valid declaration of ANOTHER version:
+ *                 changed since the driver confirmed it
+ */
+export type DeclarationState = "not-required" | "confirmed" | "unconfirmed" | "changed";
+
+export function declarationState(shift: CompletedShift): DeclarationState {
+  if (effectiveFacts(shift).workingFor.kind !== "company") return "not-required";
+  if (shift.declaration === undefined) return "unconfirmed";
+  return shift.declaration.version === timesheetVersion(shift) ? "confirmed" : "changed";
+}
+
+/** Whether nothing more is to be declared: a Personal day, or a confirmed company's day. */
+export function declarationHolds(shift: CompletedShift): boolean {
+  const state = declarationState(shift);
+  return state === "not-required" || state === "confirmed";
+}
+
+/** The facts of a finished day that a correction may change — and nothing else. */
+export interface ShiftFacts {
+  workingFor: WorkingContext;
+  startedAt: string;
+  endedAt: string;
+  nightOut: boolean;
+  notes: string | null;
+}
+
+/**
+ * One confirmed correction of a finished day: a COMPLETE snapshot of its
+ * facts as the driver now confirms them, and who made it, when. Never edited
+ * once written; a later mistake is corrected by the next one.
+ */
+export interface ShiftCorrection extends ShiftFacts {
+  /** Stable id: a repeated confirmation of one correction is one correction. */
+  id: string;
+  /** The device clock when the driver confirmed it — never backdated. */
+  correctedAt: string;
+  /** The signed-in driver who made it. */
+  correctedBy: string;
+}
+
+/**
+ * A finished day's uses as the day says them NOW (D40): a use its finish
+ * ended (`endedBy: "finish"`) ends at the day's current finish; every other
+ * use exactly as stored. The stored uses are never rewritten by a correction.
+ */
+export function effectiveUses(shift: CompletedShift): Pick<CompletedShift, "previousVehicles" | "previousTrailers"> {
+  const finish = effectiveFacts(shift).endedAt;
+  return {
+    previousVehicles: shift.previousVehicles.map(use => (use.endedBy === USE_ENDED_BY.finish ? { ...use, endedAt: finish } : use)),
+    previousTrailers: shift.previousTrailers.map(use => (use.endedBy === USE_ENDED_BY.finish ? { ...use, endedAt: finish } : use)),
+  };
+}
+
+/** What a finished day says NOW: its latest correction, or the day as finished. */
+export function effectiveFacts(shift: CompletedShift): ShiftFacts {
+  const latest = shift.corrections?.[shift.corrections.length - 1];
+  const source: ShiftFacts = latest ?? shift;
+  return { workingFor: source.workingFor, startedAt: source.startedAt, endedAt: source.endedAt, nightOut: source.nightOut, notes: source.notes };
+}
+
+/** What the driver gives in the Finish flow. */
+export interface ShiftFinish {
+  /** The odometer as the vehicle in use is handed back; `null` exactly when none is in use. */
+  finalMileage: number | null;
+  endedAt: Date;
+  nightOut: boolean;
+  /** As typed. */
+  notes: string;
+}
+
+export interface FinishShiftInput extends ShiftFinish {
+  /** The day the Finish flow was opened for. */
+  shiftId: string;
+  /** The vehicle use the flow showed, by `useId` — `null` when it showed none. */
+  vehicleUseId: string | null;
+  /** The trailer use the flow showed, by `useId` — `null` when it showed none. */
+  trailerUseId: string | null;
+  /**
+   * The declaration pressed on the Review — required for a company's day,
+   * which is filed only with the version declared (D42). Ignored for Personal.
+   */
+  declared: Declared | null;
+}
+
+/** What a finish may not precede. */
+export type FinishBoundary =
+  | { kind: "shift" }
+  | { kind: "vehicle"; numberPlate: string }
+  | { kind: "trailer"; trailerNumber: string }
+  | { kind: "ended-vehicle"; numberPlate: string }
+  | { kind: "ended-trailer"; trailerNumber: string };
+
+/**
+ * The earliest finish the day allows, and why: the latest of the shift's
+ * start, the current vehicle's and trailer's starts, and every earlier use's
+ * end. A shift cannot end before something in it began or ended.
+ */
+export function earliestFinish(shift: LocalShift): { at: string; because: FinishBoundary } {
+  const bounds: { at: string; because: FinishBoundary }[] = [
+    { at: shift.startedAt, because: { kind: "shift" } },
+    ...shift.previousVehicles.map(use => ({ at: use.endedAt, because: { kind: "ended-vehicle", numberPlate: use.numberPlate } as const })),
+    ...shift.previousTrailers.map(use => ({ at: use.endedAt, because: { kind: "ended-trailer", trailerNumber: use.trailerNumber } as const })),
+  ];
+  if (shift.vehicle !== null) bounds.push({ at: shift.vehicle.startedAt, because: { kind: "vehicle", numberPlate: shift.vehicle.numberPlate } });
+  if (shift.trailer !== null) bounds.push({ at: shift.trailer.startedAt, because: { kind: "trailer", trailerNumber: shift.trailer.trailerNumber } });
+  // Later entries win a tie: the thing in use is the reason a driver recognises.
+  return bounds.reduce((latest, bound) => (Date.parse(bound.at) >= Date.parse(latest.at) ? bound : latest));
+}
+
+/**
+ * Thrown — writing nothing — for a finish earlier than `earliestFinish`. The
+ * time is never clamped: the driver is told, and corrects it.
+ */
+export class FinishTooEarlyError extends Error {
+  readonly earliest: { at: string; because: FinishBoundary };
+  constructor(earliest: { at: string; because: FinishBoundary }) {
+    super("Refusing a finish before the day's latest start or end");
+    this.name = "FinishTooEarlyError";
+    this.earliest = earliest;
+  }
+}
+
+/**
+ * The finished day an open day and the driver's finish make — or a refusal.
+ *
+ * The finish is DECLARED (D40): the official finish of the timesheet, which
+ * may be later than now — a guaranteed day, say — and is never compared with
+ * the clock here. A finish far ahead of now is confirmed on screen
+ * (`finishAheadOf`), never refused.
+ *
+ * PURE: it reads and writes nothing, so the Review shows exactly what
+ * `finishOpenShift` will save, before anything is saved. The vehicle in use
+ * ends with `finalMileage`, the trailer in use ends with no mileage, both at
+ * `endedAt`; their checks, fills and fridge diesel are carried exactly, and
+ * every earlier use is left as it was.
+ */
+export function completedFrom(open: LocalShift, { finalMileage, endedAt, nightOut, notes }: ShiftFinish): CompletedShift {
+  if (Number.isNaN(endedAt.getTime())) throw new Error("Refusing an invalid finish time");
+  const at = endedAt.toISOString();
+  const earliest = earliestFinish(open);
+  if (Date.parse(at) < Date.parse(earliest.at)) throw new FinishTooEarlyError(earliest);
+  if (typeof nightOut !== "boolean") throw new Error("Refusing a finish without a Night Out answer");
+  const written = notes.trim();
+  if (written.length > SHIFT_NOTES_MAX_LENGTH) throw new Error("Refusing over-long shift notes");
+
+  let vehicles = open.previousVehicles;
+  if (open.vehicle !== null) {
+    if (finalMileage === null || !Number.isSafeInteger(finalMileage) || finalMileage < open.vehicle.startMileage) {
+      throw new Error("Refusing an invalid final mileage");
+    }
+    // Ended BY the finish — so a correction of the finish moves it too (D40).
+    vehicles = [...open.previousVehicles, { ...open.vehicle, endMileage: finalMileage, endedAt: at, endedBy: USE_ENDED_BY.finish }];
+  } else if (finalMileage !== null) {
+    throw new Error("Refusing a final mileage with no vehicle in use");
+  }
+
+  return {
+    id:               open.id,
+    workingFor:       open.workingFor,
+    startedAt:        open.startedAt,
+    endedAt:          at,
+    nightOut,
+    notes:            written === "" ? null : written,
+    previousVehicles: vehicles,
+    previousTrailers: open.trailer === null
+      ? open.previousTrailers
+      : [...open.previousTrailers, { ...open.trailer, endedAt: at, endedBy: USE_ENDED_BY.finish }],
+    status:           LOCAL_SHIFT_STATUS.completed,
+    createdAt:        open.createdAt,
+  };
+}
+
+/**
+ * A company's day with its declaration bound to it, or `null` when what the
+ * driver declared is not what would be stored. A Personal day carries none.
+ */
+function declaredAs(day: CompletedShift, declared: Declared | null): CompletedShift | null {
+  const undeclared: CompletedShift = { ...day };
+  delete undeclared.declaration;
+  if (effectiveFacts(undeclared).workingFor.kind !== "company") return undeclared;
+  if (declared === null) throw new Error("Refusing to save a company's timesheet without its declaration");
+  if (declared.by === "" || Number.isNaN(declared.at.getTime())) throw new Error("Refusing an unattributed declaration");
+  const version = timesheetVersion(undeclared);
+  if (declared.version !== version) return null;
+  return { ...undeclared, declaration: { version, declaredAt: declared.at.toISOString(), declaredBy: declared.by } };
+}
+
+/**
+ * Finish the open day: file it as a `CompletedShift`, then remove the open
+ * day. Resolves to the finished day, or `null` when nothing was finished.
+ *
+ * EXACTLY THE DAY ON SCREEN. It finishes only the day named, and only while
+ * its vehicle and trailer in use are still the ones the flow showed — a
+ * final mileage belongs to one vehicle. Otherwise it writes nothing and
+ * resolves `null`. A repeated press, finding the day already finished,
+ * resolves to that finished day: one finish, however many taps.
+ *
+ * SAVED BEFORE IT IS REPORTED. The record goes through the same verified
+ * write as every change (`storeSafely`), moved into place WITHOUT overwrite,
+ * and only then is the open file removed. Any failure before that is a
+ * `SafeSaveFailedError` and the open day stays as it was. If the open file
+ * then cannot be removed, the day is still finished: the reader hides an
+ * open file whose day is filed, and the next Start Shift removes it.
+ */
+export function finishOpenShift(input: FinishShiftInput): Promise<CompletedShift | null> {
+  return queued(() => finishIfCurrent(input));
+}
+
+async function finishIfCurrent(input: FinishShiftInput): Promise<CompletedShift | null> {
+  const open = await readOpenShift();
+  if (open === null || open.id !== input.shiftId) return readCompletedShift(input.shiftId);
+  if ((open.vehicle?.useId ?? null) !== input.vehicleUseId) return null;
+  if ((open.trailer?.useId ?? null) !== input.trailerUseId) return null;
+
+  const completed = declaredAs(completedFrom(open, input), input.declared);
+  if (completed === null) return null;
+  const serialised = JSON.stringify(completed);
+  if (asCompletedShift(JSON.parse(serialised)) === null) throw new Error("Refusing to file a day the reader would refuse");
+  const target = completedShiftFile(completed.id);
+  if (target === null) throw new Error("Refusing to file a day under an id that cannot name a file");
+  // Something already there is not a readable record of this day — the
+  // reader would have hidden the open day otherwise. Kept, never overwritten.
+  if (target.exists) preserveForRecovery(target, "unreadable");
+
+  storeSafely(serialised, target, { overwrite: false });
+  try {
+    openShiftFile().delete();
+  } catch {
+    // Filed and readable, so the day IS finished: saying otherwise would be
+    // the untrue report. The leftover is hidden by `readOpenShift` and removed
+    // by the next Start Shift (`isFinishedLeftover`).
+  }
+  return completed;
+}
+
+/** The finished day with this id, or `null`. Never throws. */
+export function readCompletedShift(id: string): Promise<CompletedShift | null> {
+  return Promise.resolve(readCompletedSync(id));
+}
+
+function readCompletedSync(id: string): CompletedShift | null {
+  const file = completedShiftFile(id);
+  if (file === null || !file.exists) return null;
+  try {
+    const shift = asCompletedShift(JSON.parse(file.textSync()));
+    return shift?.id === id ? shift : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every finished day on this phone that can be read, newest first.
+ *
+ * Only files named exactly as a finished day's record are considered — never
+ * the open day, its temporary file or a recovery file — and each is read
+ * through the same strict reader as `readCompletedShift`, under the id its
+ * name gives. A record that cannot be read is LEFT OUT, never guessed at, and
+ * never takes the others with it — but it is COUNTED, so a screen can say
+ * that not every saved day could be read. It is never deleted or repaired.
+ *
+ * Newest first by the day itself — its start, then its finish — with the id
+ * as the last word, so the order is stable and never the order of the files.
+ */
+export function listCompletedShifts(): Promise<CompletedShiftListing> {
+  const shifts: CompletedShift[] = [];
+  let unreadable = 0;
+  for (const entry of new Directory(Paths.document).list()) {
+    if (!(entry instanceof File)) continue;
+    const id = completedShiftIdFrom(entry.uri);
+    if (id === null) continue;
+    const shift = readCompletedSync(id);
+    if (shift === null) unreadable += 1;
+    else shifts.push(shift);
+  }
+  // By what each day says NOW — a corrected start moves it in the list.
+  shifts.sort((a, b) => {
+    const left = effectiveFacts(a);
+    const right = effectiveFacts(b);
+    return Date.parse(right.startedAt) - Date.parse(left.startedAt)
+      || Date.parse(right.endedAt) - Date.parse(left.endedAt)
+      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  });
+  return Promise.resolve({ timesheets: shifts, unreadable });
+}
+
+export interface CompletedShiftListing {
+  /** Every readable finished day, newest first. */
+  timesheets: CompletedShift[];
+  /** How many files named as a finished day's record could not be read. */
+  unreadable: number;
+}
+
+/** The day id a finished day's file name carries, or `null` for any other file. */
+function completedShiftIdFrom(uri: string): string | null {
+  const name = uri.split("/").pop() ?? "";
+  if (!name.startsWith(COMPLETED_SHIFT_FILE_PREFIX) || !name.endsWith(".json")) return null;
+  // Whether the id can name a file at all is `completedShiftFile`'s rule.
+  return name.slice(COMPLETED_SHIFT_FILE_PREFIX.length, -".json".length);
+}
+
+/** A day's record file — or `null` for an id that is not safe to name a file with. */
+function completedShiftFile(id: string): File | null {
+  return /^[0-9A-Za-z-]+$/.test(id) ? new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`) : null;
+}
+
+/** An open-day file whose day already has a readable completed record. */
+function isFinishedLeftover(file: File): boolean {
+  try {
+    const shift = asLocalShift(JSON.parse(file.textSync()));
+    return shift !== null && readCompletedSync(shift.id) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function isInstant(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+/**
+ * Narrow a parsed record to a finished day, or reject it — the same rules as
+ * an open day's uses, and nothing in the day ending after the day does.
+ */
+function asCompletedShift(value: unknown): CompletedShift | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const { id, startedAt, endedAt, createdAt, status, workingFor, nightOut, notes } = record;
+  if (typeof id !== "string" || id === "") return null;
+  if (!isInstant(startedAt) || !isInstant(endedAt) || !isInstant(createdAt)) return null;
+  if (status !== LOCAL_SHIFT_STATUS.completed) return null;
+  if (Date.parse(endedAt) < Date.parse(startedAt)) return null;
+  if (typeof nightOut !== "boolean") return null;
+  if (notes !== null && (typeof notes !== "string" || notes === "" || notes !== notes.trim() || notes.length > SHIFT_NOTES_MAX_LENGTH)) return null;
+
+  const context = asWorkingContext(workingFor);
+  if (context === null) return null;
+
+  // Both lists are always written for a finished day; absent is not "none".
+  if (!Array.isArray(record["previousVehicles"]) || !Array.isArray(record["previousTrailers"])) return null;
+  const vehicles = asPreviousVehicles(record["previousVehicles"]);
+  if (vehicles === null) return null;
+  if (!distinct(vehicles.map(use => use.startedAt)) || !distinct(vehicles.map(use => use.useId))) return null;
+  const trailers = asTrailers(null, record["previousTrailers"]);
+  if (trailers === null) return null;
+  // A use the finish ended ended AT that finish — anything else was not written by it.
+  if ([...vehicles, ...trailers.previousTrailers].some(use => use.endedBy === USE_ENDED_BY.finish && use.endedAt !== endedAt)) return null;
+
+  const read: CompletedShift = {
+    id, workingFor: context, startedAt, endedAt, nightOut, notes,
+    previousVehicles: vehicles, previousTrailers: trailers.previousTrailers,
+    status: LOCAL_SHIFT_STATUS.completed, createdAt,
+  };
+  // ABSENT means none — a day finished before corrections existed, never
+  // rewritten by being read. PRESENT must be exactly a list of corrections.
+  let day = read;
+  if (record["corrections"] !== undefined) {
+    const corrections = asCorrections(record["corrections"]);
+    if (corrections === null) return null;
+    day = { ...read, corrections };
+  }
+  // ABSENT means none was recorded. DAMAGED is not trusted, in whole or in
+  // part, and does not cost the driver the timesheet: the day reads with no
+  // declaration — to be reviewed and confirmed — and the file is left as it
+  // is. Nothing is made up in its place.
+  const declaration = asDeclaration(record["declaration"]);
+  if (declaration !== null) day = { ...day, declaration };
+  // Nothing in the day ends after the day as it NOW ends — its latest finish,
+  // which a use's own corrected end must respect too (D42) — and a use the
+  // finish ended does not begin after it.
+  const finish = Date.parse(effectiveFacts(day).endedAt);
+  if (finish < Date.parse(effectiveFacts(day).startedAt)) return null;
+  const uses = [...vehicles, ...trailers.previousTrailers];
+  if (uses.some(use => (use.endedBy === USE_ENDED_BY.finish ? Date.parse(use.startedAt) > finish : Date.parse(use.endedAt) > finish))) return null;
+  return day;
+}
+
+function asDeclaration(value: unknown): TimesheetDeclaration | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const { version, declaredAt, declaredBy } = value as Record<string, unknown>;
+  if (typeof version !== "string" || version === "" || version.length > 64) return null;
+  if (!isInstant(declaredAt)) return null;
+  if (typeof declaredBy !== "string" || declaredBy === "" || declaredBy.length > 64) return null;
+  return { version, declaredAt, declaredBy };
+}
+
+/**
+ * A finished day's corrections, or `null`: each a complete, valid snapshot,
+ * ids unique, in the order they were made. Whether the LATEST holds the
+ * day's uses as they now are is checked with them (`asCompletedShift`); an
+ * earlier snapshot is history, and its day has since been corrected. A malformed one fails the whole day closed — it is a record
+ * of what the day says, and one quietly dropped would change it.
+ */
+function asCorrections(value: unknown): ShiftCorrection[] | null {
+  if (!Array.isArray(value)) return null;
+  const corrections: ShiftCorrection[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const record = raw as Record<string, unknown>;
+    const { id, correctedAt, correctedBy, startedAt, endedAt, nightOut, notes } = record;
+    if (typeof id !== "string" || id === "" || corrections.some(earlier => earlier.id === id)) return null;
+    if (typeof correctedBy !== "string" || correctedBy === "") return null;
+    if (!isInstant(correctedAt) || !isInstant(startedAt) || !isInstant(endedAt)) return null;
+    if (typeof nightOut !== "boolean") return null;
+    if (notes !== null && (typeof notes !== "string" || notes === "" || notes !== notes.trim() || notes.length > SHIFT_NOTES_MAX_LENGTH)) return null;
+    const workingFor = asWorkingContext(record["workingFor"]);
+    if (workingFor === null) return null;
+    const previous = corrections[corrections.length - 1];
+    if (previous !== undefined && Date.parse(correctedAt) < Date.parse(previous.correctedAt)) return null;
+    if (Date.parse(endedAt) < Date.parse(startedAt)) return null;
+    corrections.push({ id, correctedAt, correctedBy, workingFor, startedAt, endedAt, nightOut, notes });
+  }
+  return corrections;
+}
+
+/**
+ * Why a day's facts cannot hold its uses, or `null` when they can: it may not
+ * end before it starts, start after any use began, or end before any use
+ * ended. A correction is refused on these — no use is ever moved to fit it.
+ */
+export type TimesheetBoundsProblem =
+  | { kind: "finish-before-start" }
+  | { kind: "start-after-use"; name: string; at: string }
+  | { kind: "finish-before-use"; name: string; at: string }
+  | { kind: "finish-before-use-start"; name: string; at: string };
+
+export function boundsProblem(day: Pick<CompletedShift, "previousVehicles" | "previousTrailers">, facts: Pick<ShiftFacts, "startedAt" | "endedAt">): TimesheetBoundsProblem | null {
+  const start = Date.parse(facts.startedAt);
+  const end = Date.parse(facts.endedAt);
+  if (end < start) return { kind: "finish-before-start" };
+  const uses = [
+    ...day.previousVehicles.map(use => ({ name: use.numberPlate, startedAt: use.startedAt, endedAt: use.endedAt, byFinish: use.endedBy === USE_ENDED_BY.finish })),
+    ...day.previousTrailers.map(use => ({ name: `trailer ${use.trailerNumber}`, startedAt: use.startedAt, endedAt: use.endedAt, byFinish: use.endedBy === USE_ENDED_BY.finish })),
+  ];
+  const startsLater = uses.filter(use => Date.parse(use.startedAt) < start).sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))[0];
+  if (startsLater !== undefined) return { kind: "start-after-use", name: startsLater.name, at: startsLater.startedAt };
+  // A use the finish ended moves with it — but never to before it began.
+  const movedTooFar = uses.filter(use => use.byFinish && Date.parse(use.startedAt) > end).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+  if (movedTooFar !== undefined) return { kind: "finish-before-use-start", name: movedTooFar.name, at: movedTooFar.startedAt };
+  // Every other use keeps its own end: the finish may not come before it.
+  const endsEarlier = uses.filter(use => !use.byFinish && Date.parse(use.endedAt) > end).sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt))[0];
+  if (endsEarlier !== undefined) return { kind: "finish-before-use", name: endsEarlier.name, at: endsEarlier.endedAt };
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Correcting and deleting a finished day (D39)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Store a finished day's record through the verified write, after the reader has accepted it. */
+function saveCompleted(shift: CompletedShift, options: { overwrite: boolean }): void {
+  const serialised = JSON.stringify(shift);
+  if (asCompletedShift(JSON.parse(serialised)) === null) throw new Error("Refusing to file a day the reader would refuse");
+  const target = completedShiftFile(shift.id);
+  if (target === null) throw new Error("Refusing to file a day under an id that cannot name a file");
+  storeSafely(serialised, target, options);
+}
+
+/**
+ * Thrown — writing nothing — when a correction's facts cannot hold the day's
+ * uses (`TimesheetBoundsProblem`). No use is ever moved to make one fit.
+ */
+export class TimesheetBoundsError extends Error {
+  readonly problem: TimesheetBoundsProblem;
+  constructor(problem: TimesheetBoundsProblem) {
+    super("Refusing a correction that does not hold the day's uses");
+    this.name = "TimesheetBoundsError";
+    this.problem = problem;
+  }
+}
+
+export interface CorrectCompletedShiftInput {
+  shiftId: string;
+  /**
+   * The correction the edit screen was opened on — `null` when it showed the
+   * day as finished. If the day has been corrected since, nothing is written.
+   */
+  basedOn: string | null;
+  /** This correction's own id: a repeated confirmation of it is one correction. */
+  correctionId: string;
+  workingFor: WorkingContext;
+  startedAt: Date;
+  endedAt: Date;
+  nightOut: boolean;
+  /** As typed. */
+  notes: string;
+  /** The device clock when the driver confirmed it. */
+  correctedAt: Date;
+  /** The signed-in driver. */
+  correctedBy: string;
+  /**
+   * The declaration pressed on the Review. Every save of a company's day —
+   * and every save of a day that WAS a company's — needs one (D42); a
+   * Personal day's ordinary correction does not.
+   */
+  declared: Declared | null;
+}
+
+/**
+ * Correct a finished day's own facts — who it was worked for, its start and
+ * finish, Night Out and notes — by APPENDING a correction (D39). The day as
+ * finished and every earlier correction stay exactly as they were; the new
+ * one is what the day says from now on.
+ *
+ * Resolves to the day as it now stands, or `null` when nothing was written
+ * because the day is not there, or was corrected by someone else since the
+ * screen opened (`basedOn`). A correction already recorded, or one that
+ * changes nothing, writes nothing and resolves to the day.
+ *
+ * A use the day's finish ended (`endedBy: "finish"`) ends at the corrected
+ * finish from then on (`effectiveUses`); its stored end is left as finished,
+ * like every other fact the day was finished with. No other use moves.
+ *
+ * The finish is declared and may be later than now (D40). REFUSES — throws,
+ * writing nothing — facts that cannot hold the day's uses
+ * (`TimesheetBoundsError`), over-long notes, and a correction with no id or
+ * no driver. Fills, checks and mileages are never touched here.
+ */
+export function correctCompletedShift(input: CorrectCompletedShiftInput): Promise<CompletedShift | null> {
+  return queued(() => {
+    const day = readCompletedSync(input.shiftId);
+    if (day === null) return Promise.resolve(null);
+    if ((day.corrections ?? []).some(correction => correction.id === input.correctionId)) return Promise.resolve(day);
+    const latest = day.corrections?.[day.corrections.length - 1];
+    if ((latest?.id ?? null) !== input.basedOn) return Promise.resolve(null);
+
+    if (input.correctionId === "") throw new Error("Refusing a correction with no id");
+    if (input.correctedBy === "") throw new Error("Refusing a correction with no driver");
+    for (const at of [input.startedAt, input.endedAt, input.correctedAt]) {
+      if (Number.isNaN(at.getTime())) throw new Error("Refusing a correction with an invalid time");
+    }
+    const workingFor = asWorkingContext(input.workingFor);
+    if (workingFor === null) throw new Error("Refusing a correction for an unknown working context");
+    const written = input.notes.trim();
+    if (written.length > SHIFT_NOTES_MAX_LENGTH) throw new Error("Refusing over-long shift notes");
+
+    const facts: ShiftFacts = {
+      workingFor,
+      startedAt: input.startedAt.toISOString(),
+      endedAt: input.endedAt.toISOString(),
+      nightOut: input.nightOut,
+      notes: written === "" ? null : written,
+    };
+    const problem = boundsProblem(day, facts);
+    if (problem !== null) throw new TimesheetBoundsError(problem);
+    const wasCompany = effectiveFacts(day).workingFor.kind === "company";
+    if (wasCompany && input.declared === null) throw new Error("Refusing to change a company's timesheet without its declaration");
+
+    const sameFacts = JSON.stringify(facts) === JSON.stringify(effectiveFacts(day));
+    // Nothing to change and nothing to declare again: the day as it is.
+    if (sameFacts && declarationHolds(day)) return Promise.resolve(day);
+    const corrected: CompletedShift = sameFacts ? day : {
+      ...day,
+      corrections: [...(day.corrections ?? []), { id: input.correctionId, correctedAt: input.correctedAt.toISOString(), correctedBy: input.correctedBy, ...facts }],
+    };
+    const declared = declaredAs(corrected, input.declared);
+    if (declared === null) return Promise.resolve(null);
+    saveCompleted(declared, { overwrite: true });
+    return Promise.resolve(declared);
+  });
+}
+
+/**
+ * Thrown when a finished day's record could not be deleted and whether it is
+ * still there cannot be known. Never reported as deleted.
+ */
+export class DeleteUncertainError extends Error {
+  constructor(cause: unknown) {
+    super("The timesheet may or may not have been deleted", { cause });
+    this.name = "DeleteUncertainError";
+  }
+}
+
+/**
+ * Delete ONE finished day from this phone, by its id — never by date,
+ * employer or position (D39). For a timesheet created by accident; a real
+ * day with a mistake in it is corrected instead.
+ *
+ * Resolves `true` once that day's record is gone, `false` when no readable
+ * day has the id (nothing is touched). Only that day's record is removed —
+ * never the open day, another day, a temporary or a recovery file. An open
+ * file left behind by an interrupted finish OF THIS DAY goes first, or the
+ * day would reappear as open once its record was gone.
+ *
+ * A delete that throws is a failure — rethrown, the record still there —
+ * unless the record is provably gone; when that cannot be known, it is a
+ * `DeleteUncertainError`.
+ */
+export function deleteCompletedShift(id: string): Promise<boolean> {
+  return queued(() => {
+    const target = completedShiftFile(id);
+    if (target === null || readCompletedSync(id) === null) return Promise.resolve(false);
+
+    const live = openShiftFile();
+    if (live.exists && isFinishedLeftover(live)) {
+      const leftover = asLocalShift(JSON.parse(live.textSync()));
+      if (leftover?.id === id) live.delete();
+    }
+
+    try {
+      target.delete();
+    } catch (error: unknown) {
+      let remains: boolean;
+      try {
+        remains = target.exists;
+      } catch {
+        throw new DeleteUncertainError(error);
+      }
+      if (remains) throw error;
+    }
+    return Promise.resolve(true);
+  });
+}
+
+/**
+ * A finished day, seen as the use screens and use writes see a day: nothing
+ * in use, every use ended, its facts as they stand now. NOT an open day —
+ * nothing reads it as one, and every write through it goes back to the
+ * finished day's own record (`saveDay`), re-validated in full (D39).
+ */
+const finishedBehind = new WeakMap<LocalShift, CompletedShift>();
+
+function viewOfFinished(done: CompletedShift): LocalShift {
+  const facts = effectiveFacts(done);
+  const uses = effectiveUses(done);
+  const view: LocalShift = {
+    id: done.id,
+    workingFor: facts.workingFor,
+    startedAt: facts.startedAt,
+    vehicle: null,
+    previousVehicles: uses.previousVehicles,
+    trailer: null,
+    previousTrailers: uses.previousTrailers,
+    status: LOCAL_SHIFT_STATUS.open,
+    createdAt: done.createdAt,
+  };
+  finishedBehind.set(view, done);
+  return view;
+}
+
+function withStoredEnds<T extends { useId: string; endedAt: string; endedBy?: UseEndedBy }>(written: readonly T[], stored: readonly T[]): T[] {
+  if (written.length !== stored.length) throw new Error("Refusing a use write that adds or removes a use");
+  return written.map((use, index) => {
+    const original = stored[index];
+    if (original?.useId !== use.useId) throw new Error("Refusing a use write that reorders the day");
+    // A use still ended BY the finish is shown at the day's current finish;
+    // its stored end stays as finished. Any other end is exactly as written —
+    // including one the driver has just corrected (D42).
+    return use.endedBy === USE_ENDED_BY.finish ? { ...use, endedAt: original.endedAt } : use;
+  });
+}
+
+/** No value appears twice. */
+function distinct(values: readonly string[]): boolean {
+  return new Set(values).size === values.length;
+}
+
+/** A finished day's uses, for the use screens: `null` when no readable day has the id. */
+export function readFinishedDayOfUses(id: string): Promise<LocalShift | null> {
+  const done = readCompletedSync(id);
+  return Promise.resolve(done === null ? null : viewOfFinished(done));
+}
+
+/**
+ * The day a use write names: the open day, or — when it is not the open one —
+ * a finished day's uses (`viewOfFinished`). Either is found only by its id.
+ */
+async function readDayOfUses(shiftId: string): Promise<LocalShift | null> {
+  const open = await readOpenShift();
+  if (open !== null && open.id === shiftId) return open;
+  const done = readCompletedSync(shiftId);
+  return done === null ? null : viewOfFinished(done);
+}
+
+/**
+ * Save a use write: the open day through `persist`, a finished day through
+ * its own record — only its uses change, never its facts or corrections.
+ */
+function saveDay(day: LocalShift, updated: LocalShift): LocalShift {
+  const done = finishedBehind.get(day);
+  if (done === undefined) return persist(updated);
+  if (updated.vehicle !== null || updated.trailer !== null) throw new Error("Refusing to put a use back in use on a finished day");
+  // The view shows ends as the day says them now; the record keeps a use the
+  // finish ended at the end it was finished with (`effectiveUses`), so that
+  // end goes back exactly as it was. A use with its own end keeps what was
+  // written — corrected on its own page, if it was (D42).
+  const next: CompletedShift = {
+    ...done,
+    previousVehicles: withStoredEnds(updated.previousVehicles, done.previousVehicles),
+    previousTrailers: withStoredEnds(updated.previousTrailers, done.previousTrailers),
+  };
+  saveCompleted(next, { overwrite: true });
+  return viewOfFinished(next);
 }
 
 /**

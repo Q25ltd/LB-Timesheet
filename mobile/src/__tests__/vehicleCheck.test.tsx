@@ -86,7 +86,7 @@ const text = (view: View, testID: string) => String(view.getByTestId(testID).pro
 const allText = (view: View) => JSON.stringify(view.toJSON()).toLowerCase();
 
 function vehicleOf(details: VehicleDetails = UNIT, checks: VehicleCheck[] = []): LocalVehicle {
-  return { ...details, startedAt: STARTED_AT.toISOString(), checks, fills: [] };
+  return { ...details, useId: "use-unit", startedAt: STARTED_AT.toISOString(), checks, fills: [] };
 }
 
 const keysOf = (vehicleClass: VehicleDetails["vehicleClass"]) => checklistItems(checklistFor(vehicleClass)).map(entry => entry.key);
@@ -808,10 +808,10 @@ test("after a RESTART, Active Shift reads In progress and the check reopens exac
 
 test("completing stores the completion time, returns to the shift, and Active Shift reads Completed", async () => {
   const shift = await dayWith();
-  const vehicleStartedAt = shift.vehicle?.startedAt ?? "";
+  const vehicleUseId = shift.vehicle?.useId ?? "";
   // Every row but one already answered, as a driver part-way through.
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt, usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleUseId, usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").filter(key => key !== "horn").map(key => ({ key, result: "pass", note: "" })),
   });
   const before = Date.now();
@@ -867,7 +867,7 @@ test("a draft carries no completion time and no driver — defaults on screen ch
 test("rapid Complete taps through the route store ONE completed check", async () => {
   const shift = await dayWith();
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })),
   });
   const view = await openRoute();
@@ -913,7 +913,7 @@ test("with no vehicle there is nothing to check — back to Active Shift; with n
 test("a COMPLETED check is still reachable from Active Shift — demoted, not disabled", async () => {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
+    shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })), completedAt: new Date(), completedBy: "user_1",
   });
 
@@ -924,18 +924,18 @@ test("a COMPLETED check is still reachable from Active Shift — demoted, not di
   expect(stateOf(view, "vehicle-checks").disabled).toBe(false);
   await press(view, "vehicle-checks");
   // For EXACTLY the use in the card.
-  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.startedAt, usageState: "in-use" } });
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.useId, usageState: "in-use" } });
 });
 
 test("Active Shift opens the check, and its row follows Not completed → In progress → Completed", async () => {
   const shift = await dayWith();
-  const target = { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT };
+  const target = { shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT };
 
   const notYet = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(notYet.queryByTestId("vehicle-checks")).not.toBeNull(); });
   expect(text(notYet, "vehicle-checks-state")).toBe("Not completed");
   await press(notYet, "vehicle-checks");
-  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.startedAt, usageState: "in-use" } });
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: shift.vehicle?.useId, usageState: "in-use" } });
   await notYet.unmount();
 
   // A real change: Horn starts at OK. (OK would be no change at all, and a

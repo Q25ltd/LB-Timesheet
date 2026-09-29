@@ -12,8 +12,9 @@
  * opens and keep the answer still while the driver types (see `useTimeOfDay`).
  */
 import { useRef, useState } from "react";
-import { View, Text, TextInput, StyleSheet } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { colors, radius, spacing, typography } from "../theme/index";
+import { calendarDaysBetween, formatDate } from "./format";
 
 function twoDigits(value: number): string {
   return String(value).padStart(2, "0");
@@ -99,6 +100,42 @@ function ClockField({ testID, label, value, onChange, invalid }: {
   );
 }
 
+/**
+ * A DAY, stepped a day back or forward — the date beside the clock where a
+ * time may fall on another day (a finish after midnight, a corrected start).
+ * Two buttons rather than a date field, so the usual same-day entry costs
+ * nothing. Said as Today / Yesterday / Tomorrow against `today`.
+ */
+export function DayStepper({ testID, day, today, onStep }: { testID: string; day: Date; today: Date; onStep: (step: -1 | 1) => void }) {
+  const offset = calendarDaysBetween(today.toISOString(), day.toISOString());
+  const relative = offset === 0 ? "Today" : offset === -1 ? "Yesterday" : offset === 1 ? "Tomorrow" : null;
+  return (
+    <View style={styles.dayRow}>
+      <StepButton testID={`${testID}-previous`} label="Previous day" glyph="‹" onPress={() => { onStep(-1); }} />
+      <View style={styles.dayText}>
+        <Text style={styles.dayValue} testID={testID}>{formatDate(day.toISOString())}</Text>
+        {relative === null ? null : <Text style={styles.dayRelative} testID={`${testID}-relative`}>{relative}</Text>}
+      </View>
+      <StepButton testID={`${testID}-next`} label="Next day" glyph="›" onPress={() => { onStep(1); }} />
+    </View>
+  );
+}
+
+function StepButton({ testID, label, glyph, onPress }: { testID: string; label: string; glyph: string; onPress: () => void }) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={({ pressed }) => [styles.step, pressed ? styles.stepPressed : null]}
+    >
+      <Text style={styles.stepGlyph}>{glyph}</Text>
+    </Pressable>
+  );
+}
+
 export const timeStyles = StyleSheet.create({
   hint: { ...typography.helper, marginTop: spacing.sm, marginHorizontal: spacing.xs },
 });
@@ -118,5 +155,18 @@ const styles = StyleSheet.create({
     color: colors.brandDark,
   },
   clockInvalid: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
+  dayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
+  },
+  dayText: { flex: 1, alignItems: "center" },
+  dayValue: { fontSize: 17, fontWeight: "700", color: colors.brandDark },
+  dayRelative: { fontSize: 13, color: colors.textMuted },
+  step: { width: 48, height: 48, borderRadius: radius.button, alignItems: "center", justifyContent: "center" },
+  stepPressed: { backgroundColor: colors.surfaceAccent },
+  stepGlyph: { fontSize: 30, fontWeight: "700", color: colors.brandLight },
   clockSeparator: { fontSize: 30, fontWeight: "700", color: colors.brandDark, marginHorizontal: spacing.md },
 });

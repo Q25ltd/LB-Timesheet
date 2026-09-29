@@ -1,6 +1,7 @@
 /**
- * The two destinations whose features are not built yet — Timesheets and My
- * Records — and Settings, whose features are.
+ * My Records, whose feature is not built yet; Timesheets with no finished day
+ * on the phone (its rows are proven in `timesheetHistory.test.tsx`); and
+ * Settings, whose features are built.
  *
  * THE RULE THESE CASES ENFORCE. An unfinished destination is allowed to be a
  * designed page that says the feature is being built. It is NOT allowed to
@@ -40,6 +41,8 @@ jest.mock("expo-router", () => {
     },
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Home and Timesheets re-read the phone on focus; mounting is the focus here.
+    useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
   };
 });
 
@@ -138,7 +141,7 @@ test("Timesheets renders a real, titled page rather than an error or a blank", a
   expect(view.getByTestId("timesheets-empty")).toBeTruthy();
 });
 
-test("Timesheets fabricates NO history — no rows, no statuses, no dates, no distances", async () => {
+test("Timesheets with no finished day fabricates NO history — no rows, no statuses, no dates, no distances", async () => {
   const view = await signedIn(<Timesheets />);
   const rendered = allText(view);
 
@@ -150,7 +153,7 @@ test("Timesheets fabricates NO history — no rows, no statuses, no dates, no di
   expect(renderedNumbers(view)).toEqual([]);
 });
 
-test("Timesheets makes no network request — there is no history endpoint to call", async () => {
+test("Timesheets makes no network request — its history is the phone's own", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
   await signedIn(<Timesheets />);
   expect(fetchSpy).not.toHaveBeenCalled();

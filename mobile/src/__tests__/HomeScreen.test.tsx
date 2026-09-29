@@ -13,7 +13,9 @@
  *
  *   2. Home INVENTS NOTHING. It makes no network request at all, so it cannot
  *      know whether a shift is open, what was submitted, or how far anyone
- *      drove — and it therefore must not say. The zero-request assertion is
+ *      drove — and it therefore must not say. The finished days it lists are
+ *      read from the phone (`timesheetHistory.test.tsx`); with none, it lists
+ *      nothing. The zero-request assertion is
  *      the load-bearing half; the absent-wording assertions are the readable
  *      half, and neither stands alone.
  *
@@ -45,6 +47,8 @@ jest.mock("expo-router", () => {
     },
     Redirect: ({ href }: { href: string }) =>
       react.createElement(rn.Text, { testID: "redirect" }, String(href)),
+    // Home and Timesheets re-read the phone on focus; mounting is the focus here.
+    useFocusEffect: (effect: () => (() => void) | undefined) => { react.useEffect(effect, [effect]); },
     Stack: () => react.createElement(rn.Text, { testID: "app-stack" }, "stack"),
   };
 });
@@ -185,15 +189,16 @@ test("the greeting carries one salutation, and it is one of exactly three", asyn
 // B. Home invents nothing
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("Home makes NO network request — so it cannot know any shift or history state", async () => {
+test("Home makes NO network request — what it shows comes from the phone or from nowhere", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
 
   const view = await homeSignedInAs(NERIJUS);
   expect(view.getByTestId("greeting-name")).toBeTruthy();
 
-  // The load-bearing assertion of this whole file. Anything Home displayed
-  // about shifts, submissions or mileage would have to be fabricated,
-  // because Home asked nobody.
+  // The load-bearing assertion of this whole file. Home asks no server
+  // anything: its Recent Timesheets are the phone's own finished days
+  // (`timesheetHistory.test.tsx`), and nothing else about shifts,
+  // submissions or mileage can be shown without being fabricated.
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
@@ -212,7 +217,7 @@ test("Home does NOT claim there is no active shift — it cannot prove that", as
   expect(rendered).not.toContain("not available yet");
 });
 
-test("the Recent Timesheets region renders its FRAME and no row data whatsoever", async () => {
+test("with no finished day, the Recent Timesheets region renders its FRAME and no row data whatsoever", async () => {
   const view = await homeSignedInAs(NERIJUS);
 
   // The section exists, because the approved composition calls for it.
@@ -224,7 +229,7 @@ test("the Recent Timesheets region renders its FRAME and no row data whatsoever"
   expect(section.queryAllByText(/\d/)).toEqual([]);
 });
 
-test("Home fabricates no timesheet status, no mileage and no drill-in", async () => {
+test("with no finished day, Home fabricates no timesheet status, no mileage and no drill-in", async () => {
   const view = await homeSignedInAs(NERIJUS);
   const rendered = allText(view);
 

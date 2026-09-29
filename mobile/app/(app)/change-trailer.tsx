@@ -3,7 +3,7 @@
  *
  * A Stack sibling of the tab group. ONLY for a day with a trailer in use;
  * otherwise back to Active Shift (or Home with no open day). The trailer it
- * ends is the one on screen when it opened, named by its `startedAt`: if it
+ * ends is the one on screen when it opened, named by its `useId`: if it
  * has changed since, the store writes nothing (`changeTrailer`).
  *
  * The vehicle is never touched here (D34). A new trailer returns to Active
@@ -45,11 +45,11 @@ export default function ChangeTrailerRoute() {
 async function confirm(shiftId: string, current: LocalTrailer, next: TrailerDetails | null): Promise<void> {
   try {
     const changedAt = new Date();
-    const day = await changeTrailer({ shiftId, endingStartedAt: current.startedAt, next, changedAt });
+    const day = await changeTrailer({ shiftId, endingUseId: current.useId, next, changedAt });
     if (day === null) { router.replace("/today"); return; }
     // Success is the trailer on screen having ended AT THIS PRESS; the store
     // changes nothing once another has replaced it, and the driver is told so.
-    if (!day.previousTrailers.some(use => use.startedAt === current.startedAt && use.endedAt === changedAt.toISOString())) {
+    if (!day.previousTrailers.some(use => use.useId === current.useId && use.endedAt === changedAt.toISOString())) {
       Alert.alert("Nothing was saved", "That trailer is no longer the one in use.");
     }
     router.dismissTo("/active-shift");

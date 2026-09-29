@@ -38,6 +38,7 @@ import {
 import { TRAILER_TYPE, type TrailerDetails, type TrailerType } from "../shift/trailer";
 import { CHECK_RESULT, checkStateOf, type CheckAnswer } from "../shift/vehicleCheck";
 import { colors } from "../theme/index";
+import { trailerUseAt, vehicleUseAt } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { trailer?: string; usageState?: string } = {};
@@ -225,12 +226,12 @@ const defect = (key: string, note: string): CheckAnswer => ({ key, result: CHECK
 
 async function complete(shift: LocalShift, use: string, type: TrailerType, over: Record<string, CheckAnswer> = {}, checkId = newLocalId()) {
   return completeTrailerCheck({
-    shiftId: shift.id, trailerStartedAt: use, usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
+    shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
     answers: answersFor(trailerChecklistFor(type), over), completedAt: at(5, 50), completedBy: DRIVER.user.id,
   });
 }
 async function draft(shift: LocalShift, use: string, answers: CheckAnswer[], checkId: string) {
-  return saveTrailerCheckDraft({ shiftId: shift.id, trailerStartedAt: use, usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40), answers });
+  return saveTrailerCheckDraft({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40), answers });
 }
 const trailerChecks = async () => (await readOpenShift())?.trailer?.checks ?? [];
 
@@ -327,7 +328,7 @@ test("a check stays on trailer A; changing to trailer B starts B with NO check; 
   await complete(shift, a, TRAILER_TYPE.refrigerated);
   const certificateA = JSON.stringify(await trailerChecks());
 
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: a, next: BOX, changedAt: at(10) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(a), next: BOX, changedAt: at(10) });
   expect(await trailerChecks()).toEqual([]);
   await complete(shift, at(10).toISOString(), TRAILER_TYPE.standard);
 
@@ -339,10 +340,10 @@ test("a check stays on trailer A; changing to trailer B starts B with NO check; 
 test("TR100 taken AGAIN is a fresh use: its check starts empty — the morning's certificate and draft never carry over", async () => {
   const { shift, use: morning } = await dayWithTrailer(FRIDGE);
   await complete(shift, morning, TRAILER_TYPE.refrigerated);
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: morning, next: BOX, changedAt: at(10) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(10) });
   const middle = at(10).toISOString();
   await draft(shift, middle, answersFor(trailerChecklistFor(TRAILER_TYPE.standard), { "doors": defect("doors", "x") }), newLocalId());
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: middle, next: FRIDGE, changedAt: at(14) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(middle), next: FRIDGE, changedAt: at(14) });
 
   const day = await readOpenShift();
   expect(day?.trailer?.trailerNumber).toBe("TR100");
@@ -356,7 +357,7 @@ test("two uses of TR100 never share a draft or a certificate: the afternoon's ow
   const { shift, use: morning } = await dayWithTrailer(FRIDGE);
   const morningId = newLocalId();
   await draft(shift, morning, answersFor(trailerChecklistFor(TRAILER_TYPE.refrigerated), { "doors": defect("doors", "morning") }), morningId);
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: morning, next: FRIDGE, changedAt: at(14) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: FRIDGE, changedAt: at(14) });
   const afternoon = at(14).toISOString();
 
   await complete(shift, afternoon, TRAILER_TYPE.refrigerated);
@@ -370,7 +371,7 @@ test("two uses of TR100 never share a draft or a certificate: the afternoon's ow
 test("STALE: a check opened for TR100 cannot save after the trailer changed — not to it, not to a replacement TR100", async () => {
   const { shift, use: opened } = await dayWithTrailer(FRIDGE);
   const id = newLocalId();
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: opened, next: FRIDGE, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(opened), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
 
   const saved = await draft(shift, opened, answersFor(trailerChecklistFor(TRAILER_TYPE.refrigerated), { "doors": defect("doors", "x") }), id);
@@ -393,7 +394,7 @@ test("a VEHICLE change with the same trailer in use keeps the trailer's check ex
   await complete(shift, use, TRAILER_TYPE.refrigerated);
   const trailer = JSON.stringify((await readOpenShift())?.trailer);
 
-  await changeVehicle({ shiftId: shift.id, endingStartedAt: STARTED_AT.toISOString(), endMileage: 100_100, next: { ...UNIT, numberPlate: "CD34 EFG" }, changedAt: at(10) });
+  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: { ...UNIT, numberPlate: "CD34 EFG" }, changedAt: at(10) });
 
   expect(JSON.stringify((await readOpenShift())?.trailer)).toBe(trailer);
 });
@@ -401,7 +402,7 @@ test("a VEHICLE change with the same trailer in use keeps the trailer's check ex
 test("vehicle and trailer checks never touch: completing either leaves the other exactly as it was", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: STARTED_AT.toISOString(), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
     answers: answersFor(checklistFor("class1")), completedAt: at(5, 20), completedBy: DRIVER.user.id,
   });
   expect(await trailerChecks()).toEqual([]);
@@ -415,14 +416,14 @@ test("vehicle and trailer checks never touch: completing either leaves the other
 
 test("Fridge Diesel and Trailer Checks are independent: neither creates, requires or changes the other", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  await recordReeferDiesel({ shiftId: shift.id, trailerStartedAt: use, usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), litres: 40, note: "" });
+  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), litres: 40, note: "" });
   expect(await trailerChecks()).toEqual([]);
 
   await complete(shift, use, TRAILER_TYPE.refrigerated);
   const checks = JSON.stringify(await trailerChecks());
   expect((await readOpenShift())?.trailer?.reeferDiesel).toHaveLength(1);
 
-  await recordReeferDiesel({ shiftId: shift.id, trailerStartedAt: use, usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), litres: null, note: "" });
+  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), litres: null, note: "" });
   expect(JSON.stringify(await trailerChecks())).toBe(checks);
 });
 
@@ -442,7 +443,7 @@ function SignedIn({ children }: { children: React.ReactNode }) {
 }
 
 async function openRoute(use: string, usageState: string = USAGE_STATE.inUse): Promise<View> {
-  params.trailer = use;
+  params.trailer = trailerUseAt(use);
   params.usageState = usageState;
   const view = await render(
     <SafeAreaProvider initialMetrics={METRICS}>
@@ -520,7 +521,7 @@ test("STALE on screen: the trailer changes while the check is open — the save 
   const { shift, use } = await dayWithTrailer(FRIDGE);
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await openRoute(use);
-  await changeTrailer({ shiftId: shift.id, endingStartedAt: use, next: FRIDGE, changedAt: at(9) });
+  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(use), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
 
   await press(view, "complete-check");
@@ -532,7 +533,7 @@ test("STALE on screen: the trailer changes while the check is open — the save 
 
 test.each([["a trailer number", "TR100"], ["a use that has ended", "ended"]])("the screen is not opened for %s", async (_why, name) => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  if (name === "ended") await changeTrailer({ shiftId: shift.id, endingStartedAt: use, next: null, changedAt: at(9) });
+  if (name === "ended") await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(use), next: null, changedAt: at(9) });
 
   const view = await openRoute(name === "ended" ? use : name);
 
@@ -547,7 +548,7 @@ function screen(shift: LocalShift, onTrailerChecks: jest.Mock = jest.fn()): Reac
   return (
     <SafeAreaProvider initialMetrics={METRICS}>
       <ActiveShiftScreen
-        shift={shift} onDiscard={() => undefined} onAddVehicle={() => undefined} onVehicleChecks={() => undefined}
+        shift={shift} onDiscard={() => undefined} onFinish={() => undefined} onCorrectPlate={() => undefined} onCorrectTrailerNumber={() => undefined} onAddVehicle={() => undefined} onVehicleChecks={() => undefined}
         onChangeVehicle={() => undefined} onFill={() => undefined} onOpenUsage={() => undefined}
         onAddTrailer={() => undefined} onChangeTrailer={() => undefined} onFridgeDiesel={() => undefined}
         onTrailerChecks={onTrailerChecks} onOpenTrailerUsage={() => undefined}
@@ -572,7 +573,7 @@ test.each([["a Standard", BOX], ["a Refrigerated", FRIDGE]] as const)("%s traile
 
   await fireEvent.press(view.getByTestId("trailer-checks"));
 
-  expect(onTrailerChecks).toHaveBeenCalledWith(use);
+  expect(onTrailerChecks).toHaveBeenCalledWith(trailerUseAt(use));
   // Fridge Diesel stays the refrigerated trailer's alone.
   expect(view.queryByTestId("fridge-diesel") !== null).toBe(trailer.trailerType === TRAILER_TYPE.refrigerated);
 });
@@ -613,7 +614,7 @@ test("ONLY an explicit completion turns the card green — 'Completed' open, 'Ch
 test("a completed UNIT check does not make the trailer green, and a completed trailer check does not make the unit green", async () => {
   const { shift } = await dayWithTrailer(FRIDGE);
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: STARTED_AT.toISOString(), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
     answers: answersFor(checklistFor("class1")), completedAt: at(5, 20), completedBy: DRIVER.user.id,
   });
   const view = await render(screen(await stored()));

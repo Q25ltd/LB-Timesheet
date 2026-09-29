@@ -37,6 +37,8 @@ import type { VehicleClass } from "./localShift";
 import { trailerChecklistFor } from "./checklists";
 import { readChecksFor, type VehicleCheck } from "./vehicleCheck";
 import { asFillRecord, type FillRecord } from "./vehicleFill";
+import { asUseEndedBy, type UseEndedBy } from "./useEnd";
+import { readUseId } from "./useIdentity";
 
 /** The two kinds of trailer. One registry, no magic strings. */
 export const TRAILER_TYPE = {
@@ -75,7 +77,9 @@ export interface TrailerDetails {
 }
 
 export interface LocalTrailer extends TrailerDetails {
-  /** When this trailer's use in the day began — the moment it was added or taken. */
+  /** This use's identity — immutable, never its start or number (`useIdentity.ts`, D42). */
+  useId: string;
+  /** When this trailer's use in the day began — business time, correctable (D42); NOT its identity. */
   startedAt: string;
   /**
    * Diesel put into a REFRIGERATED trailer's fridge unit during THIS use,
@@ -94,6 +98,8 @@ export interface LocalTrailer extends TrailerDetails {
 /** A trailer use that has ENDED: changed for another, or handed back. */
 export interface EndedTrailer extends LocalTrailer {
   endedAt: string;
+  /** Present only when the day's Finish Shift ended it (`useEnd.ts`). */
+  endedBy?: UseEndedBy;
 }
 
 /**
@@ -130,7 +136,9 @@ export function asLocalTrailer(value: unknown): LocalTrailer | null {
   // not done, never as a pass (`readChecksFor`).
   const checks = readChecksFor(record["checks"], trailerChecklistFor(type));
 
-  return { trailerNumber, trailerType: type, startedAt, reeferDiesel: fills, checks };
+  const useId = readUseId(record["useId"], "trailer", startedAt);
+  if (useId === null) return null;
+  return { trailerNumber, trailerType: type, useId, startedAt, reeferDiesel: fills, checks };
 }
 
 export function asEndedTrailer(value: unknown): EndedTrailer | null {
@@ -140,5 +148,7 @@ export function asEndedTrailer(value: unknown): EndedTrailer | null {
   if (typeof endedAt !== "string" || Number.isNaN(Date.parse(endedAt))) return null;
   // Never before it began — the vehicle's rule too (`asEndedVehicle`).
   if (Date.parse(endedAt) < Date.parse(trailer.startedAt)) return null;
-  return { ...trailer, endedAt };
+  const endedBy = asUseEndedBy((value as Record<string, unknown>)["endedBy"]);
+  if (endedBy === null) return null;
+  return endedBy === undefined ? { ...trailer, endedAt } : { ...trailer, endedAt, endedBy };
 }

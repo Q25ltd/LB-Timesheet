@@ -20,17 +20,19 @@
  * Home into a permanent work-context selector, which the frozen Start Shift
  * flow explicitly puts AFTER the driver presses Start Shift.
  *
- * The Recent Timesheets SECTION is present, because the owner approved the
- * full Home composition — but it holds one honest line and no rows. There is
- * no history endpoint, nothing can be finished or submitted yet, and a
- * specimen row would be believed. The frame is real; the data is absent and
- * says so.
+ * RECENT TIMESHEETS are the driver's own FINISHED days, read from this phone
+ * (`listCompletedShifts`, D38) — the latest few, newest first, each opening
+ * its day. Never the open day, never a server record, never a specimen: with
+ * none finished it says "No timesheets yet", and while the phone is still
+ * being read it says nothing at all rather than claim there are none.
  *
- * Home is also COMPANY-NEUTRAL. `account.memberships` is available and is
- * deliberately not rendered: naming an employer here would be the first step
- * of a work-context selector, and a driver may work for several companies
- * whose existence must not be advertised to each other (D12, CLAUDE.md's
- * privacy boundary).
+ * Home is otherwise COMPANY-NEUTRAL. `account.memberships` is available and
+ * is deliberately not rendered: naming an employer here would be the first
+ * step of a work-context selector, and a driver may work for several
+ * companies whose existence must not be advertised to each other (D12,
+ * CLAUDE.md's privacy boundary). A finished day DOES say who it was worked
+ * for — the name the driver chose at Start Shift, from their own record on
+ * their own phone.
  *
  * THE START SHIFT BUTTON IS LIVE. It opens the workflow in one tap — no
  * context picker, no confirmation dialog, and no request. Choosing who the day
@@ -43,6 +45,8 @@ import { BrandLockup } from "../components/Brand";
 import { TabIcon } from "../components/TabIcon";
 import { BiometricOptIn } from "../components/BiometricOptIn";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { TimesheetRow } from "./TimesheetRow";
+import type { CompletedShift } from "../shift/localShift";
 import { HOME_CARD_IMAGE } from "./homeCardImage";
 import { formatHomeDate, salutationFor } from "./homeGreeting";
 import type { AccountUser } from "../api/account";
@@ -59,6 +63,13 @@ interface HomeScreenProps {
   onOpenAccount: () => void;
   /** Opens the Start Shift workflow. One tap: no picker, no dialog. */
   onStartShift: () => void;
+  /**
+   * The latest finished days, newest first — or `"loading"` while the phone
+   * is read, or `"unreadable"` when it could not be.
+   */
+  recent: readonly CompletedShift[] | "loading" | "unreadable";
+  /** Opens one finished day, by its id. */
+  onOpenTimesheet: (id: string) => void;
 }
 
 /**
@@ -77,7 +88,7 @@ function initialsOf(user: AccountUser): string {
 }
 
 export function HomeScreen({
-  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift,
+  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift, recent, onOpenTimesheet,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
 
@@ -177,12 +188,29 @@ export function HomeScreen({
 
       <View style={styles.recent} testID="recent-timesheets">
         <Text style={styles.sectionTitle}>Recent Timesheets</Text>
-        {/* The section frame the approved design calls for, holding the one
-            true thing that can be said about it. No rows, no dates, no
-            distances, no statuses — see this file's header. */}
-        <View style={styles.recentEmpty} testID="recent-timesheets-empty">
-          <Text style={styles.recentEmptyText}>No timesheets yet</Text>
-        </View>
+        {/* Only what the phone holds: finished days, or the one true line
+            about there being none — see this file's header. */}
+        {recent === "loading" ? null : recent === "unreadable" ? (
+          <View style={styles.recentEmpty} testID="recent-timesheets-unreadable">
+            <Text style={styles.recentEmptyText}>Timesheets couldn't be read on this phone</Text>
+          </View>
+        ) : recent.length === 0 ? (
+          <View style={styles.recentEmpty} testID="recent-timesheets-empty">
+            <Text style={styles.recentEmptyText}>No timesheets yet</Text>
+          </View>
+        ) : (
+          <View style={styles.recentList} testID="recent-timesheets-list">
+            {recent.map((shift, index) => (
+              <TimesheetRow
+                key={shift.id}
+                shift={shift}
+                testID={`recent-timesheet-${String(index)}`}
+                last={index === recent.length - 1}
+                onOpen={onOpenTimesheet}
+              />
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Unchanged: offered once, and only where it can work — hardware
@@ -288,4 +316,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xl,
   },
   recentEmptyText: { ...typography.helper, fontSize: 14 },
+  recentList: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+  },
 });

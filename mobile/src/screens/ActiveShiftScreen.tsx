@@ -11,19 +11,14 @@
  * that does not serve one of those is decoration this screen cannot afford.
  *
  * ════════════════════════════════════════════════════════════════════════════
- * THE WORKSPACE IS BUILT; THE ACTIONS IN IT ARE NOT
+ * EVERY ACTION IS LIVE
  * ════════════════════════════════════════════════════════════════════════════
  *
- * The owner asked to approve the whole composition before any operational
- * action is wired, so the one unbuilt action is RENDERED and DISABLED:
- * Finish Shift, which has no `onPress`. The rest are live: Discard Shift,
- * Add Vehicle, Vehicle Checks, Change Unit / Change Vehicle, Fuel and AdBlue,
- * and each used vehicle. A control that answers a press by doing nothing
- * teaches a driver the app is broken, so the unbuilt one carries the
- * platform's disabled affordance and tells assistive technology the same
- * thing the pixels do.
+ * Discard Shift, Add Vehicle, Vehicle Checks, Change Unit / Change Vehicle,
+ * Fuel and AdBlue, the trailer's actions, each used vehicle and trailer, and
+ * Finish Shift, which opens the Finish flow and writes nothing itself.
  *
- * Rank is therefore carried by SIZE, POSITION and GROUPING rather than by
+ * Rank is carried by SIZE, POSITION and GROUPING rather than by
  * colour, in the order a driver needs them (owner decision, 2026-09-27):
  *
  *   the current vehicle   its plate, its facts, and every action on it —
@@ -86,14 +81,12 @@ import { TabIcon } from "../components/TabIcon";
 import { PrimaryButton } from "../components/PrimaryButton";
 import type { EndedVehicle, LocalShift, LocalVehicle, VehicleClass } from "../shift/localShift";
 import { checkStateOf, type VehicleCheckState } from "../shift/vehicleCheck";
+import { usesWithoutCompletedCheck, type UncheckedUse } from "../shift/checkCompletion";
 import { FILL_TYPES, summariseFills, summariseRecords, type FillSummary, type FillType } from "../shift/vehicleFill";
 import { TRAILER_TYPE, towsTrailers, trailerTypeLabel, type EndedTrailer, type LocalTrailer } from "../shift/trailer";
 import { usageDistance, usageHistory } from "../shift/usedVehicles";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatMileage, formatMileageRange } from "./format";
-
-/** Said to assistive technology by every control this increment has not wired. */
-const NOT_YET_AVAILABLE = "Not available yet";
 
 /**
  * A Class 1 is a tractor UNIT pulling a separate trailer, and that is what
@@ -117,31 +110,37 @@ interface ActiveShiftScreenProps {
   shift: LocalShift;
   /** Abandon the day. Called ONLY after the driver confirms. */
   onDiscard: () => void;
+  /** Open the Finish flow. Finishes nothing by itself. */
+  onFinish: () => void;
   /** Open the flow that puts a first vehicle into a day that has none. */
   onAddVehicle: () => void;
   /** Open, resume or show the walkaround check for the current vehicle. */
   onVehicleChecks: () => void;
   /** Open the flow that ends the current vehicle and takes the next. */
   onChangeVehicle: () => void;
-  /** Record fuel or AdBlue on the vehicle in use — named by its use's `startedAt`. */
-  onFill: (type: FillType, usageStartedAt: string) => void;
-  /** Open one ended use — named by its `startedAt`, never by plate — to read or correct. */
-  onOpenUsage: (usageStartedAt: string) => void;
+  /** Record fuel or AdBlue on the vehicle in use — named by its use's `useId`. */
+  onFill: (type: FillType, useId: string) => void;
+  /** Open one ended use — named by its `useId`, never by plate — to read or correct. */
+  onOpenUsage: (useId: string) => void;
   /** Open the flow that puts a trailer into a day with none in use. */
   onAddTrailer: () => void;
   /** Open the flow that hands the trailer in use back, for another or none. */
   onChangeTrailer: () => void;
-  /** Record fridge diesel on the refrigerated trailer in use — named by its use's `startedAt`. */
-  onFridgeDiesel: (trailerStartedAt: string) => void;
-  /** Open the walkaround for the trailer in use — named by its use's `startedAt`. */
-  onTrailerChecks: (trailerStartedAt: string) => void;
-  /** Open one ENDED trailer use — named by its `startedAt`, never by number. */
-  onOpenTrailerUsage: (trailerStartedAt: string) => void;
+  /** Correct the plate of the vehicle in use — named by its use's `useId`. */
+  onCorrectPlate: (useId: string) => void;
+  /** Correct the number of the trailer in use — named by its use's `useId`. */
+  onCorrectTrailerNumber: (trailerUseId: string) => void;
+  /** Record fridge diesel on the refrigerated trailer in use — named by its use's `useId`. */
+  onFridgeDiesel: (trailerUseId: string) => void;
+  /** Open the walkaround for the trailer in use — named by its use's `useId`. */
+  onTrailerChecks: (trailerUseId: string) => void;
+  /** Open one ENDED trailer use — named by its `useId`, never by number. */
+  onOpenTrailerUsage: (trailerUseId: string) => void;
 }
 
 export function ActiveShiftScreen({
-  shift, onDiscard, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage,
-  onAddTrailer, onChangeTrailer, onFridgeDiesel, onTrailerChecks, onOpenTrailerUsage,
+  shift, onDiscard, onFinish, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage,
+  onAddTrailer, onChangeTrailer, onFridgeDiesel, onTrailerChecks, onOpenTrailerUsage, onCorrectPlate, onCorrectTrailerNumber,
 }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const { vehicle } = shift;
@@ -152,12 +151,12 @@ export function ActiveShiftScreen({
    * vehicle is never folded: its card opens with its details and checks.
    */
   const [foldedUse, setFoldedUse] = useState<string | null>(null);
-  const expanded = vehicle !== null && foldedUse !== vehicle.startedAt;
+  const expanded = vehicle !== null && foldedUse !== vehicle.useId;
 
   /** The same, for the trailer card: a NEW trailer use always opens expanded. */
   const { trailer } = shift;
   const [foldedTrailer, setFoldedTrailer] = useState<string | null>(null);
-  const trailerExpanded = trailer !== null && foldedTrailer !== trailer.startedAt;
+  const trailerExpanded = trailer !== null && foldedTrailer !== trailer.useId;
 
   /**
    * A TRAILER JUST TAKEN folds the vehicle card, so the trailer is in view
@@ -167,11 +166,11 @@ export function ActiveShiftScreen({
    * render, as React recommends for state derived from a changed prop, so the
    * folded card is the first thing drawn.
    */
-  const trailerStart = trailer?.startedAt ?? null;
+  const trailerStart = trailer?.useId ?? null;
   const [seenTrailer, setSeenTrailer] = useState(trailerStart);
   if (trailerStart !== seenTrailer) {
     setSeenTrailer(trailerStart);
-    if (trailerStart !== null && vehicle !== null) setFoldedUse(vehicle.startedAt);
+    if (trailerStart !== null && vehicle !== null) setFoldedUse(vehicle.useId);
   }
   /**
    * A trailer section exists behind a vehicle that tows one. A trailer in use
@@ -186,8 +185,8 @@ export function ActiveShiftScreen({
    * card's own actions never call this.
    */
   function focusElsewhere() {
-    if (vehicle !== null) setFoldedUse(vehicle.startedAt);
-    if (trailer !== null) setFoldedTrailer(trailer.startedAt);
+    if (vehicle !== null) setFoldedUse(vehicle.useId);
+    if (trailer !== null) setFoldedTrailer(trailer.useId);
   }
 
   const startedAt = formatClockTime(shift.startedAt);
@@ -214,6 +213,26 @@ export function ActiveShiftScreen({
         { text: "Discard",    style: "destructive", onPress: onDiscard },
       ],
     );
+  }
+
+  /**
+   * CHECKS NOT COMPLETED ARE SAID BEFORE THE FINISH FLOW OPENS (D38). Any use
+   * of the day — in use or ended, vehicle or trailer — without a completed
+   * check is named, and the driver chooses: Go Back, or Continue to Finish.
+   * Neither writes anything; nothing is marked completed. The Review says it
+   * again, as the second warning.
+   */
+  function finish() {
+    focusElsewhere();
+    const unchecked = usesWithoutCompletedCheck(shift);
+    if (unchecked.length === 0) {
+      onFinish();
+      return;
+    }
+    Alert.alert("Checks not completed", uncheckedMessage(unchecked), [
+      { text: "Go Back", style: "cancel" },
+      { text: "Continue to Finish", onPress: onFinish },
+    ]);
   }
 
   return (
@@ -286,11 +305,12 @@ export function ActiveShiftScreen({
               <CurrentVehicle
                 vehicle={vehicle}
                 expanded={expanded}
-                onToggle={() => { setFoldedUse(expanded ? vehicle.startedAt : null); }}
+                onToggle={() => { setFoldedUse(expanded ? vehicle.useId : null); }}
                 changeLabel={words.change}
                 onVehicleChecks={onVehicleChecks}
                 onChangeVehicle={onChangeVehicle}
-                onFill={type => { onFill(type, vehicle.startedAt); }}
+                onCorrectPlate={() => { onCorrectPlate(vehicle.useId); }}
+                onFill={type => { onFill(type, vehicle.useId); }}
               />
             )}
         </View>
@@ -318,10 +338,11 @@ export function ActiveShiftScreen({
                   <CurrentTrailer
                     trailer={trailer}
                     expanded={trailerExpanded}
-                    onToggle={() => { setFoldedTrailer(trailerExpanded ? trailer.startedAt : null); }}
-                    onTrailerChecks={() => { onTrailerChecks(trailer.startedAt); }}
+                    onToggle={() => { setFoldedTrailer(trailerExpanded ? trailer.useId : null); }}
+                    onTrailerChecks={() => { onTrailerChecks(trailer.useId); }}
                     onChangeTrailer={onChangeTrailer}
-                    onFridgeDiesel={() => { onFridgeDiesel(trailer.startedAt); }}
+                    onCorrectNumber={() => { onCorrectTrailerNumber(trailer.useId); }}
+                    onFridgeDiesel={() => { onFridgeDiesel(trailer.useId); }}
                   />
                 )}
             </View>
@@ -337,11 +358,11 @@ export function ActiveShiftScreen({
         />
 
         {/* The end of the day, held apart by a rule and a full gap so it is
-            never the button a driver hits while reaching for another. When it
-            is built it is another section, and pressing it folds the vehicle
-            card like any other (D33); while it is disabled it takes no press. */}
+            never the button a driver hits while reaching for another. It is
+            another section, so pressing it folds the vehicle card like any
+            other (D33). */}
         <View style={styles.endOfDay}>
-          <PendingAction label="Finish Shift" testID="finish-shift" />
+          <PrimaryButton label="Finish Shift" onPress={finish} testID="finish-shift" />
         </View>
       </ScrollView>
     </View>
@@ -368,7 +389,7 @@ function NoVehicle({ stillOnShift, onAddVehicle }: { stillOnShift: boolean; onAd
   );
 }
 
-function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChecks, onChangeVehicle, onFill }: {
+function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChecks, onChangeVehicle, onCorrectPlate, onFill }: {
   vehicle: LocalVehicle;
   expanded: boolean;
   /** The plate header: open a folded card, fold an open one. */
@@ -376,6 +397,7 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
   changeLabel: string;
   onVehicleChecks: () => void;
   onChangeVehicle: () => void;
+  onCorrectPlate: () => void;
   onFill: (type: FillType) => void;
 }) {
   /**
@@ -466,6 +488,8 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
       <View style={styles.secondarySlot}>
         <SecondaryAction label={changeLabel} onPress={onChangeVehicle} testID="change-vehicle" />
       </View>
+      {/* A typing mistake in the plate, put right without changing vehicle. */}
+      <QuietAction label="Correct number plate" onPress={onCorrectPlate} testID="correct-plate" />
       {/* Things put INTO this vehicle, so they live in its card — below the
           actions that decide whether the driver is in it at all. */}
       <View style={styles.tiles}>
@@ -531,12 +555,13 @@ function NoTrailer({ onAddTrailer }: { onAddTrailer: () => void }) {
  * be done to it. Collapsible exactly like the vehicle card — folded to its
  * number over a one-line check status, on the same subtle red or green ground.
  */
-function CurrentTrailer({ trailer, expanded, onToggle, onTrailerChecks, onChangeTrailer, onFridgeDiesel }: {
+function CurrentTrailer({ trailer, expanded, onToggle, onTrailerChecks, onChangeTrailer, onCorrectNumber, onFridgeDiesel }: {
   trailer: LocalTrailer;
   expanded: boolean;
   onToggle: () => void;
   onTrailerChecks: () => void;
   onChangeTrailer: () => void;
+  onCorrectNumber: () => void;
   onFridgeDiesel: () => void;
 }) {
   // THIS trailer use's checks only (D35) — never the unit's, never an
@@ -594,6 +619,7 @@ function CurrentTrailer({ trailer, expanded, onToggle, onTrailerChecks, onChange
       <View style={styles.secondarySlot}>
         <SecondaryAction label="Change Trailer" onPress={onChangeTrailer} testID="change-trailer" />
       </View>
+      <QuietAction label="Correct trailer number" onPress={onCorrectNumber} testID="correct-trailer-number" />
       {/* The fridge unit's own diesel — never the unit's Fuel. */}
       {refrigerated ? (
         <View style={styles.tiles}>
@@ -646,10 +672,26 @@ function FactRow({ label, children }: { label: string; children: React.ReactNode
  * A live control that is not the next thing to do — Change Unit, or a
  * completed check still worth opening.
  *
- * Bordered rather than filled, and with the brand's own text rather than the
- * muted grey of the unbuilt controls — so it reads as something the driver
- * may open, not as something they cannot.
+ * Bordered rather than filled, and with the brand's own text rather than a
+ * disabled control's muted grey — so it reads as something the driver may
+ * open, not as something they cannot.
  */
+/** A small text action — something occasionally needed, below the actions that matter. */
+function QuietAction({ label, onPress, testID }: { label: string; onPress: () => void; testID: string }) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={({ pressed }) => [styles.quiet, pressed ? styles.secondaryPressed : null]}
+    >
+      <Text style={styles.quietLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function SecondaryAction({ label, onPress, testID }: { label: string; onPress: () => void; testID: string }) {
   return (
     <Pressable
@@ -673,7 +715,7 @@ function SecondaryAction({ label, onPress, testID }: { label: string; onPress: (
  * took AB12 CDE twice reads two rows with two sets of mileages. Merging them
  * by registration would invent a journey nobody drove. The row says only what
  * identifies the use at a glance — plate, class, its mileages — and opens THAT
- * use, by its `startedAt`, where its checks, fuel and AdBlue are shown and
+ * use, by its `useId`, where its checks, fuel and AdBlue are shown and
  * corrected. Every number is stored or subtracted from two stored numbers.
  *
  * Openable whether or not a vehicle is in use now (D31).
@@ -682,14 +724,14 @@ function SecondaryAction({ label, onPress, testID }: { label: string; onPress: (
  * 2026-09-27): one row per use, newest ended first, never grouped by number —
  * TR23 handed back twice is two rows. The trailer in use is never among them.
  * Each says its number, type, hours and its OWN check state, and opens THAT
- * use — by its `startedAt` — where a forgotten Trailer Check can be completed
+ * use — by its `useId` — where a forgotten Trailer Check can be completed
  * and a fridge trailer's diesel corrected.
  */
 function UsedThisShift({ usages, trailers, onOpenUsage, onOpenTrailerUsage }: {
   usages: readonly EndedVehicle[];
   trailers: readonly EndedTrailer[];
-  onOpenUsage: (usageStartedAt: string) => void;
-  onOpenTrailerUsage: (trailerStartedAt: string) => void;
+  onOpenUsage: (useId: string) => void;
+  onOpenTrailerUsage: (trailerUseId: string) => void;
 }) {
   if (usages.length === 0 && trailers.length === 0) return null;
   return (
@@ -701,10 +743,10 @@ function UsedThisShift({ usages, trailers, onOpenUsage, onOpenTrailerUsage }: {
           <View testID="used-this-shift" style={[styles.card, styles.clipped, trailers.length === 0 ? null : styles.usedGroupCard]}>
             {usages.map((use, index) => (
               <UsedRow
-                key={use.startedAt}
+                key={use.useId}
                 use={use}
                 last={index === usages.length - 1}
-                onPress={() => { onOpenUsage(use.startedAt); }}
+                onPress={() => { onOpenUsage(use.useId); }}
               />
             ))}
           </View>
@@ -716,10 +758,10 @@ function UsedThisShift({ usages, trailers, onOpenUsage, onOpenTrailerUsage }: {
           <View testID="used-trailers" style={[styles.card, styles.clipped]}>
             {trailers.map((use, index) => (
               <UsedTrailerRow
-                key={use.startedAt}
+                key={use.useId}
                 use={use}
                 last={index === trailers.length - 1}
-                onPress={() => { onOpenTrailerUsage(use.startedAt); }}
+                onPress={() => { onOpenTrailerUsage(use.useId); }}
               />
             ))}
           </View>
@@ -777,28 +819,6 @@ function UsedRow({ use, last, onPress }: { use: EndedVehicle; last: boolean; onP
   );
 }
 
-/**
- * A control whose screen does not exist yet.
- *
- * No `onPress` at all rather than an empty one: `Pressable` with `disabled`
- * reports itself correctly to assistive technology and cannot be made to look
- * like it handled a tap.
- */
-function PendingAction({ label, testID }: { label: string; testID: string }) {
-  return (
-    <Pressable
-      testID={testID}
-      disabled
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: true }}
-      accessibilityHint={NOT_YET_AVAILABLE}
-      style={styles.pending}
-    >
-      <Text style={styles.pendingLabel}>{label}</Text>
-    </Pressable>
-  );
-}
 
 /**
  * Fuel or AdBlue on the vehicle in use: what this use has had, and the way to
@@ -830,6 +850,17 @@ function FillTile({ testID, label, summary, onPress }: {
       )}
     </Pressable>
   );
+}
+
+/**
+ * "2 checks were not completed during this shift: AB12 CDE, trailer TR23."
+ * A plate or trailer used more than once is told apart by when each use began.
+ */
+function uncheckedMessage(unchecked: readonly UncheckedUse[]): string {
+  const repeated = new Set(unchecked.filter((use, index) => unchecked.findIndex(other => other.name === use.name) !== index).map(use => use.name));
+  const names = unchecked.map(use => (repeated.has(use.name) ? `${use.name} (from ${formatClockTime(use.startedAt)})` : use.name));
+  const count = unchecked.length === 1 ? "1 check was" : `${String(unchecked.length)} checks were`;
+  return `${count} not completed during this shift: ${names.join(", ")}. You can still finish — nothing will be marked as completed.`;
 }
 
 const styles = StyleSheet.create({
@@ -1043,6 +1074,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   pendingLabel: { fontSize: 16, fontWeight: "700", color: colors.disabled },
+  quiet: { alignSelf: "center", minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.md, marginTop: spacing.xs, borderRadius: radius.button },
+  quietLabel: { fontSize: 14, fontWeight: "600", color: colors.brandLight },
 
   // Equal halves that shrink together; no fixed tile width to break on a
   // narrow phone.

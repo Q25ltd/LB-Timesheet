@@ -33,6 +33,7 @@ import {
   type VehicleDetails,
 } from "../shift/localShift";
 import { FILL_TYPE } from "../shift/vehicleFill";
+import { vehicleUseAt } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { usage?: string } = {};
@@ -100,7 +101,7 @@ async function dayWith(vehicle: VehicleDetails | null = AB12): Promise<LocalShif
 async function changeTo(next: VehicleDetails, hour: number, endMileage: number): Promise<string> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
-  await changeVehicle({ shiftId: open.id, endingStartedAt: open.vehicle.startedAt, endMileage, changedAt: at(hour), next });
+  await changeVehicle({ shiftId: open.id, endingUseId: open.vehicle.useId, endMileage, changedAt: at(hour), next });
   return open.vehicle.startedAt;
 }
 
@@ -108,7 +109,7 @@ async function changeTo(next: VehicleDetails, hour: number, endMileage: number):
 async function fillNow(litres: number | null, over: { type?: "fuel" | "adblue"; note?: string; recordedAt?: Date } = {}): Promise<void> {
   const open = await readOpenShift();
   await recordVehicleFill({
-    shiftId: open?.id ?? "", vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse,
+    shiftId: open?.id ?? "", vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse,
     fillId: newLocalId(), type: over.type ?? FILL_TYPE.fuel, recordedAt: over.recordedAt ?? at(8),
     litres, note: over.note ?? "",
   });
@@ -122,7 +123,7 @@ async function fillNow(litres: number | null, over: { type?: "fuel" | "adblue"; 
 async function threeUseDay(): Promise<{ first: string; middle: string; second: string }> {
   const shift = await dayWith();
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
+    shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
@@ -146,7 +147,7 @@ async function activeShift(): Promise<View> {
 }
 
 async function openUsage(usage: string): Promise<View> {
-  params.usage = usage;
+  params.usage = vehicleUseAt(usage);
   const view = await wrap(<VehicleUsageRoute />);
   await waitFor(() => { expect(view.queryByTestId("screen-title") ?? view.queryByTestId("redirect")).not.toBeNull(); });
   return view;
@@ -227,10 +228,10 @@ test("pressing a row opens EXACTLY that use, by its identity — never by plate"
   const view = await activeShift();
 
   await press(view, `usage-${second}`);
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: second } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: vehicleUseAt(second) } });
 
   await press(view, `usage-${first}`);
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: first } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: vehicleUseAt(first) } });
 });
 
 test("rendering the history neither writes nor reorders the stored day", async () => {
@@ -267,7 +268,7 @@ test("TEN changes stay ten compact rows below the current vehicle's actions", as
 async function endWithNoVehicle(hour: number, endMileage: number): Promise<string> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
-  await endVehicleUse({ shiftId: open.id, endingStartedAt: open.vehicle.startedAt, endMileage, endedAt: at(hour) });
+  await endVehicleUse({ shiftId: open.id, endingUseId: open.vehicle.useId, endMileage, endedAt: at(hour) });
   return open.vehicle.startedAt;
 }
 
@@ -293,7 +294,7 @@ test("with NO vehicle: every ended use is still a row, and each still opens", as
 
   expect(rowIds(view)).toEqual([last, second, middle, first]);
   await press(view, `usage-${first}`);
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: first } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-usage", params: { usage: vehicleUseAt(first) } });
 });
 
 test("a day that simply booked on without a vehicle does not claim anyone is 'still' on shift", async () => {
@@ -404,13 +405,16 @@ async function openEdit(usage: string): Promise<View> {
   return view;
 }
 
-test("Edit offers ONE field — the end mileage — and states the rest", async () => {
+test("Edit offers the start and end times and mileage — and states the rest (D41, D42)", async () => {
   const { first } = await threeUseDay();
 
   const view = await openEdit(first);
 
   expect(text(view, "screen-title")).toBe("Edit Vehicle Use");
-  expect(inputs(view)).toEqual(["usage-end-mileage-input"]);
+  expect(inputs(view)).toEqual([
+    "usage-start-time-hours", "usage-start-time-minutes", "usage-end-time-hours", "usage-end-time-minutes",
+    "usage-start-mileage-input", "usage-end-mileage-input",
+  ]);
   expect(view.getByTestId("usage-end-mileage-input").props.value).toBe("100120");
   // Plate, class and hours are still shown, and are not inputs.
   expect(text(view, "usage-plate")).toBe("AB12 CDE");
@@ -506,9 +510,9 @@ test("Edit's Fuel and AdBlue open the fill screen for THIS ended use", async () 
   expect(text(view, "usage-edit-fuel-total")).toBe("60 L · 1 entry");
   expect(text(view, "usage-edit-adblue-total")).toBe("No entries");
   await press(view, "usage-edit-fuel");
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-fill", params: { type: "fuel", usage: second, usageState: "ended" } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-fill", params: { type: "fuel", usage: vehicleUseAt(second), usageState: "ended" } });
   await press(view, "usage-edit-adblue");
-  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-fill", params: { type: "adblue", usage: second, usageState: "ended" } });
+  expect(mockRouter.push).toHaveBeenLastCalledWith({ pathname: "/vehicle-fill", params: { type: "adblue", usage: vehicleUseAt(second), usageState: "ended" } });
 });
 
 test("Back from Edit returns to the use without writing, and a typed value is dropped", async () => {
@@ -565,7 +569,7 @@ test("STORE: a below-start or non-whole reading is refused, writing nothing", as
   const before = storedBytes();
 
   for (const endMileage of [99_999, -1, 100_120.5, Number.NaN]) {
-    await expect(correctEndMileage({ shiftId, vehicleStartedAt: first, endMileage })).rejects.toThrow("Refusing");
+    await expect(correctEndMileage({ shiftId, vehicleUseId: vehicleUseAt(first), endMileage })).rejects.toThrow("Refusing");
   }
 
   expect(storedBytes()).toBe(before);
@@ -577,12 +581,12 @@ test("STORE: a use that is not an ENDED use of this open day is never corrected"
   const before = storedBytes();
 
   const results = await Promise.all([
-    correctEndMileage({ shiftId: day?.id ?? "", vehicleStartedAt: "2026-09-19T23:59:00.000Z", endMileage: 100_200 }),
-    correctEndMileage({ shiftId: day?.id ?? "", vehicleStartedAt: "AB12 CDE", endMileage: 100_200 }),
-    correctEndMileage({ shiftId: day?.id ?? "", vehicleStartedAt: "", endMileage: 100_200 }),
+    correctEndMileage({ shiftId: day?.id ?? "", vehicleUseId: vehicleUseAt("2026-09-19T23:59:00.000Z"), endMileage: 100_200 }),
+    correctEndMileage({ shiftId: day?.id ?? "", vehicleUseId: vehicleUseAt("AB12 CDE"), endMileage: 100_200 }),
+    correctEndMileage({ shiftId: day?.id ?? "", vehicleUseId: vehicleUseAt(""), endMileage: 100_200 }),
     // The vehicle in use has no end to correct.
-    correctEndMileage({ shiftId: day?.id ?? "", vehicleStartedAt: day?.vehicle?.startedAt ?? "", endMileage: 300_000 }),
-    correctEndMileage({ shiftId: "another-day", vehicleStartedAt: first, endMileage: 100_200 }),
+    correctEndMileage({ shiftId: day?.id ?? "", vehicleUseId: day?.vehicle?.useId ?? "", endMileage: 300_000 }),
+    correctEndMileage({ shiftId: "another-day", vehicleUseId: vehicleUseAt(first), endMileage: 100_200 }),
   ]);
 
   expect(results).toEqual([null, null, null, null, null]);
@@ -593,7 +597,7 @@ test("STORE: a corrected end mileage survives a cold start", async () => {
   const { first } = await threeUseDay();
   const shiftId = (await readOpenShift())?.id ?? "";
 
-  await correctEndMileage({ shiftId, vehicleStartedAt: first, endMileage: 100_140 });
+  await correctEndMileage({ shiftId, vehicleUseId: vehicleUseAt(first), endMileage: 100_140 });
 
   // Read again from the file alone.
   expect(storedBytes()).toContain('"endMileage":100140');

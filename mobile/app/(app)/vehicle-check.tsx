@@ -19,7 +19,7 @@
  * vehicle in use the screen is not shown — the replacement is never checked in
  * its place. With no parameters it opens the vehicle in use.
  *
- * AN ENDED USE, EXPLICITLY. With `usage` (a use's `startedAt`) and
+ * AN ENDED USE, EXPLICITLY. With `usage` (a use's `useId`) and
  * `usageState: "ended"` it opens THAT ended vehicle use's check instead — a
  * check forgotten before the vehicle went back (D36): its draft resumed, or a
  * fresh one. A name that is not an ended use of this day is not a screen.
@@ -40,7 +40,6 @@ import {
   USAGE_STATE,
   completeVehicleCheck,
   newLocalId,
-  readOpenShift,
   reviseVehicleCheck,
   saveVehicleCheckDraft,
   type LocalShift,
@@ -48,38 +47,41 @@ import {
   type UsageState,
 } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
+import { backToDay, leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
 
 export default function VehicleCheckRoute() {
-  const { usage, usageState } = useLocalSearchParams<{ usage?: string; usageState?: string }>();
+  const { usage, usageState, timesheet, via } = useLocalSearchParams<{ usage?: string; usageState?: string; timesheet?: string; via?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []);
+  }, [timesheet]);
 
   // Reading the phone's own shift file — not signing anyone in.
   if (shift === "loading") return <Restoring message="Loading check…" />;
-  if (shift === null) return <Redirect href="/today" />;
+  if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
 
   if (usageState === USAGE_STATE.ended) {
-    const ended = shift.previousVehicles.find(use => use.startedAt === usage);
-    if (usage === undefined || ended === undefined) return <Redirect href="/active-shift" />;
-    return <OpenCheck shift={shift} vehicle={ended} usageState={USAGE_STATE.ended} onShift={setShift} />;
+    const ended = shift.previousVehicles.find(use => use.useId === usage);
+    if (usage === undefined || ended === undefined) return <Redirect href={missingHref(timesheet, true)} />;
+    return <OpenCheck shift={shift} vehicle={ended} usageState={USAGE_STATE.ended} onShift={setShift} timesheet={timesheet} />;
   }
-  // Anything but "ended" named explicitly is not a way to reach an ended use.
+  // Anything but "ended" named explicitly is not a way to reach an ended use,
+  // and nothing on a finished day is in use.
+  if (timesheet !== undefined) return <Redirect href={missingHref(timesheet, true)} />;
   if (usageState !== undefined && usageState !== USAGE_STATE.inUse) return <Redirect href="/active-shift" />;
   if (shift.vehicle === null) return <Redirect href="/active-shift" />;
   // A use NAMED as in use must still be the one in use: a vehicle changed since
   // is never silently replaced by whatever is current now.
-  if (usage !== undefined && usage !== shift.vehicle.startedAt) return <Redirect href="/active-shift" />;
+  if (usage !== undefined && usage !== shift.vehicle.useId) return <Redirect href="/active-shift" />;
 
-  return <OpenCheck shift={shift} vehicle={shift.vehicle} usageState={USAGE_STATE.inUse} onShift={setShift} />;
+  return <OpenCheck shift={shift} vehicle={shift.vehicle} usageState={USAGE_STATE.inUse} onShift={setShift} via={via} />;
 }
 
-function OpenCheck({ shift, vehicle, usageState, onShift }: {
-  shift: LocalShift; vehicle: LocalVehicle; usageState: UsageState; onShift: (shift: LocalShift | null) => void;
+function OpenCheck({ shift, vehicle, usageState, onShift, timesheet, via }: {
+  shift: LocalShift; vehicle: LocalVehicle; usageState: UsageState; onShift: (shift: LocalShift | null) => void; timesheet?: string; via?: string;
 }) {
   const { account } = useAuth();
   const existing = latestCheck(vehicle.checks);
@@ -90,7 +92,7 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
 
   const target = {
     shiftId: shift.id,
-    vehicleStartedAt: vehicle.startedAt,
+    vehicleUseId: vehicle.useId,
     usageState,
     checkId: identity.current.id,
     startedAt: identity.current.startedAt,
@@ -99,7 +101,7 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
   async function save(answers: CheckAnswer[]): Promise<void> {
     try {
       const stored = await saveVehicleCheckDraft({ ...target, answers });
-      if (stored === null) gone();
+      if (stored === null) gone(timesheet);
     } catch (error: unknown) {
       Alert.alert("Couldn't save the check", saveFailureMessage(error, "Your last answer was not saved. Please try again."));
       throw error;
@@ -119,9 +121,9 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
         completedAt: new Date(),
         completedBy: account.user.id,
       });
-      if (stored === null) { gone(); return; }
+      if (stored === null) { gone(timesheet); return; }
       // Back where it was opened from: the day, or the ended use's detail.
-      if (usageState === USAGE_STATE.inUse) router.dismissTo("/active-shift");
+      if (usageState === USAGE_STATE.inUse) backToDay(via);
       else router.back();
     } catch (error: unknown) {
       Alert.alert("Couldn't complete the check", saveFailureMessage(error));
@@ -133,12 +135,12 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
     if (account === null || existing === null) return;
     try {
       const stored = await reviseVehicleCheck({
-        shiftId: shift.id, usageStartedAt: vehicle.startedAt, usageState, checkId: existing.id,
+        shiftId: shift.id, useId: vehicle.useId, usageState, checkId: existing.id,
         revisionId: newLocalId(), answers, revisedAt: new Date(), revisedBy: account.user.id,
       });
-      if (stored === null) { gone(); return; }
+      if (stored === null) { gone(timesheet); return; }
       // Show the corrected certificate from the file.
-      onShift(await readOpenShift());
+      onShift(await readScreenDay(timesheet));
     } catch (error: unknown) {
       Alert.alert("Couldn't save the correction", saveFailureMessage(error));
       throw error;
@@ -153,7 +155,7 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
       onSave={save}
       onComplete={complete}
       onRevise={revise}
-      onExit={() => { if (usageState === USAGE_STATE.inUse) router.dismissTo("/active-shift"); else router.back(); }}
+      onExit={() => { if (usageState === USAGE_STATE.inUse) backToDay(via); else router.back(); }}
     />
   );
 }
@@ -163,7 +165,7 @@ function OpenCheck({ shift, vehicle, usageState, onShift }: {
  * changed or was handed back, or the day was discarded. Nothing was written.
  * Said, and back to the day (Active Shift sends a discarded day Home itself).
  */
-function gone(): void {
+function gone(timesheet: string | undefined): void {
   Alert.alert("Nothing was saved", "That vehicle is no longer the one this check was opened for.");
-  router.dismissTo("/active-shift");
+  leaveStale(timesheet);
 }

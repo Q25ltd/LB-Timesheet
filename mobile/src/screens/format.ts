@@ -56,6 +56,16 @@ export function formatDuration(fromIso: string, toIso: string): string {
 }
 
 /**
+ * A use's check on a FINISHED day, in the three words that matter there. A
+ * draft is not a check: it says not completed, and that it was started.
+ */
+export function finishedCheckLabel(checks: readonly VehicleCheck[]): string {
+  const state = checkStateOf(checks);
+  if (state === "completed") return isCorrected(latestCheck(checks)) ? "Checks completed · corrected" : "Checks completed";
+  return state === "in-progress" ? "Check not completed · started" : "Check not completed";
+}
+
+/**
  * A use's check state for a DETAIL screen: as `CHECK_STATE_LABEL`, and a
  * completed check that has been corrected says so (D36). Active Shift's cards
  * keep the plain "Checks completed" — revision history is not theirs to show.
@@ -63,6 +73,51 @@ export function formatDuration(fromIso: string, toIso: string): string {
 export function checkDetailLabel(checks: readonly VehicleCheck[]): string {
   const state = checkStateOf(checks);
   return state === "completed" && isCorrected(latestCheck(checks)) ? "Completed · corrected" : CHECK_STATE_LABEL[state];
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/**
+ * An instant's local calendar day: "Mon 28 Sep 2026". Built by hand, as
+ * mileages are, so it reads the same on every phone whatever its locale.
+ */
+export function formatDate(iso: string): string {
+  const at = new Date(iso);
+  return `${WEEKDAYS[at.getDay()] ?? ""} ${String(at.getDate())} ${MONTHS[at.getMonth()] ?? ""} ${String(at.getFullYear())}`;
+}
+
+/** "Mon 28 Sep 2026, 17:40". */
+export function formatDateTime(iso: string): string {
+  return `${formatDate(iso)}, ${formatClockTime(iso)}`;
+}
+
+/** Whole calendar days from one instant's local date to another's: 0 on the same day. */
+export function calendarDaysBetween(fromIso: string, toIso: string): number {
+  const from = new Date(fromIso);
+  const to = new Date(toIso);
+  return Math.round(
+    (new Date(to.getFullYear(), to.getMonth(), to.getDate()).getTime()
+      - new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime()) / 86_400_000,
+  );
+}
+
+/**
+ * A finish with its date, and — when it is not the start's day — how many
+ * days after it: "Sun 20 Sep 2026, 06:00 (next day)". The line a
+ * cross-midnight mistake shows up on.
+ */
+export function formatFinish(startedAt: string, endedAt: string): string {
+  const days = calendarDaysBetween(startedAt, endedAt);
+  if (days <= 0) return formatDateTime(endedAt);
+  return `${formatDateTime(endedAt)} (${days === 1 ? "next day" : `${String(days)} days later`})`;
+}
+
+/** A day's hours on one line: "05:00 → 17:00", or "22:00 → 06:00 (+1 day)". */
+export function formatShiftHours(startedAt: string, endedAt: string): string {
+  const days = calendarDaysBetween(startedAt, endedAt);
+  const range = `${formatClockTime(startedAt)} → ${formatClockTime(endedAt)}`;
+  return days <= 0 ? range : `${range} (+${String(days)} ${days === 1 ? "day" : "days"})`;
 }
 
 /** An instant, as a plain local clock time: "05:42". */

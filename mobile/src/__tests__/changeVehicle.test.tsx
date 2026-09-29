@@ -97,7 +97,7 @@ async function changed(to: VehicleDetails, hour: number): Promise<void> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await changeVehicle({
-    shiftId: open.id, endingStartedAt: open.vehicle.startedAt, endMileage: open.vehicle.startMileage + 50,
+    shiftId: open.id, endingUseId: open.vehicle.useId, endMileage: open.vehicle.startMileage + 50,
     changedAt: at(hour), next: to,
   });
 }
@@ -118,7 +118,7 @@ async function completeCheckOnCurrent(): Promise<void> {
   const open = await readOpenShift();
   if (open?.vehicle == null) throw new Error("expected a vehicle in use");
   await completeVehicleCheck({
-    shiftId: open.id, vehicleStartedAt: open.vehicle.startedAt, usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
+    shiftId: open.id, vehicleUseId: open.vehicle.useId, usageState: USAGE_STATE.inUse, checkId: "morning", startedAt: at(5, 40),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: DRIVER.user.id,
   });
@@ -393,7 +393,7 @@ test("YES: the returned-to vehicle becomes a new use and its Vehicle Checks open
 
   // The check opens for EXACTLY the use just begun.
   await waitFor(async () => {
-    expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: (await readOpenShift())?.vehicle?.startedAt, usageState: "in-use" } });
+    expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: (await readOpenShift())?.vehicle?.useId, usageState: "in-use" } });
   });
   const day = await readOpenShift();
   expect(day?.vehicle).toMatchObject({ numberPlate: "AB12 CDE", startMileage: 100_130, checks: [] });
@@ -516,7 +516,7 @@ test("the screen itself asks ONCE — three taps while the write is still runnin
   const onConfirm = jest.fn(() => new Promise<void>(() => { /* never settles */ }));
   const view = await wrap(
     <ChangeVehicleScreen trailerInUse={null}
-      current={{ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] }}
+      current={{ ...AB12, useId: "use-ab12", startedAt: STARTED_AT.toISOString(), checks: [], fills: [] }}
       candidates={[]}
       onLeave={() => { /* not used here */ }}
       onConfirm={onConfirm}
@@ -773,7 +773,7 @@ test("Active Shift then says NO ACTIVE VEHICLE, keeps the ended use, and still o
   expect(active.queryAllByTestId(/^usage-[0-9]/)).toHaveLength(1);
 });
 
-test("Fuel and AdBlue are unavailable, and Finish Shift is still its own separate action", async () => {
+test("Fuel and AdBlue are unavailable, and Finish Shift is still its own separate action — the shift stays open", async () => {
   await dayWith();
   const view = await openChange();
   await toNoVehicle(view, "100250");
@@ -785,9 +785,8 @@ test("Fuel and AdBlue are unavailable, and Finish Shift is still its own separat
   // Not even rendered: with no vehicle in use there is nothing to put them in.
   expect(active.queryByTestId("fuel")).toBeNull();
   expect(active.queryByTestId("adblue")).toBeNull();
-  // Still on the screen, still not this increment's to press.
+  // Still on the screen, and No vehicle did not finish anything.
   expect(active.queryByTestId("finish-shift")).not.toBeNull();
-  expect(isDisabled(active, "finish-shift")).toBe(true);
   // And the shift is genuinely still open.
   expect((await readOpenShift())?.status).toBe("open");
 });

@@ -36,7 +36,9 @@ import { useRef, useState } from "react";
 import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
-import type { EndedVehicle } from "../shift/localShift";
+import type { EndedVehicle, LocalVehicle } from "../shift/localShift";
+import { USE_ENDED_BY } from "../shift/useEnd";
+import { UseTimesEditor, type UseTimes } from "./UseTimesEditor";
 import { checkStateOf } from "../shift/vehicleCheck";
 import { FILL_TYPES, fillsOfType, summariseFills, type FillType } from "../shift/vehicleFill";
 import { usageDistance } from "../shift/usedVehicles";
@@ -44,8 +46,14 @@ import { BackButton, FormSection, formStyles, keyboardSafeScrollProps, parseMile
 import { checkDetailLabel, classLabel, fillSummaryText, formatClockTime, formatLitres, formatMileage } from "./format";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 
+/** A use still in progress has no end yet; one that has ended has both. */
+function endOf(use: LocalVehicle | EndedVehicle): EndedVehicle | null {
+  return "endedAt" in use ? use : null;
+}
+
 interface VehicleUsageScreenProps {
-  use: EndedVehicle;
+  /** An ended use — or, from the Finish Review, the use still in progress (D41). */
+  use: LocalVehicle | EndedVehicle;
   onLeave: () => void;
   /** Open THIS use's Vehicle / Unit Check — a forgotten one to complete, or its certificate (D36). */
   onVehicleChecks: () => void;
@@ -53,12 +61,19 @@ interface VehicleUsageScreenProps {
   onFills: (type: FillType) => void;
   /** Store a corrected end mileage on this use. Rejects if it could not be stored. */
   onSaveEndMileage: (endMileage: number) => Promise<void>;
+  /** Store a corrected start mileage on this use (D41). Rejects if it could not be stored. */
+  onSaveStartMileage: (startMileage: number) => Promise<void>;
+  /** Correct THIS use's plate, typed wrong (D40). */
+  onCorrectPlate: () => void;
+  /** Store corrected start / end times on this use (D42). Rejects if they could not be stored. */
+  onSaveTimes: (times: UseTimes) => Promise<void>;
 }
 
-export function VehicleUsageScreen({ use, onLeave, onVehicleChecks, onFills, onSaveEndMileage }: VehicleUsageScreenProps) {
+export function VehicleUsageScreen({ use, onLeave, onVehicleChecks, onFills, onSaveEndMileage, onSaveStartMileage, onCorrectPlate, onSaveTimes }: VehicleUsageScreenProps) {
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState(false);
-  const hours = `${formatClockTime(use.startedAt)}–${formatClockTime(use.endedAt)}`;
+  const ended = endOf(use);
+  const hours = `${formatClockTime(use.startedAt)}–${ended === null ? "in use" : formatClockTime(ended.endedAt)}`;
 
   return (
     <View style={formStyles.screen}>
@@ -84,25 +99,38 @@ export function VehicleUsageScreen({ use, onLeave, onVehicleChecks, onFills, onS
             {use.numberPlate}
           </Text>
           <Text style={styles.meta} testID="usage-class-hours">{`${classLabel(use.vehicleClass)} · ${hours}`}</Text>
+          {editing ? null : (
+            <Pressable testID="usage-correct-plate" onPress={onCorrectPlate} accessibilityRole="button" accessibilityLabel="Correct number plate" hitSlop={8} style={styles.correctName}>
+              <Text style={styles.correctNameLabel}>Correct number plate</Text>
+            </Pressable>
+          )}
         </View>
 
         {editing
-          ? <EditUsage use={use} onFills={onFills} onSaveEndMileage={onSaveEndMileage} onDone={() => { setEditing(false); }} />
+          ? <EditUsage use={use} onFills={onFills} onSaveEndMileage={onSaveEndMileage} onSaveStartMileage={onSaveStartMileage} onSaveTimes={onSaveTimes} onDone={() => { setEditing(false); }} />
           : <UsageDetail use={use} onVehicleChecks={onVehicleChecks} onEdit={() => { setEditing(true); }} />}
       </ScrollView>
     </View>
   );
 }
 
-function UsageDetail({ use, onVehicleChecks, onEdit }: { use: EndedVehicle; onVehicleChecks: () => void; onEdit: () => void }) {
+function UsageDetail({ use, onVehicleChecks, onEdit }: { use: LocalVehicle | EndedVehicle; onVehicleChecks: () => void; onEdit: () => void }) {
   const completed = checkStateOf(use.checks) === "completed";
+  const ended = endOf(use);
   const noun = use.vehicleClass === "class1" ? "Unit Check" : "Vehicle Check";
   return (
     <>
       <View style={[formStyles.card, styles.facts]}>
         <Row label="Start mileage" value={formatMileage(use.startMileage)} testID="usage-start-mileage" />
-        <Row label="End mileage" value={formatMileage(use.endMileage)} testID="usage-end-mileage" />
-        <Row label="Travelled" value={formatMileage(usageDistance(use))} testID="usage-travelled" />
+        {ended === null ? (
+          // Still in use: its end mileage is the final mileage given at the finish.
+          <Row label="End mileage" value="At the finish" testID="usage-end-mileage" />
+        ) : (
+          <>
+            <Row label="End mileage" value={formatMileage(ended.endMileage)} testID="usage-end-mileage" />
+            <Row label="Travelled" value={formatMileage(usageDistance(ended))} testID="usage-travelled" />
+          </>
+        )}
         <Row label="Vehicle checks" value={checkDetailLabel(use.checks)} testID="usage-checks" last />
       </View>
 
@@ -133,7 +161,7 @@ function UsageDetail({ use, onVehicleChecks, onEdit }: { use: EndedVehicle; onVe
  * Every entry of one type on this use, oldest first, as recorded — an unknown
  * amount says so and is never shown as 0 L.
  */
-function FillList({ use, type }: { use: EndedVehicle; type: FillType }) {
+function FillList({ use, type }: { use: LocalVehicle | EndedVehicle; type: FillType }) {
   const fills = fillsOfType(use.fills, type);
   if (fills.length === 0) {
     return <Text style={styles.none} testID={`usage-${type}-none`}>No entries</Text>;
@@ -158,16 +186,105 @@ function FillList({ use, type }: { use: EndedVehicle; type: FillType }) {
 }
 
 /**
- * The two things this use may still have corrected, each committed on its own:
- * the end mileage by its own button here, and each fill on the fill screen,
- * exactly as it is for the vehicle in use.
+ * What this use may still have corrected, each committed on its own: its
+ * start mileage (D41) and — once it has ended — its end mileage, by their own
+ * buttons here, and each fill on the fill screen, exactly as it is for the
+ * vehicle in use.
  */
-function EditUsage({ use, onFills, onSaveEndMileage, onDone }: {
-  use: EndedVehicle;
+function EditUsage({ use, onFills, onSaveEndMileage, onSaveStartMileage, onSaveTimes, onDone }: {
+  use: LocalVehicle | EndedVehicle;
   onFills: (type: FillType) => void;
   onSaveEndMileage: (endMileage: number) => Promise<void>;
+  onSaveStartMileage: (startMileage: number) => Promise<void>;
+  onSaveTimes: (times: UseTimes) => Promise<void>;
   onDone: () => void;
 }) {
+  const ended = endOf(use);
+  return (
+    <>
+      <UseTimesEditor
+        prefix="usage"
+        startedAt={use.startedAt}
+        endedAt={ended?.endedAt ?? null}
+        endsWithFinish={ended?.endedBy === USE_ENDED_BY.finish}
+        onSave={onSaveTimes}
+      />
+      <StartMileageField use={use} onSave={onSaveStartMileage} />
+      {ended === null ? null : <EndMileageField use={ended} onSave={onSaveEndMileage} />}
+
+      <View style={styles.fillsEdit}>
+        {FILL_TYPES.map(entry => (
+          <FormSection key={entry.id} label={entry.label.toUpperCase()}>
+            <FillEditRow use={use} type={entry.id} label={entry.label} onPress={() => { onFills(entry.id); }} />
+          </FormSection>
+        ))}
+      </View>
+
+      <Pressable
+        testID="usage-done"
+        onPress={onDone}
+        accessibilityRole="button"
+        accessibilityLabel="Done"
+        style={({ pressed }) => [styles.done, pressed ? formStyles.optionPressed : null]}
+      >
+        <Text style={styles.doneLabel}>Done</Text>
+      </Pressable>
+    </>
+  );
+}
+
+/**
+ * The start mileage, typed wrong: never above an ended use's end mileage.
+ * Changes nothing else about the use.
+ */
+function StartMileageField({ use, onSave }: { use: LocalVehicle | EndedVehicle; onSave: (startMileage: number) => Promise<void> }) {
+  const ended = endOf(use);
+  const [startText, setStartText] = useState(String(use.startMileage));
+  const [submitting, setSubmitting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const inFlight = useRef(false);
+
+  const startMileage = parseMileage(startText);
+  const aboveEnd = ended !== null && startMileage !== null && startMileage > ended.endMileage;
+  const valid = startMileage !== null && !aboveEnd;
+  const changed = valid && startMileage !== use.startMileage;
+
+  function save() {
+    if (!changed || startMileage === null || inFlight.current) return;
+    inFlight.current = true;
+    setSubmitting(true);
+    onSave(startMileage).then(
+      () => { inFlight.current = false; setSubmitting(false); setSaved(true); },
+      () => { inFlight.current = false; setSubmitting(false); },
+    );
+  }
+
+  return (
+    <>
+      <FormSection label="START MILEAGE">
+        <TextInput
+          testID="usage-start-mileage-input"
+          value={startText}
+          onChangeText={next => { setStartText(next); setSaved(false); }}
+          keyboardType="number-pad"
+          selectTextOnFocus
+          style={formStyles.input}
+          accessibilityLabel="Start mileage"
+        />
+      </FormSection>
+      {aboveEnd ? (
+        <Text style={styles.error} testID="usage-start-mileage-hint">
+          {`Start mileage cannot be above the end mileage (${formatMileage(ended.endMileage)}).`}
+        </Text>
+      ) : null}
+      <PrimaryButton label="Save Start Mileage" onPress={save} disabled={!changed} submitting={submitting} testID="usage-start-mileage-save" />
+      {saved ? <Text style={styles.saved} testID="usage-start-mileage-saved">Start mileage saved.</Text> : null}
+      <View style={styles.between} />
+    </>
+  );
+}
+
+function EndMileageField({ use, onSave }: { use: EndedVehicle; onSave: (endMileage: number) => Promise<void> }) {
   const [endText, setEndText] = useState(String(use.endMileage));
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -183,7 +300,7 @@ function EditUsage({ use, onFills, onSaveEndMileage, onDone }: {
     if (!changed || endMileage === null || inFlight.current) return;
     inFlight.current = true;
     setSubmitting(true);
-    onSaveEndMileage(endMileage).then(
+    onSave(endMileage).then(
       () => { inFlight.current = false; setSubmitting(false); setSaved(true); },
       () => { inFlight.current = false; setSubmitting(false); },
     );
@@ -217,31 +334,13 @@ function EditUsage({ use, onFills, onSaveEndMileage, onDone }: {
         testID="usage-end-mileage-save"
       />
       {saved ? <Text style={styles.saved} testID="usage-end-mileage-saved">End mileage saved.</Text> : null}
-
-      <View style={styles.fillsEdit}>
-        {FILL_TYPES.map(entry => (
-          <FormSection key={entry.id} label={entry.label.toUpperCase()}>
-            <FillEditRow use={use} type={entry.id} label={entry.label} onPress={() => { onFills(entry.id); }} />
-          </FormSection>
-        ))}
-      </View>
-
-      <Pressable
-        testID="usage-done"
-        onPress={onDone}
-        accessibilityRole="button"
-        accessibilityLabel="Done"
-        style={({ pressed }) => [styles.done, pressed ? formStyles.optionPressed : null]}
-      >
-        <Text style={styles.doneLabel}>Done</Text>
-      </Pressable>
     </>
   );
 }
 
 /** One type's total on this use, and the way into its entries. */
 function FillEditRow({ use, type, label, onPress }: {
-  use: EndedVehicle; type: FillType; label: string; onPress: () => void;
+  use: LocalVehicle | EndedVehicle; type: FillType; label: string; onPress: () => void;
 }) {
   const total = fillSummaryText(summariseFills(use.fills, type));
   const said = total === null ? "No entries" : `${total.amount} · ${total.detail}`;
@@ -272,6 +371,8 @@ function Row({ label, value, testID, last = false }: { label: string; value: str
 }
 
 const styles = StyleSheet.create({
+  correctName: { alignSelf: "flex-start", minHeight: 36, justifyContent: "center", marginTop: spacing.xs },
+  correctNameLabel: { fontSize: 14, fontWeight: "600", color: colors.brandLight },
   identity: { marginTop: -spacing.md, marginBottom: spacing.xl, gap: 2 },
   plate: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: 1 },
   meta: { fontSize: 15, color: colors.textMuted },
@@ -299,6 +400,7 @@ const styles = StyleSheet.create({
   saved: { ...typography.helper, color: colors.success, textAlign: "center", marginTop: spacing.sm },
 
   fillsEdit: { marginTop: spacing.xl },
+  between: { height: spacing.xl },
   editText: { flex: 1, gap: 2 },
   editTitle: { fontSize: 17, fontWeight: "700", color: colors.brandDark },
   chevron: {

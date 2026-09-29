@@ -4,6 +4,48 @@
 
 ---
 
+## 2026-09-29 — Local timesheet lifecycle: Finish Shift, Timesheets, corrections, stable use identity (D38–D42)
+
+The driver-side stage closes: a day now runs from Start Shift to a finished,
+correctable local timesheet. **Local only** — nothing is sent, and no API,
+Prisma, dependency or package file changed. What is built lives in STATUS.md;
+the rules are D38–D42.
+
+**Built.** Finish Shift (final mileage → details → Review) filing a completed
+local record, with a declared finish that may be later than now (confirmed
+beyond 15 minutes, never refused); Home's recent timesheets, the Timesheets
+tab and a Timesheet page; Edit Timesheet appending corrections, and Delete;
+a Review that corrects every driver-entered fact where it lives, with the
+declaration "I confirm all details are correct" and a truthful
+"Save Timesheet — Not Sent" for a company.
+
+**Stable use identity (D42).** A use was identified by its `startedAt`, which
+made its own times uncorrectable. Every vehicle and trailer use now has a
+`useId` given once at creation; every exact-use operation moved to it. Days
+stored before read under `legacy-<kind>-<startedAt>`, written out on the next
+save. A use's own start and end are then correctable under the day's
+chronology, never moving another use.
+
+**Declarations.** A company's declaration is stored bound to the version
+declared. Any later change — on Edit Timesheet (always through the Review) or
+on a use's page (saved at once) — means it must be confirmed again. In the
+closeout: a timesheet with no valid declaration (none recorded, or damaged)
+says it *needs review and confirmation*, never that it *changed since you
+confirmed it*; and damaged declaration metadata no longer makes an otherwise
+valid timesheet unreadable — it is ignored, never trusted in part, never
+rewritten by reading.
+
+**Proof.** Store and screen suites for each rule, with ephemeral mutations
+(identity following `startedAt`, lookups by plate / number / position,
+chronology removed, declaration bypasses and trust errors) each caught and
+restored byte-identically. Authoritative gate green on Node v22.13.0.
+
+**Not done.** Nothing was visually or device-verified in this stage. Company
+submission — snapshot, send queue, PDF, email — is the next stage. DEVLOG has
+no entries for the mobile increments committed after 1e70e16 (2026-09-12 to
+2026-09-28 — Home, Start Shift, Active Shift); STATUS.md and DECISIONS.md hold
+them, and this entry does not backfill them.
+
 ## 2026-09-12 — Governance correction, and the authentication audit closed out
 
 Two things, in order: a rule change about what an agent may leave behind, and

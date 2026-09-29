@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-27 (Trailer foundation)
+> Last updated: 2026-09-29 (D42 — stable use identity, use times, company re-declaration)
 
 ---
 
@@ -767,7 +767,10 @@ own checks, the moment it began and — once ended — the odometer reading the
 driver entered and the moment it ended. Returning to a plate used earlier is a
 **new use**, never a resumption: the earlier record, its mileages and its
 completed check are never reopened, and one plate may appear several times in
-one day. A use is identified by **when it began**, never by its plate.
+one day. A use is identified by **its own stable identity** (`useId`, D42),
+never by its plate — and not by when it began, which is a time the driver may
+correct. *(Amended by D42: until 2026-09-29 a use was identified by its
+`startedAt`.)*
 
 **End mileage is entered, never inferred.** It may equal the start mileage and
 may never fall below it. Nothing derives it from a later reading.
@@ -839,7 +842,7 @@ Fuel or AdBlue at all.
 
 **RETROSPECTIVE CORRECTION HAPPENS ON THE ENDED USE ITSELF.** USED THIS SHIFT
 lists each ended use as one compact row; the row opens THAT use — named by its
-`startedAt`, never by plate, an unknown name opening nothing — and its **Edit**
+identity (`useId`, D42), never by plate, an unknown name opening nothing — and its **Edit**
 may, while the overall shift is open:
 
 - correct the **end mileage** (never below the start mileage; the distance is
@@ -848,7 +851,10 @@ may, while the overall shift is open:
   time / known-or-unknown litres / optional note as a current fill.
 
 **IMMUTABLE IN THAT EDIT:** the use's plate, class, `startedAt`, `endedAt`,
-start mileage and completed check certificate. No other use is touched — not
+start mileage and completed check certificate. *(Since amended: start mileage
+(D41), the plate (D40) and the use's own start and end (D42) are corrected
+there, each by the use's identity and under the day's rules; class and the
+certificate are still never edited in place.)* No other use is touched — not
 the next use's start mileage, and not another use of the same registration.
 Moving an existing fill from one use to another is not part of this and would
 be its own decision; editing a fill changes its quantity, time and note only.
@@ -981,8 +987,8 @@ Trailer Checks are their own decision, D35.
 vehicle use. A trailer use is a trailer number (trimmed and upper-cased, never
 format-checked — fleet numbers are as common as registrations), a type, when it
 began and, if refrigerated, its fridge diesel; an ended one adds when it ended.
-A use is identified by its `startedAt`, never its number. There is no trailer
-mileage.
+A use is identified by its own identity (`useId`, D42), never its number
+(until D42, by its `startedAt`). There is no trailer mileage.
 
 **TWO TYPES ONLY: Standard and Refrigerated.** The one distinction the app needs
 is whether the trailer has a fridge unit with its own diesel. No wider trailer
@@ -1042,7 +1048,7 @@ shows the trailer number, its type, its hours and its own check state
 fridge diesel. The day's `previousTrailers` is kept in full.
 
 **AN ENDED TRAILER USE OPENS AND IS CORRECTABLE** (owner decision,
-2026-09-27). Each TRAILERS row opens THAT use — by its `startedAt`, never by
+2026-09-27). Each TRAILERS row opens THAT use — by its identity (D42), never by
 trailer number — on a Trailer Use screen in the Vehicle Use language: number,
 type, start, end and duration, its Trailer Check (state, and a certificate's
 defects) and, if refrigerated, its fridge diesel. **Editable:** a refrigerated
@@ -1050,7 +1056,9 @@ use's fridge diesel — added, corrected, removed — on the Fridge Diesel form
 opened for that ended use. **Never editable:** the trailer number, its type,
 `startedAt` and `endedAt`; a completed certificate is never edited in place —
 a mistake in it is corrected by an appended revision (D36). A standard use
-has no Edit. Every such write names the use AND that it has
+has no Edit. *(Since amended: the trailer number is corrected when typed
+wrong (D40), and every trailer use's own start and end are corrected on its
+Edit (D42) — so a standard use now has an Edit, for its times only.)* Every such write names the use AND that it has
 ended (`usageState`), and lands on exactly one ended use: never the trailer in
 use, never another use of the same number, never by number; anything else
 writes nothing. A write begun on the trailer IN USE keeps its own protection —
@@ -1124,7 +1132,7 @@ is corrected by an appended revision (D36). One screen serves both,
 named for what is checked — "Trailer Checks", the trailer number and type.
 
 **ONE EXACT TRAILER USE.** A check belongs to the trailer use that opened it,
-named by its `startedAt`, never by trailer number. A new trailer use — including
+named by its identity (`useId`, D42), never by trailer number. A new trailer use — including
 the same trailer taken again — starts with no check: nothing is inherited, draft
 or certificate. If the trailer is changed or handed back while the check is
 open, nothing is saved, not to it and not to a replacement with the same
@@ -1179,7 +1187,8 @@ use's `startedAt` / `endedAt`, mileage, Fuel / AdBlue / fridge diesel, the
 original completion time or completing driver. A correction that changes
 nothing writes nothing; one confirmed twice is one revision.
 
-**EXACT USE.** A correction names its use by `startedAt` and whether it is IN
+**EXACT USE.** A correction names its use by its identity (`useId`, D42; until
+then its `startedAt`) and whether it is IN
 USE or ENDED, and lands on that one use's check only — never another use of
 the same plate or trailer number, never by plate or number. Available from a
 current vehicle's or trailer's check, and from an ended use's detail.
@@ -1247,6 +1256,337 @@ asset is ended: the day is left exactly as it was, and the driver is told the
 phone's clock is earlier than the start and to check the date and time. The
 reader refuses a saved ended use whose end precedes its start — the day fails
 closed, like any other malformed field.
+
+### D38 — Finish Shift completes the day locally; the finished day is the driver's own record (2026-09-28)
+
+Owner decision for the first Finish Shift increment. LOCAL only (D28): nothing
+is sent, submitted, rendered or emailed.
+
+**THE FLOW.** With a vehicle in use: Final Mileage → Finish Details → Review →
+Finish Shift. With none in use — never had one, or handed it back with No
+vehicle (D32) — Finish Details → Review → Finish Shift, and no mileage is asked
+or invented. Nothing is saved until the final press; Back keeps what was
+entered.
+
+**THE FINISH DATE AND TIME ARE DECLARED.** Both are set to when the flow
+opened and both are freely changed; the day is chosen explicitly and never
+guessed from the time, so a shift crossing midnight — or several days —
+finishes on the day the driver gives. Not bound by the revoked ±15-minute
+rule. It may not be earlier than the shift's start, the current vehicle's or
+trailer's start, or the end of any earlier use: such a time is refused with
+the reason, never clamped. It MAY be later than now — it is the declared
+official finish, not the moment of the press (D40, which replaces the
+earlier "not later than now" rule). `shiftDate` is not touched.
+
+**NIGHT OUT** is an explicit Yes / No and a fact only (D18) — no payment.
+**Notes** are optional, trimmed, ≤500, and stored as `null` when empty.
+
+**THE SHIFT ENDING ENDS WHAT IS IN USE.** The vehicle in use ends with the final
+mileage; the trailer in use ends with the shift without No trailer first and
+with no mileage — the day is over, which is why this differs from changing to
+a van or No vehicle mid-shift (D34). Both end at the declared finish. Checks,
+corrections, Fuel / AdBlue and Fridge Diesel are carried exactly; earlier uses
+are untouched. **Checks not completed do not block** a finish, and are said
+twice: when Finish Shift is pressed on Active Shift, any use of the day —
+in use or ended, vehicle or trailer, each by its own identity — without a
+completed check is named in a warning with **Go Back** and **Continue to
+Finish**, neither of which writes anything; and again on the Review. A draft
+is not a completed check; a corrected one is. Nothing is marked completed.
+
+**THE FINISHED DAY IS A LOCAL RECORD, NOT A DELETION.** It is filed as one file
+per day, `logisticbay-completed-shift-<id>.json` — the open day's facts, the
+declared finish as `endedAt` and `notes` (as the server's `Shift` names them),
+`nightOut`, and every use, all ended, in `previousVehicles` /
+`previousTrailers`. It is written through the same verified write as every
+change (D37), never over an existing file, and only then is the open day
+removed. It finishes only the day the flow opened, with the vehicle and
+trailer in use it showed; a repeated press finds the day finished.
+
+**A FINISHED DAY'S CHECKS ARE NOT FROZEN.** The record keeps each use whole —
+its `startedAt` identity, class or trailer type, and every check exactly as
+stored: drafts, certified originals with who and when, and every revision in
+order — so a later increment can complete a forgotten check or correct a
+certified one on a finished day with the same append-only model (D35, D36),
+naming the use by its start, never by plate or number. D39 builds it.
+
+**FINISHED DAYS ARE SHOWN FROM THE PHONE.** Home's Recent Timesheets lists the
+latest three and the Timesheets tab lists them all, newest first, re-read
+whenever either comes into view; each opens a read-only page by the day's
+id. A record that cannot be read is left out, never guessed at, deleted or
+repaired — and the Timesheets tab says how many ("1 saved timesheet could not
+be read."); Home carries no such warning. On a finished day's page a DRAFT
+check shows the rows the driver actually changed, marked as draft and
+uncertified — never the untouched rows, and never as a certificate.
+
+**NO LONG-SHIFT WARNING YET.** Duration is shown as recorded and never blocks
+a finish; the app draws no drivers' hours or working-time conclusion from
+start and finish alone and sets no duration threshold. Start and finish do
+not carry enough to decide it (driving, other work, breaks, rest, the
+regime that applies). Deferred to the Driver Records / Tachograph compliance
+layer.
+
+A company
+chosen at Start Shift is still only the intended destination until a later,
+explicit Send.
+
+### D39 — A finished timesheet is corrected by appended corrections, or deleted by the driver (2026-09-28)
+
+Owner decision. LOCAL only: nothing is sent, and no company or server copy
+exists to edit.
+
+**CORRECT, DON'T REWRITE.** A real day with a mistake in it is corrected; a
+timesheet created by accident is deleted. The two are never mixed: delete
+and recreate is not a correction.
+
+**THE DAY'S OWN FACTS** — Working For, start date and time, finish date and
+time, Night Out and notes — are corrected by APPENDING a correction: a
+complete snapshot of those facts with a stable id, when (the device clock at
+the press) and by whom (the signed-in driver). The day as finished and every
+earlier correction are never edited; the latest correction is what the day
+says, on every screen and in the order of the list. A correction confirmed
+twice is one; one that changes nothing writes nothing; one made on a screen
+opened before another correction writes nothing (the driver is told).
+Working For is chosen from Personal and the driver's companies by
+membership — never typed — and a company the day already names stays
+available though the driver no longer belongs to it.
+
+**TIMES MUST HOLD THE DAY.** A corrected finish may not be before the start;
+the start may not be after any use of the day began, and the finish may not
+be before any use the driver ended. Such a correction is refused with the
+rule it breaks, and no such use is ever moved to make it fit. The vehicle or
+trailer the day's FINISH ended moves with a corrected finish (D40) — but
+never to before its own start. A finish may be later than now (D40). The
+start MAY be before the first use began: a shift can start before its first
+vehicle (D42). For a company's day, every correction is reviewed and declared
+(D42).
+
+**A FINISHED DAY'S USES** open from its page by their identity and are
+corrected by the same operations as an open day's ended uses: end mileage,
+Fuel / AdBlue and Fridge Diesel (refrigerated only), a forgotten check
+completed — dated when it is done, by the driver — and a completed check
+corrected by an appended revision (D35, D36); and its plate or trailer
+number, when typed wrong (D40); and a use's own start and end (D42). Class,
+trailer type, the check's original certificate and its earlier revisions are
+not editable there. Fill, end-mileage and plate / number corrections replace the value,
+as they do on an open day (D40); only the day's facts and the checks keep a
+history.
+
+**DELETE TIMESHEET** asks first ("Delete this timesheet?" — "This removes the
+local timesheet from this phone."), then removes that one day's record by its
+id: never another day, the open day, a temporary or a recovery file. A delete
+that fails is never reported as done.
+
+**THE PLATE OR TRAILER NUMBER** of a use may be corrected when it was typed
+wrong — on Active Shift for the use in use, and on any use's page (D40):
+only the name changes — the use keeps its identity, class or type, mileage,
+fills and checks. Changing to another vehicle or trailer is still Change
+Unit / Change Trailer.
+
+### D40 — The finish is declared; a corrected finish moves what the finish ended; names correct by exact use (2026-09-29)
+
+Owner decisions, correcting D38 and D39.
+
+**THE FINISH IS DECLARED AND MAY BE LATER THAN NOW.** Finish Time is the
+driver's official timesheet finish — which need not be the moment work
+stopped or the moment Finish was pressed (a guaranteed or minimum paid day,
+for one). A finish later than now is valid, in Finish Shift and in Edit
+Timesheet alike; no layer refuses it for that reason. Chronology still
+holds: a finish is never before the start, nor before anything the day
+holds that it cannot move.
+
+**MORE THAN 15 MINUTES AHEAD IS CONFIRMED, NEVER REFUSED.** Up to and
+including 15 minutes ahead of now asks nothing. Strictly more than 15
+minutes ahead asks once — "Finish time is ahead: You entered 16:00, which
+is 1 h 18 min from now. Is this the finish time you want to record?" —
+with **Go Back** (nothing saved, everything as entered) and **Use This Time**
+(exactly the time given: never clamped, rounded or replaced by now). It is
+decided by one rule (`finishAheadOf`) against the device clock at the final
+press — Finish Shift on the Review, Save on Edit Timesheet (only when the
+finish itself is being changed). It is mistake prevention, not a drivers'
+hours or working-time judgement, and never says a time is not allowed.
+
+**A CORRECTED FINISH MOVES ONLY WHAT THE FINISH ENDED.** Finish Shift ends
+the vehicle and trailer in use at the declared finish and records that it
+did (`endedBy: "finish"` on those uses). A later correction of the finish
+moves those ends with it — the uses keep their stored end as finished, and
+the day's current finish is what they say now (`effectiveUses`). Every
+other end — Change Unit / Vehicle, No vehicle, Change Trailer, No trailer —
+is the driver's own act and never moves. Equal times prove nothing: a use
+handed back at the finish's very minute is not taken as ended by it. A day
+finished before this was recorded has no such mark; its ends are never
+guessed to be the finish's, and a finish correction that would need them to
+move is refused. A use the finish ended whose OWN end is later corrected
+(D42) is no longer ended by the finish: the mark is dropped, and later finish
+corrections no longer move it.
+
+**A USE MAY END BEFORE THE DAY DOES.** Asset activity and the declared day
+are different facts: a vehicle returned at 12:00 in a day declared to
+14:00 is valid. Only a use the finish ended ends at the finish.
+
+**A NAME TYPED WRONG IS CORRECTED ON EXACTLY ONE USE.** The plate of any
+vehicle use and the number of any trailer use — in use, ended earlier on
+the open day, or on a finished day — are corrected by the use's identity,
+never by the name, so another use of the same name keeps it. Only the name
+changes; class and trailer type are not editable.
+
+**AN UNSENT DAY IS THE DRIVER'S OWN RECORD.** Until a timesheet has been sent
+to a company, corrections of end mileage, Fuel, AdBlue, Fridge Diesel, names
+and use times update the local record directly, without a history — by
+decision. The day's facts and the checks keep theirs (D39, D36). For a
+company's day, such a correction also means its declaration no longer holds
+until the driver reviews and declares it again (D42).
+
+**WHAT A COMPANY RECEIVES WILL BE IMMUTABLE.** When sending exists (not
+built), the snapshot a company receives is fixed: later local edits never
+rewrite it, and a correction after sending needs its own auditable
+correction or resubmission — a separate company-facing snapshot beside the
+driver's local record (D28).
+
+### D41 — The Finish Review is the final verification point; the declaration and the final action (2026-09-29)
+
+Owner decision. LOCAL only: nothing is sent.
+
+**REVIEW → CORRECT → CONFIRM → SAVE.** The Finish Review reads as a summary,
+but every driver-entered fact on it opens where it is corrected: who the day
+is for and when it started (Edit Shift, on the open day — a start after any
+use began is refused); the finish, Night Out and notes (Finish Details); the
+final mileage of the vehicle in use; and every vehicle and trailer use, in
+use or ended, by its identity — its plate or number, start and end mileage,
+Fuel / AdBlue / Fridge Diesel, and its check (a forgotten one completed, a
+completed one corrected by revision, D36). Each returns to the Review, which
+re-reads the day and shows what it now says. Corrections go through the same
+store operations and invariants as everywhere else; nothing is loosened to
+make a field editable.
+
+**A USE'S OWN START AND END** are corrected from the Review too, on the use's
+own page (D42 — which superseded this decision's "not yet").
+
+**THE DECLARATION.** "I confirm all details are correct", immediately above
+the final action, starts unticked and the action waits for it. It is bound
+to the exact version shown — any change to what the Review shows, and any
+visit to a correction, clears it — so a declaration never carries to a
+version the driver did not see. For a company's timesheet it is stored,
+bound to exactly that version (D42); a Personal timesheet's is not.
+
+**WHO THE TIMESHEET IS FOR DECIDES WHAT THE FINAL ACTION MEANS.** Personal:
+**Save Timesheet** — saved on this phone, nothing sent; it stays editable
+and deletable. Company: **Save & Send Timesheet** — the declared version
+saved and sent to that company. Sending does not exist yet: until it does,
+the company action says so plainly and saves on this phone only; it never
+claims a send and never records one. Choosing a company, at Start Shift, on
+Edit Shift or on Edit Timesheet, sends nothing by itself.
+
+**PERSONAL → COMPANY LATER.** A finished Personal day may be changed to a
+company. That is not an ordinary save: the corrected timesheet is shown in
+full and saved only through the same declaration and final action. D42
+extends this to EVERY change to a company's unsent timesheet.
+
+**WHEN SENDING EXISTS** (not built): the declared version is what is sent —
+an immutable company-facing snapshot, saved and queued exactly as declared
+when there is no signal, shown as waiting to send until it is sent, and
+never rebuilt from later edits. Once sent it cannot be edited or deleted by
+the ordinary screens; a later correction is an explicit amendment or
+resubmission. A day merely labelled for a company, never sent, is not
+locked.
+
+### D42 — A use has a stable identity; its times are correctable; a company's timesheet is declared again after any change (2026-09-29)
+
+Owner decision, superseding D41's "not yet" and amending D30, D34, D39–D41.
+LOCAL only: nothing is sent.
+
+**A USE'S IDENTITY IS NOT ITS START.** Every vehicle and trailer use is given
+a `useId` once, when it is created (the app's local id, `newLocalId`), and it
+never changes — not on a restart, a finish, a plate or trailer-number
+correction, or a correction of its own start or end. Every operation on one
+exact use finds it by that id: fills, start and end mileage, Fridge Diesel,
+checks and their drafts and revisions, names, times, and the screens that
+open it. Never by plate, trailer number, position in the day, or time.
+`startedAt` is a business time, and correctable.
+
+**A USE STORED BEFORE IDS EXISTED** reads under an id derived from its kind
+and its start — `legacy-vehicle-<startedAt>` / `legacy-trailer-<startedAt>` —
+which is unique within its day (no two uses of a kind share a start) and the
+same on every read; reading writes nothing. The next save of that day writes
+the id out, and from then on it is the use's id, whatever its start becomes.
+
+**A USE'S OWN START AND END ARE CORRECTABLE**, on its own page, open day or
+finished day, vehicle or trailer (a use still in use has a start only — it
+ends at the finish). The corrected day must still hold, and anything else is
+refused with the rule, writing nothing and moving no other use:
+- its end not before its start;
+- not before the shift started, and — on a finished day — not after it
+  finished (a use the finish ended: its start not after the finish);
+- no two uses of a kind at once: overlapping, or starting at the same
+  instant, is two at once; touching is a change; a gap is a gap (D32);
+- no trailer left without a towing vehicle that towed it before (D30, D34).
+
+**A CHANGE IS TWO FACTS, NOT ONE.** Change Unit / Change Trailer store the old
+use's end and the next use's start as two values, equal when written.
+Correcting one never moves the other: an earlier end leaves a gap; an end
+after the next start is an overlap and refused.
+
+**A SHIFT MAY START BEFORE ITS FIRST USE.** Correcting the shift's start
+earlier moves no use; a start later than any use began is still refused, and
+no use is dragged with it.
+
+**A USE THE FINISH ENDED** (`endedBy: "finish"`, D40) whose own end is
+corrected is no longer the finish's: the mark is dropped and later finish
+corrections no longer move it. Its start alone corrected keeps the mark.
+
+**A COMPANY'S UNSENT TIMESHEET IS DECLARED AGAIN AFTER ANY CHANGE.** At Finish
+Shift, a company's timesheet is filed with its declaration — "I confirm all
+details are correct" — stored as the version declared (a fingerprint of
+everything the timesheet says), when, and by whom. The store refuses a
+company's timesheet without one, and saves nothing when the version declared
+is not the version it would save.
+- On Edit Timesheet every change to a company's timesheet — Notes, Night Out,
+  start, finish, Working For, and making it Personal — goes through the
+  Review, the declaration and **Save Timesheet — Not Sent** (a Personal
+  result says **Save Timesheet**). A Personal timesheet's ordinary correction
+  is an ordinary save; Personal → company goes through the Review (D41).
+- A change made on a use's own page — a fill, mileage, check, name or time —
+  is saved at once, as on any day (D40): there is no second draft layer (owner
+  decision, 2026-09-29). The declaration then no longer matches, and the page
+  offers **Review and Confirm**, which declares it again without appending a
+  correction.
+
+**SAY ONLY WHAT CAN BE PROVEN.** A company's timesheet stands in one of three
+ways:
+- **confirmed** — a valid declaration of exactly this version;
+- **changed since you confirmed it** — a valid declaration of another version;
+- **needs review and confirmation** — NO valid declaration: none was recorded
+  (a day finished before declarations were stored) or the one stored is
+  damaged. It is never described as changed after a confirmation that cannot
+  be proven.
+
+**DAMAGED DECLARATION METADATA NEVER COSTS THE DRIVER THE TIMESHEET.** A
+declaration that is not wholly valid — a version, `declaredAt` or `declaredBy`
+missing, empty or malformed — is not trusted in any part: the day reads with
+no declaration and needs review and confirmation. Nothing is made up in its
+place, and reading does not rewrite the file; the driver's next confirmation
+writes a valid one. A damaged FACT of the timesheet still fails closed as
+before. Legacy company timesheets are never rewritten automatically.
+
+**LEGACY TOWING GAPS STAY READABLE** (owner decision, 2026-09-29). A stored day
+that already holds a trailer without a towing vehicle for part of its use
+reads as it is; a correction that leaves that gap as it was is allowed; only a
+correction that would make a NEW such gap is refused.
+
+**USE TIMES ARE NOT JUDGED AGAINST THE CLOCK** (owner decision, 2026-09-29): a
+use's start or end ahead of the device clock is not refused or warned about
+for that alone. The finish-ahead question (D40) stays Finish-only.
+
+**THE VERSION FINGERPRINT IS NOT A SECURITY PRIMITIVE.** It tells locally
+reviewed versions apart, nothing more. Company submission will define its own
+immutable snapshot and server-side integrity (not built).
+- The finish-ahead question (D40) is asked only when the finish itself
+  changes — never on a re-declaration.
+
+**NOT BUILT, AND NOT DECIDED HERE:** Save & Send, a PDF, email, or any
+submission to a company; nothing says a timesheet was sent. A company's
+timesheet changed on a use's page is saved before it is re-declared rather
+than held as a draft until the Review — staging use-level edits is a
+separate decision.
 
 ## ❓ Open — ask the user, do not guess
 

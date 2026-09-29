@@ -26,6 +26,7 @@ import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AccountMembership, AuthenticatedAccount } from "../api/account";
 import { clearOpenShift, readOpenShift } from "../shift/localShift";
 import StartShift from "../../app/(app)/start-shift";
+import { ANY_USE_ID } from "./useIdAt";
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -388,7 +389,7 @@ test("Yes creates an open shift carrying exactly the vehicle entered", async () 
   const started = await readOpenShift();
   // Its use began when the day did, so it carries the shift's own start.
   expect(started?.vehicle).toEqual({
-    vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184203, startedAt: started?.startedAt, checks: [], fills: [],
+    vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184203, useId: ANY_USE_ID, startedAt: started?.startedAt, checks: [], fills: [],
   });
   expect(started?.workingFor).toMatchObject({ kind: "company", membershipId: "mem_1" });
 });

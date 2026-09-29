@@ -7,7 +7,7 @@
  * than guessing one.
  *
  * IT IS ALWAYS OPENED FOR ONE EXACT USE (D31). `usage` is that use's
- * `startedAt`, and `usageState` says which kind of use the opener meant:
+ * `useId` (D42), and `usageState` says which kind of use the opener meant:
  *
  *   in-use   Fuel / AdBlue in the current vehicle card on Active Shift
  *   ended    a used vehicle's Edit, correcting what it holds
@@ -29,7 +29,6 @@ import { Restoring } from "../../src/components/Restoring";
 import {
   USAGE_STATE,
   newLocalId,
-  readOpenShift,
   recordVehicleFill,
   removeVehicleFill,
   type LocalShift,
@@ -37,9 +36,10 @@ import {
 } from "../../src/shift/localShift";
 import { FILL_TYPES, fillTypeLabel, fillsOfType, type FillType } from "../../src/shift/vehicleFill";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
+import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
 
 export default function VehicleFillRoute() {
-  const { type, usage, usageState } = useLocalSearchParams<{ type?: string; usage?: string; usageState?: string }>();
+  const { type, usage, usageState, timesheet } = useLocalSearchParams<{ type?: string; usage?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   // Re-read on every return, so a fill stored here — or a vehicle changed
@@ -47,46 +47,46 @@ export default function VehicleFillRoute() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, []),
+    }, [timesheet]),
   );
 
   const fillType = FILL_TYPES.find(entry => entry.id === type)?.id ?? null;
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
-  if (fillType === null || state === null || usage === undefined) return <Redirect href="/active-shift" />;
+  if (fillType === null || state === null || usage === undefined) return <Redirect href={missingHref(timesheet, true)} />;
 
   // Reading the phone's own shift file — not signing anyone in.
   if (shift === "loading") return <Restoring message="Loading shift…" />;
-  if (shift === null) return <Redirect href="/today" />;
+  if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
 
   const target = fillUsage(shift, usage, state, fillType);
-  if (target === null) return <Redirect href="/active-shift" />;
+  if (target === null) return <Redirect href={missingHref(timesheet, true)} />;
 
-  const named = { shiftId: shift.id, vehicleStartedAt: usage, usageState: state };
+  const named = { shiftId: shift.id, vehicleUseId: usage, usageState: state };
   return (
     <VehicleFillScreen
       label={fillTypeLabel(fillType)}
       asset="vehicle"
       usage={target}
       onLeave={() => { router.back(); }}
-      onSave={entry => save(named, fillType, entry, setShift)}
-      onRemove={fillId => remove(named, fillId, setShift)}
+      onSave={entry => save(named, fillType, entry, setShift, timesheet)}
+      onRemove={fillId => remove(named, fillId, setShift, timesheet)}
     />
   );
 }
 
 /**
- * The use named, in the state the opener expected — or `null`. By `startedAt`
+ * The use named, in the state the opener expected — or `null`. By `useId`
  * alone: a day may hold the same registration three times.
  */
-function fillUsage(shift: LocalShift, startedAt: string, state: UsageState, type: FillType): FillUsage | null {
+function fillUsage(shift: LocalShift, useId: string, state: UsageState, type: FillType): FillUsage | null {
   if (state === USAGE_STATE.inUse) {
     const current = shift.vehicle;
-    if (current?.startedAt !== startedAt) return null;
+    if (current?.useId !== useId) return null;
     return { name: current.numberPlate, hours: null, fills: fillsOfType(current.fills, type) };
   }
-  const ended = shift.previousVehicles.find(use => use.startedAt === startedAt);
+  const ended = shift.previousVehicles.find(use => use.useId === useId);
   if (ended === undefined) return null;
   return {
     name: ended.numberPlate,
@@ -95,11 +95,11 @@ function fillUsage(shift: LocalShift, startedAt: string, state: UsageState, type
   };
 }
 
-interface NamedUsage { shiftId: string; vehicleStartedAt: string; usageState: UsageState }
+interface NamedUsage { shiftId: string; vehicleUseId: string; usageState: UsageState }
 type Show = (shift: LocalShift | null) => void;
 
 /** Store the fill, then show the day it produced — no second read. */
-async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: Show): Promise<void> {
+async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
   try {
     const day = await recordVehicleFill({
       ...named,
@@ -110,16 +110,16 @@ async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: S
       litres: entry.litres,
       note: entry.note,
     });
-    settle(day, show);
+    settle(day, show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't save that", saveFailureMessage(error));
     throw error;
   }
 }
 
-async function remove(named: NamedUsage, fillId: string, show: Show): Promise<void> {
+async function remove(named: NamedUsage, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    settle(await removeVehicleFill({ ...named, fillId }), show);
+    settle(await removeVehicleFill({ ...named, fillId }), show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't remove that", saveFailureMessage(error));
     throw error;
@@ -132,10 +132,10 @@ async function remove(named: NamedUsage, fillId: string, show: Show): Promise<vo
  * was written, and the driver is told so and returned to the day rather than
  * left typing into a form that can no longer store anything.
  */
-function settle(day: LocalShift | null, show: Show): void {
+function settle(day: LocalShift | null, show: Show, timesheet: string | undefined): void {
   if (day === null) {
     Alert.alert("Nothing was saved", "That vehicle is no longer the one this was opened for.");
-    router.dismissTo("/active-shift");
+    leaveStale(timesheet);
     return;
   }
   show(day);

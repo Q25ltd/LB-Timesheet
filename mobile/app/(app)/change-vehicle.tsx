@@ -77,13 +77,13 @@ async function confirm(shift: LocalShift, current: LocalVehicle, change: Vehicle
     const day = next === null
       ? await endVehicleUse({
           shiftId: shift.id,
-          endingStartedAt: current.startedAt,
+          endingUseId: current.useId,
           endMileage: change.endMileage,
           endedAt: at,
         })
       : await changeVehicle({
           shiftId: shift.id,
-          endingStartedAt: current.startedAt,
+          endingUseId: current.useId,
           endMileage: change.endMileage,
           next,
           changedAt: at,
@@ -95,7 +95,7 @@ async function confirm(shift: LocalShift, current: LocalVehicle, change: Vehicle
     // use having ended AT THIS PRESS — ended by something else is a screen that
     // went stale, and the driver is told rather than shown success, or a check
     // for another vehicle.
-    const endedHere = day.previousVehicles.some(use => use.startedAt === current.startedAt && use.endedAt === at.toISOString());
+    const endedHere = day.previousVehicles.some(use => use.useId === current.useId && use.endedAt === at.toISOString());
     if (!endedHere) {
       Alert.alert("Nothing was saved", `That ${noun} is no longer the one in use.`);
       router.dismissTo("/active-shift");
@@ -103,7 +103,7 @@ async function confirm(shift: LocalShift, current: LocalVehicle, change: Vehicle
     }
     // The check opens for EXACTLY the use just begun.
     if (change.performChecks && day.vehicle !== null) {
-      router.replace({ pathname: "/vehicle-check", params: { usage: day.vehicle.startedAt, usageState: USAGE_STATE.inUse } });
+      router.replace({ pathname: "/vehicle-check", params: { usage: day.vehicle.useId, usageState: USAGE_STATE.inUse } });
     } else {
       router.dismissTo("/active-shift");
     }

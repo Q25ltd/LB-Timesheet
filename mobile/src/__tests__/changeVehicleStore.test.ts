@@ -29,6 +29,7 @@ import {
 } from "../shift/localShift";
 import { checklistFor, checklistItems } from "../shift/checklists";
 import { checkStateOf, type CheckAnswer } from "../shift/vehicleCheck";
+import { ANY_USE_ID, vehicleUseAt } from "./useIdAt";
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
 const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
@@ -46,7 +47,7 @@ async function changeFrom(shift: LocalShift, over: Partial<ChangeVehicleInput> &
   const open = (await readOpenShift()) ?? shift;
   return changeVehicle({
     shiftId: shift.id,
-    endingStartedAt: open.vehicle?.startedAt ?? "",
+    endingUseId: open.vehicle?.useId ?? "",
     endMileage: open.vehicle?.startMileage ?? 0,
     changedAt: at(9),
     ...over,
@@ -58,9 +59,9 @@ const allOk = (vehicleClass: VehicleDetails["vehicleClass"] = "class1"): CheckAn
 
 async function completeCheckOnCurrent(shift: LocalShift, checkId: string): Promise<void> {
   const open = await readOpenShift();
-  const vehicleStartedAt = open?.vehicle?.startedAt ?? "";
+  const vehicleUseId = open?.vehicle?.useId ?? "";
   await completeVehicleCheck({
-    shiftId: shift.id, vehicleStartedAt, usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
+    shiftId: shift.id, vehicleUseId, usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
     answers: allOk(open?.vehicle?.vehicleClass), completedAt: at(5, 50), completedBy: "user_1",
   });
 }
@@ -120,7 +121,7 @@ test("closing keeps the use's checks exactly as they were — a completed one AN
 
   // A draft left unfinished is kept as the unfinished draft it is.
   await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: day?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId: "draft", startedAt: at(9, 5),
+    shiftId: shift.id, vehicleUseId: day?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "draft", startedAt: at(9, 5),
     answers: [{ key: "horn", result: "fail", note: "Horn silent" }],
   });
   const withDraft = (await readOpenShift())?.vehicle?.checks;
@@ -140,7 +141,7 @@ test("the next vehicle is a NEW use: its own start mileage, its own start, and n
 
   const day = await changeFrom(shift, { endMileage: 100_120, changedAt: at(9), next: XY34 });
 
-  expect(day?.vehicle).toEqual({ ...XY34, startedAt: at(9).toISOString(), checks: [], fills: [] });
+  expect(day?.vehicle).toEqual({ ...XY34, useId: ANY_USE_ID, startedAt: at(9).toISOString(), checks: [], fills: [] });
   // One instant: the old use ends exactly as the new begins.
   expect(day?.previousVehicles[0]?.endedAt).toBe(day?.vehicle?.startedAt);
 });
@@ -211,7 +212,7 @@ test("a check saved for an ENDED use is not written into the vehicle now in use"
   await changeFrom(shift, { endMileage: 100_120, next: XY34 });
 
   const stored = await saveVehicleCheckDraft({
-    shiftId: shift.id, vehicleStartedAt: morning, usageState: USAGE_STATE.inUse, checkId: "late", startedAt: at(9, 1),
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(morning), usageState: USAGE_STATE.inUse, checkId: "late", startedAt: at(9, 1),
     answers: [{ key: "horn", result: "na", note: "" }],
   });
 
@@ -333,7 +334,7 @@ test("a change for a day that is no longer the one open writes nothing", async (
   const before = storedFile().textSync();
 
   const result = await changeVehicle({
-    shiftId: shift.id, endingStartedAt: shift.vehicle?.startedAt ?? "", endMileage: 100_120, changedAt: at(9), next: XY34,
+    shiftId: shift.id, endingUseId: shift.vehicle?.useId ?? "", endMileage: 100_120, changedAt: at(9), next: XY34,
   });
 
   expect(result).toBeNull();
@@ -344,7 +345,7 @@ test("a day with NO vehicle has nothing to change, and is returned untouched", a
   const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: null });
   const before = storedFile().textSync();
 
-  const result = await changeVehicle({ shiftId: shift.id, endingStartedAt: "", endMileage: 1, changedAt: at(9), next: XY34 });
+  const result = await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(""), endMileage: 1, changedAt: at(9), next: XY34 });
 
   expect(result).toEqual(shift);
   expect(storedFile().textSync()).toBe(before);
@@ -393,7 +394,8 @@ test("a day saved BEFORE vehicles could be changed still loads, with no earlier 
   const day = await readOpenShift();
 
   expect(day?.previousVehicles).toEqual([]);
-  expect(day?.vehicle).toEqual({ ...AB12, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
+  // No stored identity: the legacy one, derived from its start — the same on every read (D42).
+  expect(day?.vehicle).toEqual({ ...AB12, useId: `legacy-vehicle-${STARTED_AT.toISOString()}`, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
   // Reading is not writing.
   expect(storedFile().textSync()).toBe(bytes);
 });
@@ -446,8 +448,9 @@ test("CONTROL: the same document, well formed, loads", async () => {
 
   const day = await readOpenShift();
 
-  expect(day?.previousVehicles).toEqual([ended()]);
-  expect(day?.vehicle).toEqual(current);
+  // Written without identities: each read gets its legacy one (D42).
+  expect(day?.previousVehicles).toEqual([{ ...ended(), useId: `legacy-vehicle-${STARTED_AT.toISOString()}` }]);
+  expect(day?.vehicle).toEqual({ ...current, useId: `legacy-vehicle-${at(9).toISOString()}` });
 });
 
 test("changing vehicle makes NO request", async () => {
@@ -471,7 +474,7 @@ async function endFrom(shift: LocalShift, over: Partial<EndVehicleUseInput> = {}
   const open = (await readOpenShift()) ?? shift;
   return endVehicleUse({
     shiftId: shift.id,
-    endingStartedAt: open.vehicle?.startedAt ?? "",
+    endingUseId: open.vehicle?.useId ?? "",
     endMileage: open.vehicle?.startMileage ?? 0,
     endedAt: at(13),
     ...over,
@@ -482,7 +485,7 @@ async function endFrom(shift: LocalShift, over: Partial<EndVehicleUseInput> = {}
 async function fill(shift: LocalShift, litres: number | null, type: "fuel" | "adblue", recordedAt: Date): Promise<void> {
   const open = await readOpenShift();
   await recordVehicleFill({
-    shiftId: shift.id, vehicleStartedAt: open?.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
+    shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
     type, recordedAt, litres, note: "",
   });
 }
@@ -615,7 +618,7 @@ test("a later vehicle begins a NEW use at ITS OWN time, and the real gap survive
 
   const day = await addVehicleToOpenShift({ vehicle: XY34, startedAt: at(15) });
 
-  expect(day?.vehicle).toEqual({ ...XY34, startedAt: at(15).toISOString(), checks: [], fills: [] });
+  expect(day?.vehicle).toEqual({ ...XY34, useId: ANY_USE_ID, startedAt: at(15).toISOString(), checks: [], fills: [] });
   // NO use covers 13:00–15:00: the gap is the absence of one, not a record of one.
   expect(day?.previousVehicles).toHaveLength(1);
   const [closed] = day?.previousVehicles ?? [];
@@ -652,8 +655,8 @@ test("re-taking the SAME plate after the gap is a separate use — nothing is ca
 
 test("three presses of the same confirmation close ONE use", async () => {
   const shift = await dayWith();
-  const endingStartedAt = shift.vehicle?.startedAt ?? "";
-  const press = () => endVehicleUse({ shiftId: shift.id, endingStartedAt, endMileage: 100_250, endedAt: at(13) });
+  const endingUseId = shift.vehicle?.useId ?? "";
+  const press = () => endVehicleUse({ shiftId: shift.id, endingUseId, endMileage: 100_250, endedAt: at(13) });
 
   const days = await Promise.all([press(), press(), press()]);
 
@@ -668,10 +671,10 @@ test("it ends the day and the use NAMED — another day, or a use not in use, ch
 
   expect(await endVehicleUse({
     shiftId: "11111111-2222-4333-8444-999999999999",
-    endingStartedAt: shift.vehicle?.startedAt ?? "", endMileage: 100_250, endedAt: at(13),
+    endingUseId: shift.vehicle?.useId ?? "", endMileage: 100_250, endedAt: at(13),
   })).toBeNull();
   const unchanged = await endVehicleUse({
-    shiftId: shift.id, endingStartedAt: at(4).toISOString(), endMileage: 100_250, endedAt: at(13),
+    shiftId: shift.id, endingUseId: vehicleUseAt(at(4).toISOString()), endMileage: 100_250, endedAt: at(13),
   });
 
   expect(unchanged?.vehicle).not.toBeNull();

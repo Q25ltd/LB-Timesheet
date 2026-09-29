@@ -32,6 +32,7 @@ import {
 } from "../shift/localShift";
 import { checklistFor, checklistItems } from "../shift/checklists";
 import { checkStateOf, resultsOf, summarise, type CheckAnswer } from "../shift/vehicleCheck";
+import { vehicleUseAt } from "./useIdAt";
 
 const STARTED_AT = new Date(2026, 8, 13, 5, 42);
 const CHECK_STARTED = new Date(2026, 8, 13, 5, 50);
@@ -47,7 +48,7 @@ async function dayWith(vehicle: VehicleDetails = UNIT): Promise<LocalShift> {
 }
 
 function write(shift: LocalShift, answers: CheckAnswer[], checkId = "check-1"): VehicleCheckWrite {
-  return { shiftId: shift.id, vehicleStartedAt: shift.vehicle?.startedAt ?? "", usageState: USAGE_STATE.inUse, checkId, startedAt: CHECK_STARTED, answers };
+  return { shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId, startedAt: CHECK_STARTED, answers };
 }
 
 const ok = (key: string): CheckAnswer => ({ key, result: "pass", note: "" });
@@ -402,7 +403,7 @@ test("a check is written only onto the day AND vehicle use it was begun on", asy
   const shift = await dayWith();
 
   expect(await saveVehicleCheckDraft({ ...write(shift, [ok("horn")]), shiftId: "another-day" })).toBeNull();
-  expect(await saveVehicleCheckDraft({ ...write(shift, [ok("horn")]), vehicleStartedAt: CHECK_DONE.toISOString() })).toBeNull();
+  expect(await saveVehicleCheckDraft({ ...write(shift, [ok("horn")]), vehicleUseId: vehicleUseAt(CHECK_DONE.toISOString()) })).toBeNull();
   expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
 });
 

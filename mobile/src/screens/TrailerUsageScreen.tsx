@@ -31,7 +31,9 @@ import { useState } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { TRAILER_TYPE, trailerTypeLabel, type EndedTrailer } from "../shift/trailer";
+import { TRAILER_TYPE, trailerTypeLabel, type EndedTrailer, type LocalTrailer } from "../shift/trailer";
+import { USE_ENDED_BY } from "../shift/useEnd";
+import { UseTimesEditor, type UseTimes } from "./UseTimesEditor";
 import { CHECK_RESULT, checkStateOf, effectiveItems, latestCheck } from "../shift/vehicleCheck";
 import { summariseRecords } from "../shift/vehicleFill";
 import { BackButton, FormSection, formStyles } from "./vehicleForm";
@@ -39,19 +41,24 @@ import { checkDetailLabel, fillSummaryText, formatClockTime, formatDuration, for
 import { colors, radius, sizing, spacing } from "../theme/index";
 
 interface TrailerUsageScreenProps {
-  use: EndedTrailer;
+  /** An ended use — or, from the Finish Review, the trailer still in use (D41). */
+  use: LocalTrailer | EndedTrailer;
   onLeave: () => void;
   /** Open this use's Trailer Check — its draft, a fresh one, or its certificate. */
   onTrailerChecks: () => void;
   /** Open the Fridge Diesel form for THIS use, to add to, correct or remove its entries. */
   onFridgeDiesel: () => void;
+  /** Correct THIS use's trailer number, typed wrong (D40). */
+  onCorrectNumber: () => void;
+  /** Store corrected start / end times on this use (D42). Rejects if they could not be stored. */
+  onSaveTimes: (times: UseTimes) => Promise<void>;
 }
 
-export function TrailerUsageScreen({ use, onLeave, onTrailerChecks, onFridgeDiesel }: TrailerUsageScreenProps) {
+export function TrailerUsageScreen({ use, onLeave, onTrailerChecks, onFridgeDiesel, onCorrectNumber, onSaveTimes }: TrailerUsageScreenProps) {
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState(false);
   const refrigerated = use.trailerType === TRAILER_TYPE.refrigerated;
-  const hours = `${formatClockTime(use.startedAt)}–${formatClockTime(use.endedAt)}`;
+  const hours = `${formatClockTime(use.startedAt)}–${"endedAt" in use ? formatClockTime(use.endedAt) : "in use"}`;
 
   return (
     <View style={formStyles.screen}>
@@ -74,17 +81,20 @@ export function TrailerUsageScreen({ use, onLeave, onTrailerChecks, onFridgeDies
             {use.trailerNumber}
           </Text>
           <Text style={styles.meta} testID="trailer-usage-type-hours">{`${trailerTypeLabel(use.trailerType)} · ${hours}`}</Text>
+          {editing ? null : (
+            <Pressable testID="trailer-usage-correct-number" onPress={onCorrectNumber} accessibilityRole="button" accessibilityLabel="Correct trailer number" hitSlop={8} style={styles.correctName}>
+              <Text style={styles.correctNameLabel}>Correct trailer number</Text>
+            </Pressable>
+          )}
         </View>
 
         {editing
-          ? <EditTrailerUse use={use} onFridgeDiesel={onFridgeDiesel} onDone={() => { setEditing(false); }} />
+          ? <EditTrailerUse use={use} refrigerated={refrigerated} onFridgeDiesel={onFridgeDiesel} onSaveTimes={onSaveTimes} onDone={() => { setEditing(false); }} />
           : (
             <>
               <TrailerUseDetail use={use} onTrailerChecks={onTrailerChecks} />
-              {/* Only fridge diesel is editable, so only a fridge trailer has Edit. */}
-              {refrigerated ? (
-                <OutlinedAction label="Edit" onPress={() => { setEditing(true); }} testID="trailer-usage-edit" />
-              ) : null}
+              {/* Its times are editable on every trailer; fridge diesel only on a refrigerated one (D42). */}
+              <OutlinedAction label="Edit" onPress={() => { setEditing(true); }} testID="trailer-usage-edit" />
             </>
           )}
       </ScrollView>
@@ -92,7 +102,8 @@ export function TrailerUsageScreen({ use, onLeave, onTrailerChecks, onFridgeDies
   );
 }
 
-function TrailerUseDetail({ use, onTrailerChecks }: { use: EndedTrailer; onTrailerChecks: () => void }) {
+function TrailerUseDetail({ use, onTrailerChecks }: { use: LocalTrailer | EndedTrailer; onTrailerChecks: () => void }) {
+  const ended = "endedAt" in use ? use : null;
   const state = checkStateOf(use.checks);
   const check = latestCheck(use.checks);
   const completed = state === "completed" && check !== null;
@@ -103,8 +114,14 @@ function TrailerUseDetail({ use, onTrailerChecks }: { use: EndedTrailer; onTrail
     <>
       <View style={[formStyles.card, styles.facts]}>
         <Row label="Started" value={formatClockTime(use.startedAt)} testID="trailer-usage-started" />
-        <Row label="Ended" value={formatClockTime(use.endedAt)} testID="trailer-usage-ended" />
-        <Row label="Duration" value={formatDuration(use.startedAt, use.endedAt)} testID="trailer-usage-duration" />
+        {ended === null ? (
+          <Row label="Ended" value="At the finish" testID="trailer-usage-ended" />
+        ) : (
+          <>
+            <Row label="Ended" value={formatClockTime(ended.endedAt)} testID="trailer-usage-ended" />
+            <Row label="Duration" value={formatDuration(ended.startedAt, ended.endedAt)} testID="trailer-usage-duration" />
+          </>
+        )}
         <Row label="Trailer checks" value={checkDetailLabel(use.checks)} testID="trailer-usage-checks" last />
       </View>
 
@@ -161,12 +178,22 @@ function TrailerUseDetail({ use, onTrailerChecks }: { use: EndedTrailer; onTrail
 }
 
 /** A refrigerated use's one editable thing: its fridge diesel, on its own form. */
-function EditTrailerUse({ use, onFridgeDiesel, onDone }: { use: EndedTrailer; onFridgeDiesel: () => void; onDone: () => void }) {
+function EditTrailerUse({ use, refrigerated, onFridgeDiesel, onSaveTimes, onDone }: {
+  use: LocalTrailer | EndedTrailer; refrigerated: boolean; onFridgeDiesel: () => void; onSaveTimes: (times: UseTimes) => Promise<void>; onDone: () => void;
+}) {
   const total = fillSummaryText(summariseRecords(use.reeferDiesel));
   const said = total === null ? "No entries" : `${total.amount} · ${total.detail}`;
+  const ended = "endedAt" in use ? use : null;
   return (
     <>
-      <FormSection label="FRIDGE DIESEL">
+      <UseTimesEditor
+        prefix="trailer-usage"
+        startedAt={use.startedAt}
+        endedAt={ended?.endedAt ?? null}
+        endsWithFinish={ended?.endedBy === USE_ENDED_BY.finish}
+        onSave={onSaveTimes}
+      />
+      {refrigerated ? <FormSection label="FRIDGE DIESEL">
         <Pressable
           testID="trailer-usage-edit-diesel"
           onPress={onFridgeDiesel}
@@ -180,7 +207,7 @@ function EditTrailerUse({ use, onFridgeDiesel, onDone }: { use: EndedTrailer; on
           </View>
           <View style={styles.chevron} />
         </Pressable>
-      </FormSection>
+      </FormSection> : null}
       <OutlinedAction label="Done" onPress={onDone} testID="trailer-usage-done" />
     </>
   );
@@ -210,6 +237,8 @@ function Row({ label, value, testID, last = false }: { label: string; value: str
 }
 
 const styles = StyleSheet.create({
+  correctName: { alignSelf: "flex-start", minHeight: 36, justifyContent: "center", marginTop: spacing.xs },
+  correctNameLabel: { fontSize: 14, fontWeight: "600", color: colors.brandLight },
   identity: { marginTop: -spacing.md, marginBottom: spacing.xl, gap: 2 },
   number: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: 1 },
   meta: { fontSize: 15, color: colors.textMuted },

@@ -2,7 +2,7 @@
  * The Trailer Checks route. Wiring only — the screen is the one Vehicle Checks
  * use, named for the trailer (D35).
  *
- * ALWAYS FOR ONE EXACT TRAILER USE: `trailer` is that use's `startedAt`, and
+ * ALWAYS FOR ONE EXACT TRAILER USE: `trailer` is that use's `useId`, and
  * `usageState` says which kind — the trailer IN USE (from its card) or an
  * ENDED use (from its Vehicle-Use-style detail, for a check forgotten before
  * the trailer went back). Anything else — no such use in that state, a trailer
@@ -34,7 +34,6 @@ import {
   USAGE_STATE,
   completeTrailerCheck,
   newLocalId,
-  readOpenShift,
   reviseTrailerCheck,
   saveTrailerCheckDraft,
   type LocalShift,
@@ -42,31 +41,32 @@ import {
 } from "../../src/shift/localShift";
 import type { LocalTrailer } from "../../src/shift/trailer";
 import { saveFailureMessage } from "../../src/screens/format";
+import { backToDay, leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
 
 export default function TrailerCheckRoute() {
-  const { trailer, usageState } = useLocalSearchParams<{ trailer?: string; usageState?: string }>();
+  const { trailer, usageState, timesheet, via } = useLocalSearchParams<{ trailer?: string; usageState?: string; timesheet?: string; via?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []);
+  }, [timesheet]);
 
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
-  if (trailer === undefined || state === null) return <Redirect href="/active-shift" />;
+  if (trailer === undefined || state === null) return <Redirect href={missingHref(timesheet, true)} />;
   if (shift === "loading") return <Restoring message="Loading check…" />;
-  if (shift === null) return <Redirect href="/today" />;
+  if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
   const use = state === USAGE_STATE.inUse
-    ? (shift.trailer?.startedAt === trailer ? shift.trailer : null)
-    : (shift.previousTrailers.find(entry => entry.startedAt === trailer) ?? null);
-  if (use === null) return <Redirect href="/active-shift" />;
+    ? (shift.trailer?.useId === trailer ? shift.trailer : null)
+    : (shift.previousTrailers.find(entry => entry.useId === trailer) ?? null);
+  if (use === null) return <Redirect href={missingHref(timesheet, true)} />;
 
-  return <OpenCheck shift={shift} trailer={use} usageState={state} onShift={setShift} />;
+  return <OpenCheck shift={shift} trailer={use} usageState={state} onShift={setShift} timesheet={timesheet} via={via} />;
 }
 
-function OpenCheck({ shift, trailer, usageState, onShift }: {
-  shift: LocalShift; trailer: LocalTrailer; usageState: UsageState; onShift: (shift: LocalShift | null) => void;
+function OpenCheck({ shift, trailer, usageState, onShift, timesheet, via }: {
+  shift: LocalShift; trailer: LocalTrailer; usageState: UsageState; onShift: (shift: LocalShift | null) => void; timesheet?: string; via?: string;
 }) {
   const { account } = useAuth();
   const existing = latestCheck(trailer.checks);
@@ -77,7 +77,7 @@ function OpenCheck({ shift, trailer, usageState, onShift }: {
 
   const target = {
     shiftId: shift.id,
-    trailerStartedAt: trailer.startedAt,
+    trailerUseId: trailer.useId,
     usageState,
     checkId: identity.current.id,
     startedAt: identity.current.startedAt,
@@ -86,7 +86,7 @@ function OpenCheck({ shift, trailer, usageState, onShift }: {
   async function save(answers: CheckAnswer[]): Promise<void> {
     try {
       const stored = await saveTrailerCheckDraft({ ...target, answers });
-      if (stored === null) gone();
+      if (stored === null) gone(timesheet);
     } catch (error: unknown) {
       Alert.alert("Couldn't save the check", saveFailureMessage(error, "Your last answer was not saved. Please try again."));
       throw error;
@@ -98,9 +98,9 @@ function OpenCheck({ shift, trailer, usageState, onShift }: {
     if (account === null) return;
     try {
       const stored = await completeTrailerCheck({ ...target, answers, completedAt: new Date(), completedBy: account.user.id });
-      if (stored === null) { gone(); return; }
+      if (stored === null) { gone(timesheet); return; }
       // Back where it was opened from: the day, or the ended use's detail.
-      if (usageState === USAGE_STATE.inUse) router.dismissTo("/active-shift");
+      if (usageState === USAGE_STATE.inUse) backToDay(via);
       else router.back();
     } catch (error: unknown) {
       Alert.alert("Couldn't complete the check", saveFailureMessage(error));
@@ -112,11 +112,11 @@ function OpenCheck({ shift, trailer, usageState, onShift }: {
     if (account === null || existing === null) return;
     try {
       const stored = await reviseTrailerCheck({
-        shiftId: shift.id, usageStartedAt: trailer.startedAt, usageState, checkId: existing.id,
+        shiftId: shift.id, useId: trailer.useId, usageState, checkId: existing.id,
         revisionId: newLocalId(), answers, revisedAt: new Date(), revisedBy: account.user.id,
       });
-      if (stored === null) { gone(); return; }
-      onShift(await readOpenShift());
+      if (stored === null) { gone(timesheet); return; }
+      onShift(await readScreenDay(timesheet));
     } catch (error: unknown) {
       Alert.alert("Couldn't save the correction", saveFailureMessage(error));
       throw error;
@@ -131,13 +131,13 @@ function OpenCheck({ shift, trailer, usageState, onShift }: {
       onSave={save}
       onComplete={complete}
       onRevise={revise}
-      onExit={() => { if (usageState === USAGE_STATE.inUse) router.dismissTo("/active-shift"); else router.back(); }}
+      onExit={() => { if (usageState === USAGE_STATE.inUse) backToDay(via); else router.back(); }}
     />
   );
 }
 
 /** The trailer this check was opened for is no longer in use. Nothing was written. */
-function gone(): void {
+function gone(timesheet: string | undefined): void {
   Alert.alert("Nothing was saved", "That trailer is no longer the one this check was opened for.");
-  router.dismissTo("/active-shift");
+  leaveStale(timesheet);
 }

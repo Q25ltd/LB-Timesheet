@@ -3,7 +3,7 @@
  * unit. Wiring only; the form is the one Fuel and AdBlue use.
  *
  * ALWAYS FOR ONE EXACT REFRIGERATED TRAILER USE: `trailer` is that use's
- * `startedAt`, and `usageState` says which kind — the trailer IN USE (its
+ * `useId` (D42), and `usageState` says which kind — the trailer IN USE (its
  * card) or an ENDED use (its Edit, correcting what it holds). Anything else —
  * no such use in that state, a standard trailer, a trailer handed back since —
  * is not a screen, and goes back to Active Shift rather than falling back to
@@ -20,7 +20,6 @@ import { Restoring } from "../../src/components/Restoring";
 import {
   USAGE_STATE,
   newLocalId,
-  readOpenShift,
   recordReeferDiesel,
   removeReeferDiesel,
   type LocalShift,
@@ -28,29 +27,30 @@ import {
 } from "../../src/shift/localShift";
 import { TRAILER_TYPE } from "../../src/shift/trailer";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
+import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
 
 export default function TrailerDieselRoute() {
-  const { trailer, usageState } = useLocalSearchParams<{ trailer?: string; usageState?: string }>();
+  const { trailer, usageState, timesheet } = useLocalSearchParams<{ trailer?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, []),
+    }, [timesheet]),
   );
 
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
-  if (trailer === undefined || state === null) return <Redirect href="/active-shift" />;
+  if (trailer === undefined || state === null) return <Redirect href={missingHref(timesheet, true)} />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
-  if (shift === null) return <Redirect href="/today" />;
+  if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
 
-  const ended = state === USAGE_STATE.ended ? shift.previousTrailers.find(entry => entry.startedAt === trailer) ?? null : null;
-  const use = state === USAGE_STATE.inUse ? (shift.trailer?.startedAt === trailer ? shift.trailer : null) : ended;
-  if (use === null || use.trailerType !== TRAILER_TYPE.refrigerated) return <Redirect href="/active-shift" />;
+  const ended = state === USAGE_STATE.ended ? shift.previousTrailers.find(entry => entry.useId === trailer) ?? null : null;
+  const use = state === USAGE_STATE.inUse ? (shift.trailer?.useId === trailer ? shift.trailer : null) : ended;
+  if (use === null || use.trailerType !== TRAILER_TYPE.refrigerated) return <Redirect href={missingHref(timesheet, true)} />;
 
-  const named: NamedTrailer = { shiftId: shift.id, trailerStartedAt: trailer, usageState: state };
+  const named: NamedTrailer = { shiftId: shift.id, trailerUseId: trailer, usageState: state };
   return (
     <VehicleFillScreen
       label="Fridge Diesel"
@@ -62,16 +62,16 @@ export default function TrailerDieselRoute() {
         fills: use.reeferDiesel,
       }}
       onLeave={() => { router.back(); }}
-      onSave={entry => save(named, entry, setShift)}
-      onRemove={fillId => remove(named, fillId, setShift)}
+      onSave={entry => save(named, entry, setShift, timesheet)}
+      onRemove={fillId => remove(named, fillId, setShift, timesheet)}
     />
   );
 }
 
-interface NamedTrailer { shiftId: string; trailerStartedAt: string; usageState: UsageState }
+interface NamedTrailer { shiftId: string; trailerUseId: string; usageState: UsageState }
 type Show = (shift: LocalShift | null) => void;
 
-async function save(named: NamedTrailer, entry: FillEntry, show: Show): Promise<void> {
+async function save(named: NamedTrailer, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
   try {
     settle(await recordReeferDiesel({
       ...named,
@@ -79,16 +79,16 @@ async function save(named: NamedTrailer, entry: FillEntry, show: Show): Promise<
       recordedAt: entry.recordedAt,
       litres: entry.litres,
       note: entry.note,
-    }), show);
+    }), show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't save that", saveFailureMessage(error));
     throw error;
   }
 }
 
-async function remove(named: NamedTrailer, fillId: string, show: Show): Promise<void> {
+async function remove(named: NamedTrailer, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    settle(await removeReeferDiesel({ ...named, fillId }), show);
+    settle(await removeReeferDiesel({ ...named, fillId }), show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't remove that", saveFailureMessage(error));
     throw error;
@@ -96,10 +96,10 @@ async function remove(named: NamedTrailer, fillId: string, show: Show): Promise<
 }
 
 /** `null`: the trailer this was opened for is no longer in use. Nothing was written. */
-function settle(day: LocalShift | null, show: Show): void {
+function settle(day: LocalShift | null, show: Show, timesheet: string | undefined): void {
   if (day === null) {
     Alert.alert("Nothing was saved", "That trailer is no longer the one this was opened for.");
-    router.dismissTo("/active-shift");
+    leaveStale(timesheet);
     return;
   }
   show(day);
