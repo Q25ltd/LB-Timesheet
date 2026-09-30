@@ -1,0 +1,654 @@
+/* ---------- Hero ---------- */
+
+.hero {
+  overflow: clip;
+  padding-block: clamp(2.5rem, 1.5rem + 5vw, 6rem);
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.hero__inner {
+  display: grid;
+  gap: var(--space-7);
+  align-items: center;
+}
+
+/* Greedy wrapping, not `balance`: balancing this headline strands "without"
+   on a line of its own at phone widths. */
+.hero__title {
+  text-wrap: wrap;
+  font-size: clamp(2.375rem, 1.35rem + 4.3vw, 4.25rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+}
+
+.hero__lead {
+  max-width: 34rem;
+  margin-top: var(--space-5);
+  color: var(--text-muted);
+  font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+/* The phone sits on a quiet panel of the app's accent blue — the app's own
+   surface behind the app's own screen. Inset from the column on every side,
+   so it can never widen the page. */
+.hero__visual {
+  position: relative;
+  padding-block: var(--space-5);
+  --phone-max: 280px;
+}
+
+.hero__visual::before {
+  content: "";
+  position: absolute;
+  inset: 12% 4% 12% 4%;
+  border-radius: var(--radius-md);
+  background: var(--surface-accent);
+}
+
+.hero__visual .phone {
+  position: relative;
+}
+
+@media (max-width: 479px) {
+  .hero__actions .button {
+    flex: 1 1 100%;
+  }
+
+  .hero__visual {
+    --phone-max: 260px;
+  }
+}
+
+@media (min-width: 800px) {
+  .hero__inner {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  }
+
+  /* Three even lines beside the phone; on a phone the width does this. */
+  .hero__title {
+    max-width: 14ch;
+  }
+
+  .hero__visual {
+    padding-block: var(--space-4);
+  }
+}
+
+@media (min-width: 1100px) {
+  .hero__visual {
+    --phone-max: 310px;
+  }
+
+  .hero__visual::before {
+    inset: 14% 0 14% 10%;
+  }
+}
+
+/* ---------- Principles ---------- */
+
+.principles__statement {
+  max-width: 24ch;
+  font-size: clamp(1.625rem, 1.15rem + 2vw, 2.375rem);
+  font-weight: 800;
+}
+
+.principles__list {
+  display: grid;
+  gap: var(--space-5);
+  margin-top: var(--space-7);
+}
+
+.principle + .principle {
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.principle__icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-accent);
+  color: var(--brand-dark);
+}
+
+.principle__icon .icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.principle__title {
+  margin-top: var(--space-4);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.principle__body {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+}
+
+@media (min-width: 800px) {
+  .principles__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-6);
+  }
+
+  .principle + .principle {
+    padding-top: 0;
+    padding-left: var(--space-6);
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* ---------- How it works: the day's own timeline ---------- */
+
+.how__steps {
+  position: relative;
+  display: grid;
+  gap: var(--space-7);
+  margin-top: var(--space-7);
+}
+
+/* The day's line: down the left edge when stacked, across the top when wide. */
+.how__steps::before {
+  content: "";
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  left: calc(1.375rem - 1px);
+  width: 2px;
+  background: var(--border);
+}
+
+.how__step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding-left: 4rem;
+}
+
+.how__marker {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+.how__number {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 4px solid var(--background);
+  border-radius: 50%;
+  background: var(--brand-dark);
+  color: var(--on-brand);
+  font-weight: 800;
+  box-sizing: content-box;
+  margin: -4px;
+}
+
+.how__time {
+  color: var(--brand-dark);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.how__title {
+  margin-top: var(--space-2);
+  font-size: 1.375rem;
+  font-weight: 800;
+}
+
+.how__body {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+}
+
+@media (min-width: 960px) {
+  .how__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-6);
+  }
+
+  .how__steps::before {
+    top: calc(1.375rem - 1px);
+    bottom: auto;
+    left: 1.375rem;
+    right: 0;
+    width: auto;
+    height: 2px;
+  }
+
+  .how__step {
+    padding-left: 0;
+  }
+
+  .how__number {
+    position: static;
+    margin: -4px var(--space-3) -4px -4px;
+  }
+
+  .how__time {
+    padding-right: var(--space-3);
+    background: var(--background);
+  }
+
+  .how__title {
+    margin-top: var(--space-4);
+  }
+}
+
+/* An example of what the driver sees at that stage. */
+.snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(10 52 104 / 6%);
+  font-size: 0.9375rem;
+}
+
+.snippet__title {
+  color: var(--brand-dark);
+  font-weight: 800;
+}
+
+.snippet__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--background);
+}
+
+.snippet__label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.snippet__value {
+  font-weight: 700;
+  text-align: right;
+}
+
+.snippet__event {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.65rem;
+  align-items: start;
+}
+
+.snippet__event-icon {
+  grid-row: span 2;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.1rem;
+  color: var(--brand-dark);
+}
+
+.snippet__event-label {
+  font-weight: 700;
+}
+
+.snippet__event-value {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.snippet__event[data-tone="ok"] .snippet__event-icon {
+  color: var(--success);
+}
+
+.snippet__event[data-tone="defect"] .snippet__event-icon,
+.snippet__event[data-tone="defect"] .snippet__event-label {
+  color: var(--danger);
+}
+
+.snippet__confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+}
+
+.snippet__checkbox {
+  display: grid;
+  flex-shrink: 0;
+  width: 1.375rem;
+  height: 1.375rem;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--brand-dark);
+  color: var(--on-brand);
+}
+
+.snippet__checkbox .icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.snippet__button {
+  padding: 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--brand-dark);
+  color: var(--on-brand);
+  font-weight: 800;
+  text-align: center;
+}
+
+/* ---------- Paper comparison ---------- */
+
+.compare__table {
+  margin-top: var(--space-7);
+}
+
+.compare__head {
+  display: none;
+}
+
+.compare__row {
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.compare__topic {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+.compare__cell {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+}
+
+/* Paper: warm paper, with the ruled margin line of a notebook. */
+.compare__cell--paper {
+  background: var(--paper);
+  box-shadow: inset 3px 0 0 #dcbfb6;
+  color: var(--paper-ink);
+}
+
+.compare__cell--app {
+  background: var(--surface-accent);
+  box-shadow: inset 3px 0 0 var(--brand-dark);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.compare__side {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compare__cell--paper .compare__side {
+  color: var(--paper-ink);
+}
+
+.compare__cell--app .compare__side {
+  color: var(--brand-dark);
+}
+
+@media (min-width: 800px) {
+  .compare__head,
+  .compare__row {
+    display: grid;
+    grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: var(--space-4);
+  }
+
+  .compare__head {
+    font-size: 0.8125rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .compare__head-paper,
+  .compare__head-app {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+
+  .compare__head-paper {
+    background: var(--paper);
+    color: var(--paper-ink);
+  }
+
+  .compare__head-app {
+    background: var(--surface-accent);
+    color: var(--brand-dark);
+  }
+
+  /* Wide, the rows form two continuous columns: paper and Timesheets. */
+  .compare__row {
+    padding-block: 0;
+  }
+
+  .compare__topic {
+    padding-block: var(--space-4);
+  }
+
+  .compare__cell {
+    margin-top: 0;
+    padding: var(--space-4);
+    border-radius: 0;
+  }
+
+  .compare__row:last-child .compare__cell {
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  }
+
+  .compare__side {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Driver experience ---------- */
+
+.driver__inner {
+  display: grid;
+  gap: var(--space-7);
+  align-items: center;
+}
+
+.driver__visual {
+  order: 2;
+  --phone-max: 270px;
+}
+
+.driver__features {
+  display: grid;
+  gap: var(--space-5) var(--space-6);
+  margin-top: var(--space-6);
+}
+
+/* `align-content: start`: an item stretched to its row's height must keep
+   its title and text together rather than share the extra space out. */
+.feature {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  column-gap: 0.9rem;
+}
+
+.feature__icon {
+  grid-row: span 2;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: 0.1rem;
+  color: var(--brand-dark);
+}
+
+.feature__title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.feature__body {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+@media (min-width: 640px) {
+  .driver__features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .driver__inner {
+    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+    gap: var(--space-8);
+  }
+
+  .driver__visual {
+    order: 0;
+    --phone-max: 310px;
+  }
+}
+
+/* ---------- For companies (planned) ---------- */
+
+.companies__panel {
+  display: grid;
+  gap: var(--space-6);
+  padding: clamp(1.25rem, 0.75rem + 2.5vw, 3rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.companies__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: var(--surface-accent);
+  color: var(--brand-dark);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.companies__status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--brand-dark);
+}
+
+.companies .section-heading {
+  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
+}
+
+.companies__focus {
+  max-width: 40rem;
+  margin-top: var(--space-5);
+  padding-left: var(--space-4);
+  border-left: 3px solid var(--border);
+}
+
+.companies__planned {
+  align-self: start;
+  padding: var(--space-5);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+}
+
+.companies__planned-title {
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+.companies__list {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.companies__list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.6rem;
+}
+
+.companies__bullet {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.25rem;
+  color: var(--brand-dark);
+}
+
+@media (min-width: 960px) {
+  .companies__panel {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    gap: var(--space-8);
+  }
+}
+
+/* ---------- Final call to action ---------- */
+
+.final-cta {
+  padding-block: clamp(4rem, 3rem + 4vw, 6.5rem);
+  background: var(--brand-deep);
+  color: var(--on-brand);
+}
+
+.final-cta__title {
+  max-width: 20ch;
+  color: var(--on-brand);
+  font-size: clamp(1.875rem, 1.25rem + 2.7vw, 3rem);
+  font-weight: 800;
+}
+
+.final-cta__body {
+  max-width: 36rem;
+  margin-top: var(--space-4);
+  color: rgb(255 255 255 / 85%);
+  font-size: 1.125rem;
+}
+
+.final-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 479px) {
+  .final-cta__actions .button {
+    flex: 1 1 100%;
+  }
+}

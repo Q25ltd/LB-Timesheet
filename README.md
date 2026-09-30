@@ -33,6 +33,7 @@ cp api/.env.example api/.env  # then follow the comments in it — the JWT
 npm install                   # root deps: eslint, knip
 npm install --prefix api      # api deps + prisma generate
 npm install --prefix mobile   # Expo driver app deps
+npm install --prefix web      # Timesheets web app deps
 cd api
 npx prisma migrate deploy     # build YOUR dev database from the real migrations
 npm run db:smoke              # prove it actually enforces the guarantees
@@ -40,6 +41,7 @@ cd ..
 npm run check                 # the authoritative gate — see below
 npm run dev                   # API on http://localhost:3000/health
 npm start --prefix mobile     # Expo driver app (needs the API running)
+npm run dev --prefix web      # web app on http://localhost:5173 (calls no API yet)
 ```
 
 In development the app derives the API host from the Metro dev server it was
@@ -77,12 +79,12 @@ else.
 
 ## The authoritative gate
 
-`npm run check` = generate → typecheck → eslint (**both workspaces**) →
+`npm run check` = generate → typecheck → eslint (**every workspace**) →
 check-rules → prisma validate → knip → api unit tests → **mobile typecheck and
-tests** → **db stage** (clean database + real migrations + the PostgreSQL
-integrity and Company A/B repository suites). CI runs exactly this one command
-— there is no separate CI checklist to drift, and no second, laxer standard for
-the app.
+tests** → **web typecheck, tests and build** → **db stage** (clean database +
+real migrations + the PostgreSQL integrity and Company A/B repository suites).
+CI runs exactly this one command — there is no separate CI checklist to drift,
+and no second, laxer standard for the app or the web.
 
 `npm run studio` (in `api/`) opens a table editor — during early development
 that is the admin screen.
@@ -95,5 +97,5 @@ passes them through as arguments.
 ```
 api/      Fastify + Prisma backend
 mobile/   Expo driver app          (registration only — see STATUS.md)
-web/      company web app          (not started)
+web/      Timesheets web app       (public homepage only — see STATUS.md)
 ```

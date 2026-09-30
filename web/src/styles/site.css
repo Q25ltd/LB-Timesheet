@@ -1,0 +1,322 @@
+/* ---------- Brand lockup ---------- */
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-lockup__logo {
+  width: auto;
+  height: 2.125rem;
+}
+
+.brand-lockup__rule {
+  width: 1px;
+  height: 1.625rem;
+  background: var(--border);
+}
+
+.brand-lockup__product {
+  color: var(--brand-dark);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.brand-lockup--small .brand-lockup__logo {
+  height: 1.75rem;
+}
+
+.brand-lockup--small .brand-lockup__product {
+  font-size: 1rem;
+}
+
+/* A phone-width header must hold the lockup AND the Menu button in one row. */
+@media (max-width: 479px) {
+  .site-header__bar {
+    gap: var(--space-3);
+  }
+
+  .brand-lockup {
+    gap: 0.5rem;
+  }
+
+  .brand-lockup__logo {
+    height: 1.625rem;
+  }
+
+  .brand-lockup__rule {
+    height: 1.25rem;
+  }
+
+  .brand-lockup__product {
+    font-size: 1rem;
+  }
+}
+
+/* ---------- Header ---------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.site-header__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: var(--header-height);
+}
+
+.site-header__brand {
+  display: inline-flex;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+.site-nav__link,
+.site-header__login {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-nav__link:hover,
+.site-header__login:hover {
+  color: var(--brand-dark);
+  text-decoration: underline;
+}
+
+.site-header__login {
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+
+.site-header__toggle {
+  display: none;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.75rem;
+  margin-left: auto;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--brand-dark);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Narrowest phones: the button keeps its accessible name "Menu" / "Close",
+   but shows only its icon, so it still fits beside the lockup. */
+@media (max-width: 359px) {
+  .site-header__bar {
+    gap: var(--space-3);
+  }
+
+  .site-header__toggle {
+    padding-inline: var(--space-3);
+  }
+
+  .site-header__toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+.site-header__toggle-icon {
+  width: 1.125rem;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 -6px 0 currentColor, 0 6px 0 currentColor;
+}
+
+[data-menu-open="true"] .site-header__toggle-icon {
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+}
+
+[data-menu-open="true"] .site-header__toggle-icon::before,
+[data-menu-open="true"] .site-header__toggle-icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+}
+
+[data-menu-open="true"] .site-header__toggle-icon::before {
+  transform: rotate(45deg);
+}
+
+[data-menu-open="true"] .site-header__toggle-icon::after {
+  transform: rotate(-45deg);
+}
+
+/* Wide: one row — brand, the three section links, then the two actions. */
+@media (min-width: 960px) {
+  .site-header__menu {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-5);
+  }
+
+  .site-nav {
+    display: flex;
+    gap: var(--space-1);
+    margin-left: var(--space-4);
+  }
+
+  .site-header__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-left: auto;
+  }
+}
+
+/* Narrow: the same links behind the Menu button, as a full-width panel. */
+@media (max-width: 959px) {
+  .site-header__toggle {
+    display: inline-flex;
+  }
+
+  .site-header__menu {
+    display: none;
+  }
+
+  [data-menu-open="true"] .site-header__menu {
+    display: block;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: calc(100dvh - var(--header-height));
+    overflow-y: auto;
+    padding: var(--space-3) var(--gutter) var(--space-6);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 16px 32px -16px rgb(10 52 104 / 25%);
+  }
+
+  .site-nav__link {
+    width: 100%;
+    min-height: 3.25rem;
+    padding-inline: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    font-size: 1.125rem;
+  }
+
+  .site-header__actions {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+  }
+
+  .site-header__actions .button,
+  .site-header__login {
+    justify-content: center;
+    min-height: var(--control-height);
+    font-size: 1.0625rem;
+  }
+
+  .site-header__login {
+    border: 2px solid var(--brand-dark);
+  }
+}
+
+/* ---------- Footer ---------- */
+
+.site-footer {
+  padding-block: var(--space-8) var(--space-6);
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.site-footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.site-footer__brand a {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.site-footer__tagline {
+  max-width: 24rem;
+  margin-top: var(--space-3);
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.site-footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.site-footer__links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  font-weight: 600;
+}
+
+.site-footer__legal {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* ---------- "Not available yet" and "not found" pages ---------- */
+
+.notice {
+  min-height: 60vh;
+  padding-block: clamp(4rem, 3rem + 6vw, 8rem);
+  background: var(--background);
+}
+
+/* Aligned with the header's content edge, with a readable line length. */
+.notice__inner > * {
+  max-width: 44rem;
+}
+
+.notice__title {
+  font-size: clamp(2rem, 1.5rem + 2.2vw, 3rem);
+  font-weight: 800;
+}
+
+.notice__body {
+  margin-top: var(--space-4);
+  color: var(--text-muted);
+  font-size: 1.125rem;
+}
+
+.notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}

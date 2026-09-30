@@ -1,0 +1,68 @@
+/*
+ * The LogisticBay Timesheets visual language for the web.
+ *
+ * The colours are COPIED from the driver app's theme
+ * (`mobile/src/theme/index.ts`), never imported: the two workspaces share no
+ * code (D1, D6), so a change there is a deliberate change here too. The
+ * names match the app's tokens, kebab-cased, so one concept keeps one name.
+ *
+ * The web adds only what a page needs and a phone screen does not: a type
+ * scale for long-form reading, a layout width and section spacing.
+ */
+:root {
+  color-scheme: light;
+
+  /* Copied from the app theme. */
+  --brand-dark: #0b3c7a;
+  --brand-deep: #0a3468;
+  --brand-light: #2e8be0;
+  --surface: #ffffff;
+  --surface-accent: #e8f1fc;
+  --background: #f5f8fc;
+  --border: #d4deea;
+  --text: #12243a;
+  --text-muted: #5c7089;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --success: #1e7b3e;
+  --success-bg: #e8f4ec;
+  --neutral-selected: #e4e8ee;
+  --on-brand: #ffffff;
+
+  /*
+   * Web-only. `--brand-light` is 3.6:1 on white, which is below the 4.5:1
+   * body text needs, so on the web it is an ACCENT (rules, icons, focus
+   * rings) and never the colour of small text. Text links use --brand-dark.
+   */
+  --focus-ring: #2e8be0;
+  --paper: #f7f4ec;
+  --paper-line: #e6dfcd;
+  --paper-ink: #4a4a4a;
+
+  /* The app's system type, not a web font: the driver app uses the
+     platform's own face, and loading nothing is the fastest font. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+
+  /* Web surfaces stay squarer than the phone: a page of 16px-radius cards
+     reads as a template. The app's own radii appear inside the phone. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+
+  --container: 1180px;
+  --gutter: clamp(1rem, 4vw, 2rem);
+  --section-space: clamp(4rem, 3rem + 5vw, 7rem);
+  --header-height: 4.5rem;
+
+  /* 52px controls, as in the app. */
+  --control-height: 3.25rem;
+}

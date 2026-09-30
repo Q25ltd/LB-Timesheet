@@ -63,6 +63,50 @@ export default tseslint.config(
   },
 
   {
+    // The web workspace, on the same footing: its own tsconfig root, the same
+    // rules -- plus the web tier's own guardrails. check-rules scans the API
+    // only, so what it enforces there that also matters in a browser is
+    // enforced here instead.
+    files: ["web/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: `${import.meta.dirname}/web` },
+    },
+    rules: {
+      // CLAUDE.md: no console.* in src.
+      "no-console": "error",
+
+      // D45: in a browser no credential is ever persisted where JavaScript
+      // can read it. Nothing in web/ needs browser storage today, so all of
+      // it is closed; a genuine non-credential use is a reviewed exception
+      // (`eslint-disable-next-line` with a reason), not a quiet default.
+      "no-restricted-globals": [
+        "error",
+        { name: "localStorage", message: "D45: no browser persistence in web/ without a reviewed exception." },
+        { name: "sessionStorage", message: "D45: no browser persistence in web/ without a reviewed exception." },
+        { name: "indexedDB", message: "D45: no browser persistence in web/ without a reviewed exception." },
+      ],
+      "no-restricted-properties": [
+        "error",
+        { object: "window", property: "localStorage", message: "D45: no browser persistence in web/ without a reviewed exception." },
+        { object: "window", property: "sessionStorage", message: "D45: no browser persistence in web/ without a reviewed exception." },
+        { object: "window", property: "indexedDB", message: "D45: no browser persistence in web/ without a reviewed exception." },
+        { object: "document", property: "cookie", message: "D45: the refresh credential is an HttpOnly cookie the page never reads." },
+      ],
+
+      // XSS is the web tier's main exposure (D45 keeps tokens in memory, so
+      // injected script is what could reach them). React escapes everything
+      // it renders; this is the one way around that.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: "Raw HTML bypasses React's escaping -- the web tier's XSS guard. Render elements instead.",
+        },
+      ],
+    },
+  },
+
+  {
     // Jest supplies these as globals; unlike node:test they are not imported.
     files: ["mobile/jest.setup.js", "mobile/**/*.test.{ts,tsx}"],
     languageOptions: {

@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-09-30 — Web foundation and the public homepage (D43, D44) — local, uncommitted for review
+
+**Built.** The `web/` workspace — Vite 8, React 19, TypeScript 6, React Router
+7 — and the public homepage at `/`, with `/register` and `/login` as
+placeholders that say the company feature is not available yet and hold no
+form. No API call, no authentication, no company account or dashboard. What
+exists is STATUS.md's to state.
+
+**Versions chosen for the pinned Node.** react-router 8 and jsdom 30 require
+Node ≥ 22.22; `.nvmrc` and CI pin 22.13.0, so react-router 7.18 and jsdom 29
+were taken rather than upgrading Node inside a homepage increment.
+
+**In the gate from the first commit (D44).** Root `check` gains web
+typecheck, Vitest and a production build; CI installs the fourth workspace;
+ESLint lints `web/` with the same type-aware rules plus four web guardrails —
+no `console`, no browser storage or `document.cookie` (D45), no
+`dangerouslySetInnerHTML`; knip covers it. The homepage tests hold the claims
+boundary: delivery language only inside the section marked planned, which must
+say "not available yet"; no invented statistics, prices, customers,
+certification or tracking; no broken or external link; one h1; named controls.
+**22 ephemeral mutations**, each caught for its intended reason and restored
+byte-identically.
+
+**Found and fixed in the browser, not by tests.** The Menu button was pushed
+off-screen at 390px; the company panel's border ran to the screen edge on
+phones (padding overrode the container gutter); the driver features grid
+split a title from its text. Horizontal overflow then measured zero at every
+width from 320 to 1440px. A manual claims review against STATUS.md then caught
+one line the automated guard cannot: "a prompt to confirm a time far from the
+current one" — the Start-time half of D20 is unbuilt — reworded to what is.
+
+**Gate.** First full run failed on ONE mobile test
+(`changeVehicle.test.tsx`, Jest's 5 s timeout) with `mobile/` untouched; it
+passed 3/3 in isolation, and the full gate passed on rerun with the web dev
+server stopped. Recorded as a load-sensitive timeout, not investigated.
+
+**Not done.** Static pre-rendering of public pages (D44 left the mechanism to
+this increment; it is deferred to before deployment, and the page is
+client-rendered). No real-browser test suite in the gate yet. Nothing
+deployed. Owner copy decisions at review: the footer reads "© 2026 Q25 Ltd.
+LogisticBay Timesheets."; the phone picture shows "Company: Example
+Haulage"; the public "based on DVSA walkaround guidance" line was removed
+(copy only — the checks and their documentation are unchanged).
+
+---
+
 ## 2026-09-30 — Web surface, web framework and browser credential transport decided (D43–D45)
 
 Documentation only. **Nothing was built**: no `web/`, no dependency, no API,

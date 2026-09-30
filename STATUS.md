@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-09-30 (web surface, framework and browser credential transport decided — D43–D45; nothing built)
+> Last updated: 2026-09-30 (web workspace and public homepage built locally — D43, D44; no auth, no API use)
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -22,7 +22,8 @@ each earlier use of the day, and add, change or hand back a trailer — with
 fridge diesel on a refrigerated one (rows below) — all on the phone, with no network —
 and finish the day into a completed timesheet kept on the phone, listed on
 Home and the Timesheets tab and opened again read-only — but cannot
-send anything: no PDF, no email sending, no web app.
+send anything: no PDF, no email sending, no company web app (the web
+workspace holds only the public homepage, locally — see Company web app).
 
 What IS real: migration-managed schema with membership-bound shifts, a
 one-open-shift invariant, a non-null company IANA timezone (D18) and offline
@@ -34,7 +35,7 @@ postures, and an Expo driver app whose Registration screen calls the real
 API**; a tenant-safe repository boundary with Company A/B proofs;
 global error handling that cannot leak internals; fail-closed env validation
 (CORS, JWT, email); a single authoritative gate (`npm run check`) that CI runs
-verbatim, covering both workspaces and ending in a clean-database
+verbatim, covering every workspace and ending in a clean-database
 migrate-deploy + integrity suite. Findings
 F-01…F-11, F-13, F-14, **F-19** and **F-21** closed; F-15…F-18 and F-20 open or
 deferred, F-22 partial, F-23 open (F-12 reserved); see FINDINGS.md.
@@ -235,7 +236,7 @@ the one way to believe the gate passed when it did not.
 
 | Area | State |
 |---|---|
-| Web workspace and public homepage (D43, D44) | 🔲 — `web/` does not exist; no web dependency, route or page is built |
+| Web workspace and public homepage (D43, D44) | 🔶 — **local only, not deployed, awaiting owner review.** `web/` exists: Vite + React + TypeScript + React Router, inside the full gate (typecheck, eslint, knip, 33 Vitest tests, production build) and CI. Built: the public homepage at `/` (hero with a drawn Active Shift phone, principles, how it works, paper comparison, driver section, a small "for companies" section marked **in development — not available yet**, final call to action, footer), a not-found page, and `/register` + `/login` as **placeholders only** — each says company registration / login is not available yet, is `noindex`, and holds no form or field (tests fail if one appears). **It calls no API and implements no authentication, company account or dashboard** (D45, O10, O11 all untouched). Guardrails, each proven by an ephemeral mutation: no `console`, no `any`, no browser storage or `document.cookie` (D45), no `dangerouslySetInnerHTML`; delivery language (send, PDF, email, submitted, sync…) only inside the planned section; no invented statistics, prices, customers, certification or tracking claims; no broken or external link. **Not built:** static pre-rendering of public pages (D44 — to choose before deployment; the page is client-rendered today), a real-browser test suite in the gate, deployment (D14, blocked by F-15/F-17/F-28). Verified by hand in a browser at 320–1440px (no horizontal overflow) — not on a physical device |
 | Browser credential transport (D45) | 🔲 — the API is unchanged: CORS `credentials: false`, no cookie set or read, the refresh secret only in JSON bodies, and one 90-day `SESSION_LIFETIME_MS` for every Session (browser lifetime open — O10) |
 | Company registration | 🔲 |
 | Settings | 🔲 |
@@ -252,7 +253,7 @@ the one way to believe the gate passed when it did not.
 | Area | State |
 |---|---|
 | Schema | ✅ D15 shape — Shift bound to CompanyMembership by composite FK; ShiftStatus enum; `Shift.clientEventId` (nullable) with `@@unique([membershipId, clientEventId])` for offline Start Shift identity (D19). **`User` now carries `firstName` + `lastName` (both NOT NULL) and `email` is `citext`** with one unique index (D22) — `User.name` is gone, not retained alongside. Validated, generated, migrated |
-| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, both workspaces), check-rules (17 checks), prisma validate, knip, 177 api unit tests, **mobile typecheck + 1375 mobile tests (44 suites, 2026-09-29)**, test:db integrity gate. The api-local `check` script is narrower and skips mobile and the database; running it by mistake is the one way to think the gate passed when it did not |
+| Typecheck / lint / rules / dead-code guards | ✅ `npm run check` **from the repo root** — generate, tsc, eslint (type-aware, every workspace), check-rules (17 checks), prisma validate, knip, 177 api unit tests, **mobile typecheck + 1375 mobile tests (44 suites, 2026-09-29)**, **web typecheck + 33 web tests + production build (2026-09-30)**, test:db integrity gate. The api-local `check` script is narrower and skips mobile, web and the database; running it by mistake is the one way to think the gate passed when it did not |
 | Tenant-boundary rules | ✅ 4 mechanical rules, each independently unit-tested (`api/scripts/rules/tenantPatterns.ts`) |
 | CORS integration proof | ✅ `app.inject()` tests — a foreign origin receives no `Access-Control-Allow-Origin` |
 | Database tenant-integrity proof | ✅ 148/148 against a clean database built by `migrate deploy`, at the authoritative gate of 2026-09-29 (how the count grew past 85 is not recorded here — git history holds it). 85/85 at Registration Increment 1 (71 → 85, the fourteen added being registration's — schema shape, citext uniqueness at raw-SQL level, persistence, session, zero-membership, duplicate/concurrency and identity-token cases). Previously 71/71 (45 → 50 at `4888d63`, the five added being the company timezone authority's; 50 → 71 at Start Shift, the twenty-one added being that route's — see its row below). Includes membership-binding (D15) and one-open-shift, on create AND update, plus the two persisted protected-request proofs (P1.2a). Now INSIDE `npm run check` via `test:db` (provisions a clean `lb_timesheet_check` db + `migrate deploy` every run) — F-04 closed. |
@@ -411,7 +412,7 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 | API skeleton boots (`/health`) | ✅ verified on the Mac |
 | First Prisma schema | ✅ migration-managed (8 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
 | Local Postgres (docker-compose, port 5544) | ✅ running |
-| Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2. **Three workspaces now**: root, `api/`, `mobile/` — each needs its own `npm install`/`npm ci`, and CI installs all three |
+| Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2. **Four workspaces now**: root, `api/`, `mobile/`, `web/` — each needs its own `npm install`/`npm ci`, and CI installs all four |
 | `timesheets.logisticbay.com` DNS | 🔲 |
 | `timesheets-api.logisticbay.com` DNS | 🔲 |
 | Database provisioned | 🔲 |

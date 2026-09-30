@@ -235,11 +235,12 @@ Escape hatch: `// rules-ignore: <id>` on the line, **with a reason**. Reaching f
 it often means the rule is wrong — change the rule, don't paper over it.
 
 Before saying "done": `npm run check` **from the repo root** (the api-local
-`check` is a narrower script — running it by accident skips mobile and the
-database) — generate, typecheck, eslint over both workspaces, check-rules,
-prisma validate, knip, api unit tests, mobile typecheck and tests, then the db
-stage, which builds a clean database from the real migrations and runs the
-integrity and Company A/B suites. One command; CI runs the same one.
+`check` is a narrower script — running it by accident skips mobile, web and
+the database) — generate, typecheck, eslint over every workspace, check-rules,
+prisma validate, knip, api unit tests, mobile typecheck and tests, web
+typecheck, tests and build, then the db stage, which builds a clean database
+from the real migrations and runs the integrity and Company A/B suites. One
+command; CI runs the same one.
 
 Never `npm audit fix --force` — see DEVLOG 2026-08-25.
 
