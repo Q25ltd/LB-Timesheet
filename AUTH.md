@@ -10,7 +10,9 @@
 > by D26 plus the refresh/logout/switch specifics marked below. Clarified
 > 2026-09-12 by owner decision (F-27): the refresh concurrency wording, which
 > an independent audit measured to be stronger than the design it describes.
-> That clarification changed no behaviour.**
+> That clarification changed no behaviour. Amended 2026-09-30 by D45: the
+> browser credential transport ("Browser clients" below) — an APPROVED TARGET,
+> NOT BUILT; mobile and the server-side contract are unchanged.**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -166,7 +168,9 @@ the Session row, never in plaintext.
 
 - **TTL 90 days.** Drivers work offline for whole shifts and go on holiday for
   weeks; a short refresh TTL means a forced re-login at exactly the wrong moment,
-  which is the friction PRODUCT.md §19 exists to avoid.
+  which is the friction PRODUCT.md §19 exists to avoid. This is the **mobile**
+  lifetime. A company browser session's lifetime is open (DECISIONS O10) and
+  is not assumed to be 90 days.
 - **Rotated on every use, with a grace window.** The previous token stays valid
   for a short period (60s) so a driver who loses signal mid-rotation is not
   logged out. Strict rotation without grace is a real failure mode on a lorry.
@@ -218,7 +222,9 @@ current missed — never one filter across both columns. The refresh repository'
 database interface declares only `findUnique` and `updateMany`, so the
 ambiguous `OR` query does not typecheck.
 
-The refresh token lives in the device's secure storage. **The driver's daily
+On the phone, the refresh token lives in the device's secure storage
+(SecureStore, D25). A browser has no equivalent; it is covered by "Browser
+clients" below. **The driver's daily
 "login" is a biometric unlock, not an email-and-password screen.** Do not
 build a credentials form for every morning.
 
@@ -229,6 +235,44 @@ Session is then validated by `POST /auth/refresh`, and only the server's answer
 authenticates anyone. What the daily unlock avoids is retyping a password — not
 the round trip. A local PIN was considered and is NOT built; nothing requires
 one.
+
+## Browser clients (D45, 2026-09-30) — APPROVED TARGET, NOT BUILT
+
+The company web application (DECISIONS D43, D44) is a browser client of this
+API. What a browser holds, and how it presents the refresh credential, differs
+from the phone. **Nothing in this section is implemented:** today CORS has
+`credentials: false`, the API sets and reads no cookie, and the refresh secret
+travels only in JSON bodies. STATUS.md owns what is built.
+
+| | Mobile (built — D25, D26) | Browser (approved target — D45) |
+|---|---|---|
+| Access token (identity / tenant) | memory only | memory only — never `localStorage`, `sessionStorage`, IndexedDB, a readable cookie or any persistent store |
+| Refresh credential at rest | SecureStore | `HttpOnly` cookie, `Secure` in production, **host-only** on the Timesheets API host — never a parent domain such as `.logisticbay.com` |
+| Refresh credential in transit | JSON body | the cookie, on a credentialed request |
+| After a restart / page reload | biometric gate (optional), then `POST /auth/refresh` | refresh via the cookie |
+| Session lifetime | 90 days, absolute | **open — DECISIONS O10** |
+
+**Authority is unchanged.** Session validation, rotation with its 60-second
+grace, one-generation reuse detection, revocation, token issuance, membership
+validation and tenant derivation all remain this API's, exactly as specified
+above. The browser changes how the refresh credential is carried, never who
+decides. The web application duplicates none of it.
+
+**CORS.** Credentialed requests will need credentialed CORS, still on the
+**explicit origin allowlist** — no wildcard, no reflected origin, no trust for
+sibling subdomains.
+
+**CSRF.** Because the cookie is attached automatically, the endpoints that act
+on it — refresh and logout — require explicit CSRF protection: **strict
+server-side validation of `Origin`** against the explicitly authorised
+Timesheets web origin(s). `SameSite` is **not** relied on alone; the TMS and
+the umbrella site share this product's registrable domain, so they are the
+same site. Every other route stays **bearer-authorised** and is not converted
+to cookie authentication. If Origin validation proves insufficient for a
+concrete endpoint or browser behaviour, implementation STOPS and the added
+protection is put to the owner — the model is not silently weakened.
+
+**Company authorization is not granted by any of this** — see DECISIONS O11.
 
 ---
 

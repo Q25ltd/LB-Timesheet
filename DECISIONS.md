@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-29 (D42 — stable use identity, use times, company re-declaration)
+> Last updated: 2026-09-30 (D43–D45 — web surface, web framework, browser credential transport; O5 closed; O10, O11 opened)
 
 ---
 
@@ -43,7 +43,13 @@ each product, not shared.
 
 **Trap to avoid:** if auth ever moves to cookies, scope them per-subdomain —
 never to `.logisticbay.com`, which would hand a Timesheets session to the TMS.
-Bearer tokens in browser storage are origin-scoped and safe by default.
+~~Bearer tokens in browser storage are origin-scoped and safe by default.~~
+**SUPERSEDED by D45 (2026-09-30).** Origin scoping stops another site reading
+browser storage; it does not stop a script injected into this origin reading
+it, so persistent browser storage is not safe for a long-lived credential. The
+approved browser design keeps the access token in memory and the refresh
+credential in an `HttpOnly` cookie that is host-only on the Timesheets API
+host — which is this trap's own rule, applied. The trap itself stands.
 
 ### D4 — Two apps, not one plan-gated app (2026-08-25)
 Rejected: a single driver app that unlocks TMS features on a higher subscription
@@ -176,7 +182,8 @@ Full contract in **AUTH.md**. Summary of what was chosen and why:
 - **Refresh: opaque, hashed at rest, 90-day TTL, rotated with a 60s grace
   window.** Long TTL because drivers are offline for whole shifts and away for
   weeks; grace because strict rotation logs a driver out when signal drops
-  mid-rotation.
+  mid-rotation. *(2026-09-30:)* that reasoning is the phone's; it is **not**
+  carried to a company browser session, whose lifetime is open — **O10**.
 - **The daily unlock is a local PIN/biometric**, not a server login.
 - ~~**0 memberships → denied.**~~ **SUPERSEDED by D21 (2026-09-10).** A
   zero-membership driver now authenticates with an **identity token** that
@@ -579,7 +586,10 @@ Investigated and accepted 2026-09-11 after it happened three times.
 - **Expo SecureStore** holds the long-lived refresh secret.
 - The short-lived identity / tenant access token lives **in memory only**.
 - **No** authentication secret in AsyncStorage; **no** plaintext token
-  persistence anywhere.
+  persistence anywhere. *(Scope made explicit 2026-09-30.)* This decision
+  governs the mobile client, and that rule stands for it unchanged. A browser
+  has no SecureStore; the browser equivalent is **D45**, which keeps the same
+  principle — no credential persisted anywhere JavaScript can read it.
 - **No SQLite yet.** It arrives with local Personal Timesheets / offline
   operational data and not before — speculative persistence infrastructure is
   forbidden (AGENT_WORKFLOW §25).
@@ -1588,6 +1598,123 @@ timesheet changed on a use's page is saved before it is re-declared rather
 than held as a draft until the Review — staging use-level edits is a
 separate decision.
 
+### D43 — The Timesheets web application lives at `timesheets.logisticbay.com`; `/` is the public product homepage (2026-09-30)
+
+Owner decision; closes **O5**. **Nothing of it is implemented** — `web/` does
+not exist; STATUS.md owns build state.
+
+`https://timesheets.logisticbay.com` is the Timesheets product web
+application — the host D3 assigned to this product. Its route `/` is the
+public LogisticBay Timesheets product homepage. The same application will
+later hold the company-facing routes: `/register`, `/login`, company
+onboarding, the authenticated company dashboard, company settings,
+membership/driver administration, submitted-timesheet history and detail, and
+any other company function explicitly approved later. Naming a route here
+approves its place, not its build.
+
+The umbrella `logisticbay.com` site (D3) is unchanged and remains outside this
+application. The driver's surface remains the phone (D25).
+
+**The company sees what was sent, and nothing else.** The web application
+reads only company-authorised server-side records — the snapshots a driver
+explicitly submitted through the product's submission process (D28, D41). It
+gains no access to a driver's local or in-progress working day, to an unsent
+timesheet, or to private data (CLAUDE.md privacy boundary; D11, D12), merely
+because that driver holds a membership in the company. Building the web
+application broadens no company's visibility.
+
+**Which company user may do what is not decided here** — see **O11**. A route
+guard in the browser is presentation, never authorization.
+
+### D44 — The web application is Vite + React + TypeScript + React Router, a client of the Fastify API (2026-09-30)
+
+Owner decision, taken after comparing Vite and Next.js against the whole
+company application rather than the homepage. **Nothing of it is
+implemented** — no `web/` workspace, no web dependency.
+
+- **Vite, React, TypeScript and React Router.** Not Next.js.
+- **The web application is a client of the existing Fastify API, which remains
+  the single backend authority** — authentication, sessions, tenant context,
+  authorization and every business rule. No backend-for-frontend, no second
+  authentication authority, no server runtime in the web tier. Deployment is
+  D14's: Vercel, root directory `web/`.
+- **Public pages needing crawlable static HTML may be pre-rendered as part of
+  the web build**, rather than by adding a server runtime. The pre-rendering
+  mechanism is chosen when the web foundation is built.
+
+*Why:* the company application is almost entirely authenticated, tenant-scoped
+and uncacheable, and what it shows is read from the API (D43). Server rendering
+could only render those pages by holding the session itself — a second
+authority duplicating `requireAuth`, which AGENT_WORKFLOW §15 forbids creating
+casually. The few public pages are fully served by static pre-rendering.
+
+**`web/` joins the engineering discipline from its first commit.** It is not a
+lighter or lower-assurance frontend. The web foundation increment must
+integrate, at minimum: TypeScript checking · ESLint and static rules ·
+dead-code/unused analysis as appropriate · automated tests · root
+`npm run check` · CI · accessibility verification · real-browser verification
+of critical workflows · responsive/overflow verification · regression tests ·
+security invariants. Important web workflows follow the established
+discipline (AGENT_WORKFLOW §7–§14): invariant → honest RED → minimal GREEN →
+targeted verification → adversarial/mutation proof where appropriate → full
+gate → diff/scope review → atomic commit → remote/CI verification. The tools
+themselves are chosen and configured in that increment, not here — D25's
+principle for mobile, applied to the web: a workspace CI ignores rots.
+
+### D45 — Browser credential transport: access token in memory, refresh credential in an `HttpOnly` host-only cookie (2026-09-30)
+
+Owner decision. **APPROVED TARGET ARCHITECTURE — NOT IMPLEMENTED.** The API
+today is unchanged by it: CORS has `credentials: false`, no cookie is set or
+read anywhere, and the refresh secret travels only in JSON request and response
+bodies. STATUS.md owns build state.
+
+**Mobile is unchanged.** D25 and D26 stand exactly: SecureStore holds the
+refresh secret, access tokens live in memory. Nothing here weakens or replaces
+them. This decision exists because a browser has no equivalent secure store,
+and neither AUTH.md's "device's secure storage" nor D3's former remark about
+browser storage settled what a browser may hold.
+
+**This changes browser TRANSPORT, not authentication AUTHORITY.** The Fastify
+API still validates the Session, rotates the refresh credential (AUTH.md's
+rotation, grace and one-generation reuse detection), revokes sessions, issues
+identity and tenant tokens, validates memberships and derives tenant
+authority. None of it is duplicated in the web application.
+
+**Access token (identity and tenant).** A bearer JWT, held in JavaScript
+**memory only**. Never persisted in `localStorage`, `sessionStorage`,
+IndexedDB, a JavaScript-readable cookie or any other persistent browser store.
+A page reload therefore restores the session through the refresh mechanism.
+
+**Refresh credential.** Persisted in the browser **only** in a cookie that is:
+
+- `HttpOnly` — never readable by JavaScript;
+- `Secure` in production;
+- **host-only** on the Timesheets API host — no `Domain` attribute, and never
+  scoped to a parent domain such as `.logisticbay.com` (D3's trap).
+
+**Refresh and logout** are browser requests to the Fastify API carrying that
+cookie — credentialed requests.
+
+**CORS.** Credentialed browser requests will need credentialed CORS. When
+implemented, CORS keeps its **explicit origin allowlist**: no wildcard, no
+reflected origin, and no trust extended to sibling subdomains. Until then
+`credentials: false` stands (`api/src/app.ts`).
+
+**CSRF.** A cookie is attached automatically, so the endpoints that act on the
+cookie — refresh and logout — need explicit CSRF protection. **`SameSite` is
+not relied on alone**: the TMS and the umbrella site are the same *site* as
+this product (D3), so `SameSite` does not separate them. The approved baseline
+is **strict server-side validation of the request's `Origin`** against the
+explicitly authorised Timesheets web origin(s). The rest of the API stays
+**bearer-authorised**; it is not converted to cookie authentication. If
+implementation shows Origin validation alone is insufficient for a concrete
+endpoint or browser behaviour, the work **STOPS** and the additional
+protection is presented for decision — the model is never silently weakened.
+
+**Not decided here:** the browser session lifetime (**O10**) — the 90-day
+mobile lifetime is deliberately not assumed — and company authorization
+(**O11**).
+
 ## ❓ Open — ask the user, do not guess
 
 ### O1 — Retention period and cancellation
@@ -1622,7 +1749,11 @@ If not, upgrading to the TMS is a **personal downgrade** for the driver — he
 gains a jobs list he didn't ask for and loses the one feature that was for him.
 That would make the salary tracker a third shared surface.
 
-### O5 — Admin surface location
+### O5 — Admin surface location — ✅ CLOSED 2026-09-30
+Resolved: the company web application is the Timesheets product web
+application at `timesheets.logisticbay.com`, with the public product homepage
+at `/`. See D43. The original question follows.
+
 The company web app (registration, settings, password, destination email, driver
 roster + active/inactive, subscription, download copies) is confirmed to exist.
 Undecided: does it live at `timesheets.logisticbay.com` alongside the driver-
@@ -1655,3 +1786,26 @@ thereafter. See D18.
 
 ### O9 — Multi-company drivers — ✅ CLOSED 2026-08-25
 Resolved: **supported**, and modelled from the first migration. See D12.
+
+### O10 — Browser session lifetime
+How long a company browser session lives before its user must sign in again —
+session-only, a fixed number of days, or something else — and whether it is
+absolute or sliding. The mobile 90 days (AUTH.md, D13) was chosen for a driver
+offline for whole shifts and away for weeks; it is **not** carried to the
+browser (D45). Today one constant, `SESSION_LIFETIME_MS` (90 days,
+`api/src/lib/tokens.ts`), applies to every Session the API creates, because no
+browser client exists. **Must be decided before browser authentication is
+implemented.**
+
+### O11 — Company authorization model
+The company web application (D43) needs **explicit server-side authorization
+rules** for company-level capabilities: membership/driver administration,
+company settings, viewing submitted company timesheet snapshots, PDF access,
+and any other company operation. None exists. The current contract stays
+authoritative until it is explicitly extended: an `admin` membership **confers
+no authority over another user or membership** (D19), and company-admin
+powers must **not** be inferred from the role's existence. The Fastify API
+must enforce whatever is decided; a browser route guard is never
+authorization. Related: F-20 (`notes` has no decided privacy audience) and
+D24 (email ownership before invitation-by-email). **Must be decided before any
+company-facing capability is built.**

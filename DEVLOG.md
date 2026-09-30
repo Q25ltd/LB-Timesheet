@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-09-30 — Web surface, web framework and browser credential transport decided (D43–D45)
+
+Documentation only. **Nothing was built**: no `web/`, no dependency, no API,
+CORS, cookie, auth, schema, mobile or CI change.
+
+**Decided.** D43 — the Timesheets web application lives at
+`timesheets.logisticbay.com`, `/` is the public product homepage, and the
+company sees only explicitly submitted snapshots (closes O5). D44 — Vite +
+React + TypeScript + React Router, a pure client of the Fastify API; no BFF,
+no Next.js, public pages pre-rendered at build; `web/` joins the full gate
+from its first commit. D45 — in a browser the access token lives in memory
+only and the refresh credential in an `HttpOnly`, `Secure`, host-only cookie
+on the API host; credentialed CORS on the explicit allowlist; Origin
+validation on refresh and logout, not `SameSite` alone. Mobile unchanged.
+
+**Why.** Compared against the whole company application, not the homepage:
+its pages are authenticated, tenant-scoped and read from the API, so server
+rendering would need a second authority holding the session. The browser
+question had no settled answer — D3 called bearer tokens in browser storage
+"safe by default", D25 forbade plaintext token persistence "anywhere", and
+AUTH.md put the refresh token in "the device's secure storage".
+
+**Reconciled, history kept.** D3's sentence is struck through and marked
+superseded by D45 (its cookie trap stands); D25's rule is scoped to mobile with
+a pointer to D45; D13 and AUTH.md mark 90 days as the mobile lifetime; AUTH.md
+gains a "Browser clients" section marked APPROVED TARGET, NOT BUILT; STATUS.md
+gains two 🔲 rows stating the API is unchanged.
+
+**Opened.** O10 — browser session lifetime. O11 — company authorization model
+(admin still confers no authority over another member, D19).
+
+**Not done.** The `api/src/app.ts` CORS comment ("Enabling it is an
+architectural change") is still accurate — the change is approved, not made —
+and was left alone. Unrelated and reported, not edited: `README.md` and the
+fork-lineage section of `CLAUDE.md` still name the TMS repo `~/timesheet-app`.
+
+---
+
 ## 2026-09-29 — Local timesheet lifecycle: Finish Shift, Timesheets, corrections, stable use identity (D38–D42)
 
 The driver-side stage closes: a day now runs from Start Shift to a finished,

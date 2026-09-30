@@ -2,7 +2,7 @@
 
 > **This is the ONLY file allowed to describe what is currently built.**
 > Other docs describe intent and must point here instead of asserting state.
-> Last updated: 2026-09-29 (stable use identity, use times, company re-declaration — D42; local only)
+> Last updated: 2026-09-30 (web surface, framework and browser credential transport decided — D43–D45; nothing built)
 
 Legend: ✅ done · 🔶 partial · 🔲 not started
 
@@ -235,6 +235,8 @@ the one way to believe the gate passed when it did not.
 
 | Area | State |
 |---|---|
+| Web workspace and public homepage (D43, D44) | 🔲 — `web/` does not exist; no web dependency, route or page is built |
+| Browser credential transport (D45) | 🔲 — the API is unchanged: CORS `credentials: false`, no cookie set or read, the refresh secret only in JSON bodies, and one 90-day `SESSION_LIFETIME_MS` for every Session (browser lifetime open — O10) |
 | Company registration | 🔲 |
 | Settings | 🔲 |
 | Change password | 🔲 |
