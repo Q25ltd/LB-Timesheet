@@ -10,7 +10,7 @@ import { renderRoute } from "./test/renderRoute";
  * by accessible name.
  */
 
-const PAGES = [PATHS.home, PATHS.register, PATHS.login] as const;
+const PAGES = [PATHS.home, PATHS.register, PATHS.login, PATHS.forgotPassword, PATHS.verifyEmail, PATHS.resetPassword] as const;
 
 function linkHrefs(): string[] {
   return [...document.querySelectorAll("a[href]")].map(link => link.getAttribute("href") ?? "");
@@ -70,8 +70,8 @@ describe("links", () => {
   });
 });
 
-describe("company entry points that do not exist yet", () => {
-  // Every way into company registration or login that the site offers.
+describe("account entry points", () => {
+  // Every way into account registration or sign-in that the site offers.
   const ENTRY_POINTS = [
     { name: "Get started", path: PATHS.register },
     { name: "Log in", path: PATHS.login },
@@ -85,25 +85,27 @@ describe("company entry points that do not exist yet", () => {
     for (const link of links) expect(link.getAttribute("href")).toBe(path);
   });
 
-  test.each([PATHS.register, PATHS.login])(
-    "%s says it is not available yet, and offers no form or credential field",
-    path => {
-      renderRoute(path);
-      expect(pageHeading()).toMatch(/is not (open|available) yet$/);
+  test("/register is YOUR OWN account's form — four labelled fields plus a repeat, and no company field", () => {
+    renderRoute(PATHS.register);
+    expect(pageHeading()).toBe("Create your account");
+    for (const label of ["First name", "Last name", "Email", "Password", "Repeat password"]) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+    expect(screen.queryByLabelText(/company/i)).toBeNull();
+    expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
+    expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("new-password");
+    expect(robotsMeta()).toBe("noindex");
+  });
 
-      // An account form with nothing behind it would pretend registration or
-      // login exists. None of these may appear until they do.
-      expect(document.querySelector("form")).toBeNull();
-      expect(document.querySelector("input, select, textarea")).toBeNull();
-      expect(document.querySelector('button[type="submit"]')).toBeNull();
-      expect(screen.queryByRole("textbox")).toBeNull();
-
-      // A page whose only message is "not yet" stays out of search results.
-      expect(robotsMeta()).toBe("noindex");
-      // And it is a way back, not a dead end.
-      expect(screen.getByRole("link", { name: "Back to the homepage" }).getAttribute("href")).toBe(PATHS.home);
-    },
-  );
+  test("/login is the sign-in form", () => {
+    renderRoute(PATHS.login);
+    expect(pageHeading()).toBe("Sign in");
+    expect(screen.getByLabelText("Email").getAttribute("autocomplete")).toBe("username");
+    expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
+    expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("current-password");
+    expect(screen.getByRole("link", { name: "Forgotten your password?" }).getAttribute("href")).toBe(PATHS.forgotPassword);
+    expect(robotsMeta()).toBe("noindex");
+  });
 
   test("the homepage itself is indexable", () => {
     renderRoute(PATHS.home);

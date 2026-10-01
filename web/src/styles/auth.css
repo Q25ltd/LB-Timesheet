@@ -1,0 +1,175 @@
+/* Account pages: one narrow column, forms in the app's 52px controls. */
+
+.auth {
+  padding-block: var(--space-8);
+  background: var(--background);
+  min-height: 60vh;
+}
+
+.auth__inner {
+  max-width: 34rem;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.auth__title {
+  margin: 0;
+  font-size: clamp(1.75rem, 1.5rem + 1vw, 2.25rem);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.auth__intro {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.auth__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.auth__links a {
+  color: var(--brand-dark);
+}
+
+.auth-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.auth-form__submit {
+  justify-self: start;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.field__label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.field__hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.field__input {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field__input:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.field__input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field__error {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--danger);
+}
+
+.form-message {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+}
+
+.form-message--error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.form-message--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.form-message--info {
+  background: var(--surface-accent);
+  color: var(--text);
+}
+
+.account-block {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.account-block__title {
+  margin: 0;
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.account-block__line {
+  margin: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  justify-self: start;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.badge--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge--warning {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.badge--neutral {
+  background: var(--neutral-selected);
+  color: var(--text);
+}
+
+.company-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.company-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.company-list__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

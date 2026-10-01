@@ -51,7 +51,7 @@ describe("site menu", () => {
     renderRoute(PATHS.home);
     fireEvent.click(toggle());
     fireEvent.click(within(menuPanel()).getByRole("link", { name: "Log in" }));
-    await screen.findByRole("heading", { level: 1, name: "Company login is not available yet" });
+    await screen.findByRole("heading", { level: 1, name: "Sign in" });
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
   });
 
