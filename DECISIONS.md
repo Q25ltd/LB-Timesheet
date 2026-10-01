@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company)
 
 ---
 
@@ -1780,6 +1780,30 @@ D24's `409 EMAIL_IN_USE`.
 - Web registration sends the first message with the account. Delivery from a
   public path runs after the reply (no timing difference), and a failure is
   logged, never swallowed.
+
+### D48 — A company is created by a verified identity, for itself, in one transaction (2026-10-01)
+
+Owner decision (B3). Account registration and company creation stay
+**separate** concepts:
+
+1. a person creates and authenticates their OWN identity (phone or web);
+2. proves ownership of their email (D47);
+3. as that authenticated, verified identity, asks for a company —
+   `POST /companies`, **identity posture**, body exactly `{ name }`;
+4. ONE transaction creates the Company and that person's CompanyMembership
+   with the existing `admin` role — both or neither;
+5. tenant authority comes from the existing exchange,
+   `POST /auth/switch-company` (or login's single-membership auto-select) —
+   creation mints no tenant token.
+
+**Knowledge of an email address never attaches a User to a Company.** The
+request names no email, user or membership; the only account it can touch is
+the caller's. An unverified caller gets D17's generic 403.
+
+**`admin` resolves nothing of O11.** It is the role value the creator's
+membership carries; it confers no authority over other users or memberships,
+no capability is inferred from it, and no company administration is built.
+O11 stays open.
 
 ## ❓ Open — ask the user, do not guess
 

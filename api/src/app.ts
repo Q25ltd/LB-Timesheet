@@ -19,6 +19,8 @@ import { mailerFor, type Mailer } from "./lib/mailer.js";
 import { backgroundWork } from "./lib/backgroundWork.js";
 import { accountTokenRepository, type AccountTokenDatabase } from "./repositories/accountTokenRepository.js";
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
+import { companyRepository, type CompanyDatabase } from "./repositories/companyRepository.js";
+import { registerCompanyRoutes } from "./routes/companies.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -36,7 +38,7 @@ import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & CompanyDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -192,6 +194,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // Email-ownership verification (B4): identity-posture resend, public
   // confirm. The token, not a header, authenticates the confirm.
   registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail);
+
+  // A verified identity creates a company and its own admin membership (B3).
+  // Tenant authority still comes only from /auth/switch-company.
+  registerCompanyRoutes(app, identityRepository(prisma), companyRepository(prisma));
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
