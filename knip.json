@@ -37,7 +37,6 @@
       ],
       "ignoreDependencies": [
         "@prisma/client",
-        "@sendgrid/mail",
         "pdfkit",
         "@types/pdfkit",
         "@types/bcryptjs"

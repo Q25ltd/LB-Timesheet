@@ -21,6 +21,8 @@ import { verificationEmail } from "../lib/authEmails.js";
 import { AppError } from "../lib/errors.js";
 import type { BackgroundLog } from "../lib/backgroundWork.js";
 import type { Mailer } from "../lib/mailer.js";
+import type { SendThrottle } from "../lib/sendThrottle.js";
+import type { AccountTokenPurpose } from "../generated/enums.js";
 import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
 import type { AccountState, IdentityRepository } from "../repositories/identityRepository.js";
 
@@ -41,6 +43,18 @@ export interface AccountMail {
   webAppUrl: string;
   /** Where a failed delivery is recorded; it is never swallowed. */
   log: BackgroundLog;
+  /** B6: at most 3 emails of each purpose per address per hour. */
+  throttles: Record<AccountTokenPurpose, SendThrottle>;
+}
+
+/** What issuing produced: nothing to do, too many already, or a message ready to go. */
+export type VerificationIssue =
+  | { kind: "already-verified" }
+  | { kind: "throttled" }
+  | { kind: "ready"; deliver: () => Promise<void> };
+
+function rateLimited(): AppError {
+  return new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
 }
 
 /**
@@ -56,8 +70,11 @@ export async function issueEmailVerification(
   state: AccountState,
   tokens: AccountTokenRepository,
   mail: AccountMail,
-): Promise<(() => Promise<void>) | null> {
-  if (state.emailVerified) return null;
+): Promise<VerificationIssue> {
+  if (state.emailVerified) return { kind: "already-verified" };
+  // Counted before a token is minted, so a throttled request changes nothing:
+  // the token already in the person's inbox stays the valid one.
+  if (!mail.throttles.email_verification.allow(state.user.email)) return { kind: "throttled" };
 
   const token = mintAccountToken();
   const issuedAt = new Date();
@@ -74,7 +91,7 @@ export async function issueEmailVerification(
     firstName: state.user.firstName,
     link:      `${mail.webAppUrl}/verify-email#token=${token}`,
   });
-  return () => mail.mailer.send(message);
+  return { kind: "ready", deliver: () => mail.mailer.send(message) };
 }
 
 /**
@@ -91,11 +108,13 @@ export async function requestEmailVerification(
   const state = await accounts.findAccountState(userId);
   if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 
-  const deliver = await issueEmailVerification(state, tokens, mail);
-  if (deliver === null) return;
+  const issued = await issueEmailVerification(state, tokens, mail);
+  if (issued.kind === "already-verified") return;
+  // The caller is the account's owner, so the throttle may say so honestly.
+  if (issued.kind === "throttled") throw rateLimited();
 
   try {
-    await deliver();
+    await issued.deliver();
   } catch (error) {
     // The provider's error goes to the server log; the account owner is told
     // only that it did not go, and may ask again (the new token supersedes).

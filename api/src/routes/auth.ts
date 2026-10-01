@@ -32,6 +32,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IdentityContext } from "../lib/auth.js";
+import type { AuthRateLimits } from "../lib/authRateLimits.js";
 import { invalidRequest } from "../lib/requestValidation.js";
 import type { IdentityRepository } from "../repositories/identityRepository.js";
 import type { RefreshRepository } from "../repositories/refreshRepository.js";
@@ -59,10 +60,12 @@ export function registerAuthRoutes(
   app: FastifyInstance,
   accounts: IdentityRepository,
   sessions: RefreshRepository,
+  limits: AuthRateLimits,
 ): void {
   app.post(
     "/auth/register",
-    { config: { authPosture: "public" } },
+    // B6: shares ONE bucket with the browser's registration.
+    { config: { authPosture: "public" }, onRequest: limits.registration },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = RegisterBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
@@ -81,7 +84,7 @@ export function registerAuthRoutes(
     // Public for the same reason registration is: a driver logging in has no
     // token by definition. A stale identity token the phone still holds in
     // memory is irrelevant here and is never verified — the body decides.
-    { config: { authPosture: "public" } },
+    { config: { authPosture: "public" }, onRequest: limits.login },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = LoginBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);

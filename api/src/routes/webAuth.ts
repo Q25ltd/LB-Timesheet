@@ -33,6 +33,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AppError } from "../lib/errors.js";
 import { requireTrustedOrigin } from "../lib/originGuard.js";
+import type { AuthRateLimits } from "../lib/authRateLimits.js";
 import type { BackgroundWork } from "../lib/backgroundWork.js";
 import { invalidRequest, NoBody } from "../lib/requestValidation.js";
 import {
@@ -69,6 +70,7 @@ export async function registerWebAuthRoutes(
   tokens: AccountTokenRepository,
   mail: AccountMail,
   work: BackgroundWork,
+  limits: AuthRateLimits,
 ): Promise<void> {
   await app.register((web, _options, done) => {
     // Every route registered on this scope — today's four and any added
@@ -83,7 +85,7 @@ export async function registerWebAuthRoutes(
 
     web.post(
       `${WEB_AUTH_PREFIX}register`,
-      { config: { authPosture: "public" } },
+      { config: { authPosture: "public" }, onRequest: limits.registration },
       async (request: FastifyRequest, reply: FastifyReply) => {
         const parsed = RegisterBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);
@@ -94,8 +96,8 @@ export async function registerWebAuthRoutes(
         // verification email is sent with the account. Delivery runs after
         // the reply — the account exists either way, a failure is logged,
         // and the account page can send another.
-        const deliver = await issueEmailVerification({ user: result.user, emailVerified: false }, tokens, mail);
-        if (deliver !== null) work.run("email-verification", deliver);
+        const issued = await issueEmailVerification({ user: result.user, emailVerified: false }, tokens, mail);
+        if (issued.kind === "ready") work.run("email-verification", issued.deliver);
 
         const { refreshToken, ...body } = result;
         void reply.header("set-cookie", refreshCookie(cookies, refreshToken, sessionExpiresAt, new Date()));
@@ -105,7 +107,7 @@ export async function registerWebAuthRoutes(
 
     web.post(
       `${WEB_AUTH_PREFIX}login`,
-      { config: { authPosture: "public" } },
+      { config: { authPosture: "public" }, onRequest: limits.login },
       async (request: FastifyRequest, reply: FastifyReply) => {
         const parsed = LoginBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);

@@ -69,6 +69,9 @@ export function forgotPassword(
 ): void {
   const email = normaliseEmail(input.email);
   work.run("password-reset", async () => {
+    // B6, counted per request for the ADDRESS — before the lookup, so an
+    // address with no account is counted exactly like one with an account.
+    if (!mail.throttles.password_reset.allow(email)) return;
     const user = await accounts.findByEmail(email);
     if (user === null) return;
 

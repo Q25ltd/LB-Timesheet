@@ -23,6 +23,8 @@ import { companyRepository, type CompanyDatabase } from "./repositories/companyR
 import { registerCompanyRoutes } from "./routes/companies.js";
 import { passwordRepository, type PasswordDatabase } from "./repositories/passwordRepository.js";
 import { registerPasswordRoutes } from "./routes/password.js";
+import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
+import { sendThrottle } from "./lib/sendThrottle.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -63,7 +65,16 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // await is settled before the app finishes closing.
   const work = backgroundWork(app.log);
   app.addHook("onClose", async () => { await work.settled(); });
-  const mail = { mailer: options.mailer ?? mailerFor(env), webAppUrl: webAppUrl(env), log: app.log };
+  const HOUR_MS = 60 * 60 * 1000;
+  const mail = {
+    mailer:    options.mailer ?? mailerFor(env),
+    webAppUrl: webAppUrl(env),
+    log:       app.log,
+    throttles: {
+      email_verification: sendThrottle({ max: EMAILS_PER_ADDRESS_PER_HOUR, windowMs: HOUR_MS }),
+      password_reset:     sendThrottle({ max: EMAILS_PER_ADDRESS_PER_HOUR, windowMs: HOUR_MS }),
+    },
+  };
   const tokens = accountTokenRepository(prisma);
 
   // An explicit, normalised allowlist — never `origin: true`, which reflects
@@ -165,6 +176,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // own shape and a 500 echoes the exception message to the client.
   registerErrorHandling(app);
 
+  // B6's endpoint-specific limits — one shared hook per policy, built once
+  // the plugin above has decorated the instance.
+  const limits = authRateLimits(app);
+
   // The first protected business routes. Registered AFTER the default-deny
   // hook above, so they inherit it; the explicit `authPosture: "tenant"`
   // inside the route file states the posture where it is read. The repository
@@ -177,7 +192,7 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // `identityRepository` owns User/Session creation and membership reads,
   // `refreshRepository` owns credential resolution and rotation and is the
   // narrow surface that makes F-21's ambiguous lookup unexpressible.
-  registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma));
+  registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma), limits);
 
   // The BROWSER transport for the same lifecycle (D45, D46): the same
   // services and repositories, the refresh credential in an HttpOnly cookie,
@@ -191,11 +206,12 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
     tokens,
     mail,
     work,
+    limits,
   );
 
   // Email-ownership verification (B4): identity-posture resend, public
   // confirm. The token, not a header, authenticates the confirm.
-  registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail);
+  registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail, limits);
 
   // A verified identity creates a company and its own admin membership (B3).
   // Tenant authority still comes only from /auth/switch-company.
@@ -203,7 +219,7 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
 
   // Password recovery and change (B7). Reset revokes every session; change
   // revokes every session but the caller's.
-  registerPasswordRoutes(app, identityRepository(prisma), tokens, passwordRepository(prisma), mail, work);
+  registerPasswordRoutes(app, identityRepository(prisma), tokens, passwordRepository(prisma), mail, work, limits);
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

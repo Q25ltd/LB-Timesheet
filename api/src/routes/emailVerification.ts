@@ -11,6 +11,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IdentityContext } from "../lib/auth.js";
+import type { AuthRateLimits } from "../lib/authRateLimits.js";
 import { invalidRequest, NoBody } from "../lib/requestValidation.js";
 import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
 import type { IdentityRepository } from "../repositories/identityRepository.js";
@@ -32,10 +33,11 @@ export function registerEmailVerificationRoutes(
   accounts: IdentityRepository,
   tokens: AccountTokenRepository,
   mail: AccountMail,
+  limits: AuthRateLimits,
 ): void {
   app.post(
     "/auth/email-verification",
-    { config: { authPosture: "identity" } },
+    { config: { authPosture: "identity" }, onRequest: limits.verificationResend },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = NoBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);

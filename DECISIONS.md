@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change. D50 — endpoint abuse limits)
 
 ---
 
@@ -1827,6 +1827,30 @@ replaces the hash and revokes every **other** session, keeping the caller's.
 names an account other than the token's or the caller's; a company — admin
 or not — has no path to a user's global credential. bcryptjs at cost 12 is
 unchanged (B5); F-28 stays open at its deployment gate.
+
+### D50 — Endpoint-specific abuse limits; no account lockout; proxy trust only on evidence (2026-10-01)
+
+Owner decision (B6). Starting limits, per caller IP:
+
+| Endpoint | Limit |
+|---|---|
+| login — phone and browser, ONE bucket | 10 / minute |
+| registration — phone and browser, one bucket | 5 / hour |
+| forgot password | 5 / hour, plus 3 emails / hour / normalised address |
+| verification resend | 5 / hour, plus 3 emails / hour / normalised address |
+
+- **No account lockout.** Every limit keys on the caller, so exhausting a
+  bucket stops the attacker, never the owner of a named email.
+- The forgot-password per-address throttle is **silent** and counted before
+  any lookup: the response is identical whether or not the address has an
+  account. Resend is identity-posture, so its owner is told (`429`).
+- *Applied in implementation, reported to the owner:* password **change**
+  carries login's limit, because it verifies a password; password **reset**
+  carries no extra limit (256-bit token, dead tokens refused before bcrypt
+  work, the global limit applies).
+- **Proxy trust is set only on evidence.** `trustProxy` stays off until the
+  production proxy topology is established from deployment configuration;
+  local development never trusts a forwarded header. F-15 tracks it.
 
 ## ❓ Open — ask the user, do not guess
 

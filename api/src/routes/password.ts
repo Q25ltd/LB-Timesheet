@@ -11,6 +11,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IdentityContext } from "../lib/auth.js";
+import type { AuthRateLimits } from "../lib/authRateLimits.js";
 import type { BackgroundWork } from "../lib/backgroundWork.js";
 import { invalidRequest } from "../lib/requestValidation.js";
 import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
@@ -39,10 +40,11 @@ export function registerPasswordRoutes(
   passwords: PasswordRepository,
   mail: AccountMail,
   work: BackgroundWork,
+  limits: AuthRateLimits,
 ): void {
   app.post(
     "/auth/password/forgot",
-    { config: { authPosture: "public" } },
+    { config: { authPosture: "public" }, onRequest: limits.passwordForgot },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = ForgotPasswordBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
@@ -66,7 +68,8 @@ export function registerPasswordRoutes(
 
   app.post(
     "/auth/password/change",
-    { config: { authPosture: "identity" } },
+    // Verifies a password: login's surface, so login's limit (B6).
+    { config: { authPosture: "identity" }, onRequest: limits.login },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = ChangePasswordBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
