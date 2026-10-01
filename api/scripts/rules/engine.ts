@@ -149,6 +149,11 @@ const GLOBAL_MODELS = new Set([
   // way to a green build would be to add companyId — silently breaking the
   // frozen contract. Do not "fix" Session by giving it a companyId.
   "Session",
+  // A one-time email credential proves something about the ACCOUNT — that it
+  // owns its address, or may reset its own password (B4, B7). It belongs to
+  // the User; a company has no part in either, and must not (no company may
+  // reset a user's global password).
+  "AccountToken",
 ]);
 
 for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {

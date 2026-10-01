@@ -65,6 +65,7 @@ interface StubUserRow {
   firstName: string;
   lastName: string;
   email: string;
+  emailVerifiedAt: Date | null;
 }
 
 interface StubSessionRow {
@@ -111,6 +112,7 @@ interface StubDatabase {
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<{ timezone: string } | null> };
+  accountToken: { upsert(): Promise<never>; findUnique(): Promise<null> };
   $transaction(): Promise<never>;
 }
 
@@ -146,6 +148,10 @@ function noRows(): StubDatabase {
       findFirst: () => Promise.resolve(null),
     },
     company:      { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    accountToken: {
+      upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
+      findUnique: () => Promise.resolve(null),
+    },
     $transaction: write("transactional"),
   };
 }

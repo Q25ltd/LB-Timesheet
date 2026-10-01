@@ -105,6 +105,11 @@ const BaseEnv = z.object({
   MAIL_FROM:        z.string().max(320).default("timesheets@logisticbay.com"),
   /** Comma-separated origins allowed to call this API. */
   WEB_ORIGIN:       z.string().max(2000).default(""),
+  /**
+   * The ONE web origin emailed links point at (verification, password reset).
+   * Required outside dev/test, and must be one of the allowed origins.
+   */
+  WEB_APP_URL:      z.string().max(2000).default(""),
   PORT:             z.coerce.number().int().positive().max(65535).default(3000),
   /** Optional on purpose — see isDevLike. */
   NODE_ENV:         z.enum(NODE_ENVS).optional(),
@@ -139,6 +144,28 @@ export const EnvSchema = BaseEnv
           code: "custom",
           path: ["MAIL_FROM"],
           message: `MAIL_FROM must be a plain email address, got "${value.MAIL_FROM}"`,
+        });
+      }
+    }
+
+    // An emailed link is a credential delivered to a person: it must point at
+    // the product's own web app, never at a guess. Validated against the same
+    // allowlist the API trusts, so a link can only ever name an origin the
+    // Origin guard would also accept.
+    const appUrl = value.WEB_APP_URL.trim();
+    if (!devLike && appUrl === "") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["WEB_APP_URL"],
+        message: "WEB_APP_URL is required unless NODE_ENV is explicitly development or test (the https web origin emailed links open)",
+      });
+    } else if (appUrl !== "") {
+      const normalised = normaliseOrigin(appUrl, { allowInsecureLocalhost: devLike });
+      if (normalised === null || normalised !== appUrl || !allowedOrigins(value).includes(normalised)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["WEB_APP_URL"],
+          message: `"${appUrl}" must be exactly one of the allowed web origins (WEB_ORIGIN)`,
         });
       }
     }
@@ -196,6 +223,16 @@ export function allowedOrigins(env: { WEB_ORIGIN: string; NODE_ENV?: NodeEnv | u
     .map(origin => normaliseOrigin(origin, { allowInsecureLocalhost: devLike }))
     .filter((origin): origin is string => origin !== null);
   return [...new Set(normalised)];
+}
+
+/**
+ * The web origin emailed links open. The configured value — already proven by
+ * the schema to be one of the allowed origins — or, in development and test
+ * only, the Vite dev server.
+ */
+export function webAppUrl(env: { WEB_APP_URL: string }): string {
+  const configured = env.WEB_APP_URL.trim();
+  return configured !== "" ? configured : DEV_ORIGINS[0];
 }
 
 /** Human-readable reason a set of environment values is unusable. */

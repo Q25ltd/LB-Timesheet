@@ -503,7 +503,8 @@ test("D13. the identity token authenticates the account against the REAL persist
   assert.equal(me.statusCode, 200, "the token just issued must authenticate against the row just written");
   assert.deepEqual(
     me.body,
-    { user: { id: body.user.id, firstName: "Real", lastName: "Session", email }, memberships: [] },
+    // A phone-registered account has proved nothing about its address (D47).
+    { user: { id: body.user.id, firstName: "Real", lastName: "Session", email }, emailVerified: false, memberships: [] },
     "and describe the zero-membership account exactly",
   );
 

@@ -140,6 +140,8 @@ export async function register(
 /** The account state an identity-authenticated request may read (D21). */
 export interface AccountView {
   user: AccountUser;
+  /** Whether the account has proved ownership of its email (B4). */
+  emailVerified: boolean;
   memberships: AccountMembership[];
 }
 
@@ -151,15 +153,15 @@ export interface AccountView {
  * here would reintroduce the "0 memberships → denied" rule D21 superseded.
  */
 export async function accountView(userId: string, accounts: IdentityRepository): Promise<AccountView> {
-  const [user, memberships] = await Promise.all([
-    accounts.findById(userId),
+  const [state, memberships] = await Promise.all([
+    accounts.findAccountState(userId),
     accounts.listActiveMemberships(userId),
   ]);
 
   // The session authenticated, but the account behind it is gone. Not a
   // client error to explain — the identity is simply no longer valid, and it
   // fails exactly as every other authentication failure does.
-  if (user === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
+  if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 
-  return { user, memberships };
+  return { user: state.user, emailVerified: state.emailVerified, memberships };
 }

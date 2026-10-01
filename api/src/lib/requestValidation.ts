@@ -1,4 +1,4 @@
-import type { ZodError } from "zod";
+import { z, type ZodError } from "zod";
 import { AppError } from "./errors.js";
 
 /**
@@ -17,3 +17,11 @@ export function invalidRequest(error: ZodError): AppError {
   }));
   return new AppError(400, "Invalid request", "VALIDATION", details);
 }
+
+/**
+ * A request that must carry NOTHING in its body — refresh and logout through
+ * the cookie, an identity-authenticated resend. An offered field is refused as
+ * malformed rather than silently ignored, so a secret sent in a body is never
+ * mistaken for the credential the route actually reads.
+ */
+export const NoBody = z.object({}).strict().optional();

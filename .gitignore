@@ -10,3 +10,6 @@ api/src/generated/
 .vercel
 .expo/
 coverage/
+
+# Development-only account emails (api/src/lib/mailer.ts)
+api/.mail-outbox/

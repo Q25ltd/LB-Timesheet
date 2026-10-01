@@ -85,6 +85,17 @@ interface UserRow {
   firstName: string;
   lastName: string;
   email: string;
+  emailVerifiedAt: Date | null;
+}
+
+/**
+ * The account and whether it has PROVED ownership of its email (B4). A
+ * boolean leaves this boundary, never the timestamp: the client needs to know
+ * whether, not when.
+ */
+export interface AccountState {
+  user: AccountUser;
+  emailVerified: boolean;
 }
 
 /**
@@ -220,10 +231,10 @@ export function identityRepository(db: IdentityDatabase) {
       return row === null ? null : accountUser(row);
     },
 
-    /** The account behind an authenticated identity, or null if it is gone. */
-    async findById(userId: string): Promise<AccountUser | null> {
+    /** The account behind an authenticated identity, and its verification state, or null if it is gone. */
+    async findAccountState(userId: string): Promise<AccountState | null> {
       const row = await db.user.findUnique({ where: { id: userId } });
-      return row === null ? null : accountUser(row);
+      return row === null ? null : { user: accountUser(row), emailVerified: row.emailVerifiedAt !== null };
     },
 
     /**

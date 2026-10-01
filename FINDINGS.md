@@ -27,8 +27,9 @@ now, the current risk, and the **lifecycle gate** at which it must be resolved â
 that is intentional and will not be fixed is `ACCEPTED` with its reason, not
 `DEFERRED`. Deferral without a trigger is a forgotten defect wearing a status.
 
-**Deferred planned features are not findings.** Email verification is unbuilt
-planned work governed by D24, not a defect, and deliberately has no F-number.
+**Deferred planned features are not findings.** Email verification was unbuilt
+planned work governed by D24, not a defect, and deliberately had no F-number;
+it is now built (D47, 2026-10-01).
 `F-31` remains the next free ID.
 
 | ID | Finding | Status | Resolution / owner | Evidence |

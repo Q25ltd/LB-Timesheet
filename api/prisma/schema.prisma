@@ -51,6 +51,12 @@ enum SessionClientKind {
   browser
 }
 
+/// What a one-time AccountToken proves when it is redeemed (B4, B7).
+enum AccountTokenPurpose {
+  email_verification
+  password_reset
+}
+
 enum ShiftStatus {
   draft     /// created; checks not yet complete
   active    /// day underway
@@ -123,11 +129,46 @@ model User {
   lastName     String
 
   passwordHash String
+
+  /// When the account PROVED it owns `email`, by redeeming an
+  /// email_verification AccountToken (B4). Null means unproven — not "false",
+  /// not "pending": nothing is known. The FIRST verification is kept. Login
+  /// does not require it; company creation does.
+  emailVerifiedAt DateTime?
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  memberships  CompanyMembership[]
-  sessions     Session[]
+  memberships   CompanyMembership[]
+  sessions      Session[]
+  accountTokens AccountToken[]
+}
+
+/// A one-time credential sent by email: email verification (24 hours) or
+/// password reset (30 minutes) — owner decisions B4, B7.
+///
+/// The token itself is 32 random bytes that exist only in the email; this row
+/// holds its SHA-256 digest. ONE row per user and purpose (the unique key
+/// below): issuing a new token REPLACES the old one in place, so a superseded
+/// token's digest no longer exists anywhere and cannot be redeemed.
+/// Redemption is one conditional write — unconsumed, unexpired, this digest —
+/// so a token is used at most once even under concurrency. Lifetimes are
+/// enforced by CHECK constraints in the migration, not only by the code that
+/// computes them.
+model AccountToken {
+  id         String              @id @default(cuid())
+  userId     String
+  purpose    AccountTokenPurpose
+  /// SHA-256 of the emailed secret — never the secret.
+  tokenHash  String              @unique
+  issuedAt   DateTime
+  expiresAt  DateTime
+  /// Set once, by redemption. Null = not yet used.
+  consumedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, purpose])
 }
 
 /// One authenticated device/login for a User (AUTH.md). Deliberately has NO

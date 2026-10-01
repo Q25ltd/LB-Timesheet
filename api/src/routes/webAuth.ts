@@ -31,17 +31,19 @@
  * forgotten (D45's CSRF baseline).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { z } from "zod";
 import { AppError } from "../lib/errors.js";
 import { requireTrustedOrigin } from "../lib/originGuard.js";
-import { invalidRequest } from "../lib/requestValidation.js";
+import type { BackgroundWork } from "../lib/backgroundWork.js";
+import { invalidRequest, NoBody } from "../lib/requestValidation.js";
 import {
   clearedRefreshCookie,
   readRefreshCookie,
   refreshCookie,
   type RefreshCookiePolicy,
 } from "../lib/refreshCookie.js";
+import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
 import type { IdentityRepository } from "../repositories/identityRepository.js";
+import { issueEmailVerification, type AccountMail } from "../services/emailVerification.js";
 import type { RefreshRepository } from "../repositories/refreshRepository.js";
 import { LoginBody, login } from "../services/login.js";
 import { logoutByCredential, refresh } from "../services/refresh.js";
@@ -52,14 +54,6 @@ import { RegisterBody, register } from "../services/registration.js";
  * credentialed CORS to exactly these paths and no others (D45).
  */
 export const WEB_AUTH_PREFIX = "/auth/web/";
-
-/**
- * Refresh and logout take NOTHING in a body. A secret offered in a body is not
- * the cookie transport and is refused as a malformed request, rather than
- * silently ignored — the cookie is the only place this route reads a
- * credential from.
- */
-const EmptyBody = z.object({}).strict().optional();
 
 /** The one failure, identical to every other authentication failure (D17). */
 function notAuthenticated(): AppError {
@@ -72,6 +66,9 @@ export async function registerWebAuthRoutes(
   sessions: RefreshRepository,
   cookies: RefreshCookiePolicy,
   allowedOrigins: readonly string[],
+  tokens: AccountTokenRepository,
+  mail: AccountMail,
+  work: BackgroundWork,
 ): Promise<void> {
   await app.register((web, _options, done) => {
     // Every route registered on this scope — today's four and any added
@@ -92,6 +89,14 @@ export async function registerWebAuthRoutes(
         if (!parsed.success) throw invalidRequest(parsed.error);
 
         const { result, sessionExpiresAt } = await register(parsed.data, "browser", accounts, app.jwt);
+
+        // A company-to-be starts by proving its address (B3, B4): the first
+        // verification email is sent with the account. Delivery runs after
+        // the reply — the account exists either way, a failure is logged,
+        // and the account page can send another.
+        const deliver = await issueEmailVerification({ user: result.user, emailVerified: false }, tokens, mail);
+        if (deliver !== null) work.run("email-verification", deliver);
+
         const { refreshToken, ...body } = result;
         void reply.header("set-cookie", refreshCookie(cookies, refreshToken, sessionExpiresAt, new Date()));
         return reply.status(201).send(body);
@@ -116,7 +121,7 @@ export async function registerWebAuthRoutes(
       `${WEB_AUTH_PREFIX}refresh`,
       { config: { authPosture: "public" } },
       async (request: FastifyRequest, reply: FastifyReply) => {
-        const parsed = EmptyBody.safeParse(request.body);
+        const parsed = NoBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);
 
         // Cleared up front: on every refusal below the browser is told to drop
@@ -138,7 +143,7 @@ export async function registerWebAuthRoutes(
       `${WEB_AUTH_PREFIX}logout`,
       { config: { authPosture: "public" } },
       async (request: FastifyRequest, reply: FastifyReply) => {
-        const parsed = EmptyBody.safeParse(request.body);
+        const parsed = NoBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);
 
         void reply.header("set-cookie", clearedRefreshCookie(cookies));

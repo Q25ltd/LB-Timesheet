@@ -1,0 +1,111 @@
+/**
+ * Email-ownership verification (owner decision B4, 2026-10-01).
+ *
+ * Proving an address is a property of the ACCOUNT. It does not gate login —
+ * an unverified account authenticates exactly as before, on the phone and in
+ * the browser — and it is what company creation requires, because a company
+ * must not gain authority over an account merely because that account claimed
+ * an address (D24).
+ *
+ *   request  identity-authenticated: (re)send to MY address. There is no
+ *            "send to this email" form, so this cannot be pointed at someone
+ *            else's mailbox and says nothing about whether other accounts
+ *            exist.
+ *   confirm  public: the emailed TOKEN is the credential. Every refusal —
+ *            unknown, tampered, superseded, used, expired — is one identical
+ *            400, so the endpoint cannot be probed for which.
+ */
+import { z } from "zod";
+import { ACCOUNT_TOKEN_LIFETIME_MS, hashAccountToken, mintAccountToken } from "../lib/accountToken.js";
+import { verificationEmail } from "../lib/authEmails.js";
+import { AppError } from "../lib/errors.js";
+import type { BackgroundLog } from "../lib/backgroundWork.js";
+import type { Mailer } from "../lib/mailer.js";
+import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
+import type { AccountState, IdentityRepository } from "../repositories/identityRepository.js";
+
+/**
+ * Exactly one field. A token is 43 base64url characters; the cap is
+ * CLAUDE.md's 64 for a code or reference.
+ */
+export const ConfirmEmailBody = z.object({
+  token: z.string().min(1).max(64),
+}).strict();
+
+export type ConfirmEmailInput = z.infer<typeof ConfirmEmailBody>;
+
+/** Where the emailed link points, and how a message leaves. */
+export interface AccountMail {
+  mailer: Mailer;
+  /** The web origin links open — `WEB_APP_URL`, validated against the allowlist. */
+  webAppUrl: string;
+  /** Where a failed delivery is recorded; it is never swallowed. */
+  log: BackgroundLog;
+}
+
+/**
+ * Issue a verification token for this account and return the message that
+ * carries it, or null when the account is already verified. The caller
+ * decides whether delivery is awaited or runs after the reply.
+ *
+ * The token travels in the link's FRAGMENT (`#token=`), which a browser never
+ * sends to a server: it cannot land in the web host's access logs or in a
+ * `Referer`. The web page reads it and posts it to `confirm`.
+ */
+export async function issueEmailVerification(
+  state: AccountState,
+  tokens: AccountTokenRepository,
+  mail: AccountMail,
+): Promise<(() => Promise<void>) | null> {
+  if (state.emailVerified) return null;
+
+  const token = mintAccountToken();
+  const issuedAt = new Date();
+  await tokens.issue({
+    userId:    state.user.id,
+    purpose:   "email_verification",
+    tokenHash: hashAccountToken(token),
+    issuedAt,
+    expiresAt: new Date(issuedAt.getTime() + ACCOUNT_TOKEN_LIFETIME_MS.email_verification),
+  });
+
+  const message = verificationEmail({
+    to:        state.user.email,
+    firstName: state.user.firstName,
+    link:      `${mail.webAppUrl}/verify-email#token=${token}`,
+  });
+  return () => mail.mailer.send(message);
+}
+
+/**
+ * `POST /auth/email-verification` — identity posture. Delivery is AWAITED:
+ * the caller is the account owner, so there is nothing to hide, and a failure
+ * is reported to them honestly rather than swallowed.
+ */
+export async function requestEmailVerification(
+  userId: string,
+  accounts: IdentityRepository,
+  tokens: AccountTokenRepository,
+  mail: AccountMail,
+): Promise<void> {
+  const state = await accounts.findAccountState(userId);
+  if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
+
+  const deliver = await issueEmailVerification(state, tokens, mail);
+  if (deliver === null) return;
+
+  try {
+    await deliver();
+  } catch (error) {
+    // The provider's error goes to the server log; the account owner is told
+    // only that it did not go, and may ask again (the new token supersedes).
+    mail.log.error({ err: error, task: "email-verification" }, "verification email could not be sent");
+    throw new AppError(503, "The email could not be sent. Try again shortly.", "EMAIL_UNAVAILABLE");
+  }
+}
+
+/** `POST /auth/email-verification/confirm` — public; the token is the credential. */
+export async function confirmEmail(input: ConfirmEmailInput, tokens: AccountTokenRepository): Promise<void> {
+  const redeemed = await tokens.redeemEmailVerification(hashAccountToken(input.token), new Date());
+  if (!redeemed) throw new AppError(400, "This link is invalid or has expired", "TOKEN_INVALID");
+}

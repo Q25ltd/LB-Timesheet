@@ -6,6 +6,7 @@ import {
   allowedOrigins,
   normaliseOrigin,
   splitOrigins,
+  webAppUrl,
   DEV_ORIGINS,
 } from "./env.schema.js";
 
@@ -18,6 +19,7 @@ const prod = {
   ...valid,
   NODE_ENV: "production",
   WEB_ORIGIN: "https://timesheets.logisticbay.com",
+  WEB_APP_URL: "https://timesheets.logisticbay.com",
   SENDGRID_API_KEY: "SG.fake-but-present-for-tests",
   MAIL_FROM: "timesheets@logisticbay.com",
 };
@@ -241,4 +243,28 @@ test("splitOrigins trims whitespace and drops empty entries", () => {
   assert.deepEqual(splitOrigins(" https://a.com , https://b.com ,, "), ["https://a.com", "https://b.com"]);
   assert.deepEqual(splitOrigins(""), []);
   assert.deepEqual(splitOrigins("   "), []);
+});
+
+// ── WEB_APP_URL: where emailed links point (B4, B7) ──────────────────────────
+
+test("production without WEB_APP_URL fails closed — an emailed link must not point at a guess", () => {
+  const { WEB_APP_URL: _omitted, ...withoutUrl } = prod;
+  const result = EnvSchema.safeParse(withoutUrl);
+  assert.equal(result.success, false);
+  assert.match(describeEnvFailure(result.error), /WEB_APP_URL is required/);
+});
+
+test("WEB_APP_URL must be one of the allowed web origins, exactly", () => {
+  for (const url of ["https://evil.example.com", "https://app.timesheets.logisticbay.com", "http://timesheets.logisticbay.com", "https://timesheets.logisticbay.com/app"]) {
+    const result = EnvSchema.safeParse({ ...prod, WEB_APP_URL: url });
+    assert.equal(result.success, false, `${url} must be refused`);
+  }
+  assert.equal(webAppUrl(EnvSchema.parse(prod)), "https://timesheets.logisticbay.com");
+});
+
+test("development and test default WEB_APP_URL to the Vite dev server", () => {
+  for (const NODE_ENV of ["development", "test"] as const) {
+    const parsed = EnvSchema.parse({ ...valid, NODE_ENV });
+    assert.equal(webAppUrl(parsed), DEV_ORIGINS[0]);
+  }
 });

@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification)
 
 ---
 
@@ -537,8 +537,10 @@ rule that exists ("At least 10 characters") and no implementation detail.
 
 ### D24 — Duplicate email answers 409; email ownership is unproven until verified (2026-09-10)
 
-**The 409 is implemented in Registration Increment 1. Email verification is
-deliberately still absent** — that is the decision, not an omission.
+**The 409 is implemented in Registration Increment 1.** ~~Email verification is
+deliberately still absent — that is the decision, not an omission.~~
+*(2026-10-01: email verification is built — D47. The 409 is unchanged and
+remains the accepted trade-off.)*
 
 Registering an email that already exists returns **`409 EMAIL_IN_USE`** and
 nothing else — no user id, no name, no account status, no membership or
@@ -1750,6 +1752,34 @@ times a week; a weekly sign-in costs little, bounds a stolen cookie's life, and
 fits the existing absolute model with no idle-tracking schema. The phone's 90
 days were chosen for a driver offline for whole shifts and away for weeks, and
 are not carried over.
+
+### D47 — Email ownership is proved by a one-time emailed token; it gates company creation, not login (2026-10-01)
+
+Owner decision (B4). Builds the verification D24 deferred, without changing
+D24's `409 EMAIL_IN_USE`.
+
+- **`User.emailVerifiedAt DateTime?`** — when the account proved it owns its
+  address. NULL means unproven; the FIRST verification time is kept.
+- **Login does not require it** — on the phone or in the browser. No existing
+  account is locked out, and the mobile contract is unchanged (phone
+  registration sends no email).
+- **Company creation requires it** (B3): a company must not gain authority
+  over an account merely because that account claimed an address (D24's
+  recorded requirement). Future company-sensitive operations may require it
+  when they are designed.
+- **The token:** 32 random bytes, delivered only in an emailed link, carried
+  in the URL FRAGMENT so it never reaches a web server's logs; stored ONLY as
+  a SHA-256 digest (`AccountToken`); **24-hour** expiry fixed at issue;
+  single use; one row per user and purpose, so a newer issue **replaces** the
+  older; redemption is one conditional write that also stamps
+  `emailVerifiedAt`. The lifetime is also a database CHECK.
+- **Resend is identity-authenticated** — "send to MY address" — so it cannot
+  be aimed at someone else's mailbox and reveals nothing about other
+  accounts. Confirmation is public: the token is the credential, and every
+  refusal (unknown, tampered, superseded, used, expired) is one identical 400.
+- Web registration sends the first message with the account. Delivery from a
+  public path runs after the reply (no timing difference), and a failure is
+  logged, never swallowed.
 
 ## ❓ Open — ask the user, do not guess
 

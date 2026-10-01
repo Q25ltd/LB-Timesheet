@@ -47,6 +47,10 @@ const db = {
     // the test never asked for.
     create: () => Promise.reject(new Error("user.create is not part of this test")),
   },
+  accountToken: {
+    upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
+    findUnique: () => Promise.resolve(null),
+  },
   $transaction: () => Promise.reject(new Error("$transaction is not part of this test")),
 };
 

@@ -134,6 +134,7 @@ interface UserRow {
   firstName: string;
   lastName: string;
   email: string;
+  emailVerifiedAt: Date | null;
 }
 
 function driverRow(): UserRow {
@@ -142,6 +143,7 @@ function driverRow(): UserRow {
     firstName: "Nerijus",
     lastName:  "Kuizinas",
     email:     "driver@example.com",
+    emailVerifiedAt: null,
   };
 }
 
@@ -160,6 +162,7 @@ function otherUserRow(): UserRow {
     firstName: "Someone",
     lastName:  "Else",
     email:     "someone.else@example.com",
+    emailVerifiedAt: null,
   };
 }
 
@@ -200,6 +203,7 @@ interface AuthReads {
   company: { findUnique(): Promise<{ timezone: string } | null> };
   // Every WRITE rejects: no case in this file may reach persistence, so a
   // call landing here is itself the failure rather than a setup gap.
+  accountToken: { upsert(): Promise<never>; findUnique(): Promise<null> };
   $transaction(): Promise<never>;
 }
 
@@ -233,6 +237,10 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    accountToken: {
+      upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
+      findUnique: () => Promise.resolve(null),
+    },
     $transaction: () => Promise.reject(new Error("no case in routes/auth.test.ts may reach persistence")),
   };
 }
@@ -442,6 +450,8 @@ const MeSnapshot = z.object({
     lastName:  z.string().max(200),
     email:     z.string().max(320),
   }).strict(),
+  // B4: whether the account has proved its address — a boolean, never a date.
+  emailVerified: z.boolean(),
   memberships: z.array(z.unknown()),
 }).strict();
 
@@ -464,6 +474,7 @@ test("R11. a valid identity token and live session authenticate an account that 
     email:     "driver@example.com",
   });
   assert.deepEqual(me.memberships, [], "zero memberships is a legitimate authenticated state, expressed as an empty list");
+  assert.equal(me.emailVerified, false, "an account with no emailVerifiedAt reports unverified");
 });
 
 test("R12. the identity response never carries tenant identity", async () => {

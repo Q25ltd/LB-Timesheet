@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
-import { allowedOrigins } from "./lib/env.schema.js";
+import { allowedOrigins, webAppUrl } from "./lib/env.schema.js";
 import { AppError, registerErrorHandling } from "./lib/errors.js";
 import { requireAuth, requireSession } from "./lib/auth.js";
 import { TENANT_VERIFY_OPTIONS } from "./lib/tokens.js";
@@ -15,6 +15,10 @@ import { registerShiftRoutes } from "./routes/shifts.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerWebAuthRoutes, WEB_AUTH_PREFIX } from "./routes/webAuth.js";
 import { refreshCookiePolicy } from "./lib/refreshCookie.js";
+import { mailerFor, type Mailer } from "./lib/mailer.js";
+import { backgroundWork } from "./lib/backgroundWork.js";
+import { accountTokenRepository, type AccountTokenDatabase } from "./repositories/accountTokenRepository.js";
+import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -32,14 +36,31 @@ import { refreshCookiePolicy } from "./lib/refreshCookie.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
-export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
+/**
+ * What a caller may supply instead of the environment's choice. Only tests
+ * use it — to read the account emails the app sends — and production passes
+ * nothing, so its mailer is always `mailerFor(env)`.
+ */
+export interface AppOptions {
+  mailer?: Mailer;
+}
+
+export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: env.NODE_ENV === "development" ? { transport: undefined, level: "info" } : true,
   });
+
+  // Account emails (B4, B7). The mailer is chosen here, when the app is
+  // built — never at import time — and work a request starts but does not
+  // await is settled before the app finishes closing.
+  const work = backgroundWork(app.log);
+  app.addHook("onClose", async () => { await work.settled(); });
+  const mail = { mailer: options.mailer ?? mailerFor(env), webAppUrl: webAppUrl(env), log: app.log };
+  const tokens = accountTokenRepository(prisma);
 
   // An explicit, normalised allowlist — never `origin: true`, which reflects
   // whatever Origin the caller sent and lets any site read the response. The
@@ -163,7 +184,14 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
     refreshRepository(prisma),
     refreshCookiePolicy(env.NODE_ENV),
     origins,
+    tokens,
+    mail,
+    work,
   );
+
+  // Email-ownership verification (B4): identity-posture resend, public
+  // confirm. The token, not a header, authenticates the confirm.
+  registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail);
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

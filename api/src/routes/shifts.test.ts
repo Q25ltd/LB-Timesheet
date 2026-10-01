@@ -99,7 +99,7 @@ function fixtures(options: { active?: boolean } = {}) {
     user: {
       findUnique: () => Promise.resolve({
         id: USER_ID, email: "fixture-driver@example.com",
-        firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME,
+        firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME, emailVerifiedAt: null,
       }),
       // Login's credential read. Declared because `AppDatabase` requires it;
       // no case in this Start Shift file logs in.
@@ -110,6 +110,10 @@ function fixtures(options: { active?: boolean } = {}) {
       count:     () => Promise.resolve(0),
       create:    () => Promise.reject(new Error("shift.create must not be reached by a refused request")),
       findFirst: () => Promise.resolve(null),
+    },
+    accountToken: {
+      upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
+      findUnique: () => Promise.resolve(null),
     },
     $transaction: () => Promise.reject(new Error("$transaction must not be reached by a refused request")),
   };
