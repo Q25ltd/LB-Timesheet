@@ -143,7 +143,7 @@ test("Company.timezone is NOT NULL and PostgreSQL refuses to blank it", async ()
   assert.equal(facts?.isNullable, "NO", "a company without a timezone must not be representable");
 
   const company = await prisma.company.create({
-    data: { name: `${TAG}-not-null`, joinCode: `${TAG}-not-null` },
+    data: { name: `${TAG}-not-null` },
   });
 
   let caught: unknown = null;
@@ -163,7 +163,7 @@ test("Company.timezone is NOT NULL and PostgreSQL refuses to blank it", async ()
 // ── 3 & 4. The V1 default exists in the database, and is a real zone ────────
 test("a Company created without a timezone gets the V1 default Europe/London", async () => {
   const company = await prisma.company.create({
-    data: { name: `${TAG}-default`, joinCode: `${TAG}-default` },
+    data: { name: `${TAG}-default` },
   });
   assert.equal(company.timezone, "Europe/London");
 
@@ -190,7 +190,7 @@ test("the column default stored in PostgreSQL is a real IANA identifier", async 
 test("a materially non-UK company timezone persists verbatim", async () => {
   for (const timezone of ["Europe/Vilnius", "America/New_York", "Asia/Dubai", "Australia/Sydney"]) {
     const company = await prisma.company.create({
-      data: { name: `${TAG}-${timezone}`, joinCode: `${TAG}-${timezone}`, timezone },
+      data: { name: `${TAG}-${timezone}`, timezone },
     });
     const persisted = await prisma.company.findUniqueOrThrow({ where: { id: company.id } });
     assert.equal(

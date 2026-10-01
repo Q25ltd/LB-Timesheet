@@ -632,7 +632,7 @@ test("F3. F-21: end to end, the two possible precedences give OPPOSITE observabl
 
 test("R14. refresh issues no tenant token, even for a driver who holds an active membership", async () => {
   const driver = await registeredDriver();
-  const company = await prisma.company.create({ data: { name: `${TAG}-co`, joinCode: `${TAG}-join-${String(seq)}` } });
+  const company = await prisma.company.create({ data: { name: `${TAG}-co` } });
   await prisma.companyMembership.create({
     data: { companyId: company.id, userId: driver.userId, role: "driver", active: true },
   });

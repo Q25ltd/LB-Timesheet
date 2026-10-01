@@ -51,8 +51,8 @@ async function cleanup(): Promise<void> {
 
 before(async () => {
   await cleanup();
-  const a = await prisma.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A` } });
-  const b = await prisma.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B` } });
+  const a = await prisma.company.create({ data: { name: `${TAG}-A` } });
+  const b = await prisma.company.create({ data: { name: `${TAG}-B` } });
   const d = await prisma.user.create({
     data: { email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
   });

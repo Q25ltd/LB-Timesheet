@@ -118,7 +118,7 @@ async function deviceFrom(result: Injected): Promise<Device> {
 async function seedMembership(userId: string, label: string): Promise<{ companyId: string; membershipId: string }> {
   seq += 1;
   const company = await prisma.company.create({
-    data: { name: `${TAG}-${label}`, joinCode: `${TAG}-join-${String(seq)}` },
+    data: { name: `${TAG}-${label}` },
   });
   const membership = await prisma.companyMembership.create({
     data: { companyId: company.id, userId, role: "driver", active: true },

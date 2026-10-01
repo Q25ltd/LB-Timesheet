@@ -107,8 +107,8 @@ async function main(url: string): Promise<void> {
         throw new Error(`${description}: expected rejection with code ${expectedCode}, but the write succeeded`);
       }
 
-      const company = await tx.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A` } });
-      const otherCompany = await tx.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B` } });
+      const company = await tx.company.create({ data: { name: `${TAG}-A` } });
+      const otherCompany = await tx.company.create({ data: { name: `${TAG}-B` } });
       const driver = await tx.user.create({
         data: { email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
       });

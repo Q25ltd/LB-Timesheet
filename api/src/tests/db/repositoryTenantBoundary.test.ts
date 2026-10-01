@@ -43,8 +43,8 @@ async function cleanup(): Promise<void> {
 
 before(async () => {
   await cleanup();
-  const companyA = await prisma.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A` } });
-  const companyB = await prisma.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B` } });
+  const companyA = await prisma.company.create({ data: { name: `${TAG}-A` } });
+  const companyB = await prisma.company.create({ data: { name: `${TAG}-B` } });
   // One driver per company — the one-open-shift invariant is per USER, so two
   // concurrent open shifts need two people.
   const driverA = await prisma.user.create({

@@ -7,7 +7,7 @@
  * or more, and absent for none.
  *
  * Memberships are seeded DIRECTLY. No onboarding exists — there is no
- * invitation flow and `Company.joinCode` is unused and blocked by F-18 — so
+ * invitation flow, and `Company.joinCode` was removed unused (F-18) — so
  * a fixture is the only way to reach these branches. That is a statement
  * about the product's current surface, not a shortcut: every assertion below
  * runs against the real routes and the real repositories.
@@ -111,7 +111,7 @@ async function seedMembership(
   seq += 1;
   const companyName = `${TAG}-${label}`;
   const company = await prisma.company.create({
-    data: { name: companyName, joinCode: `${TAG}-join-${String(seq)}` },
+    data: { name: companyName },
   });
   const membership = await prisma.companyMembership.create({
     data: { companyId: company.id, userId, role: "driver", active },

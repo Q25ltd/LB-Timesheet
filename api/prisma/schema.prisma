@@ -57,8 +57,6 @@ model Company {
   name         String
   /// Where completed timesheet PDFs are emailed.
   reportEmail  String?
-  /// Code a driver enters to join this company (D12).
-  joinCode     String    @unique
   /// trial | active | past_due | cancelled
   status       String    @default("trial")
 

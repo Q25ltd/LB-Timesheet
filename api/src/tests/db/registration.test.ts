@@ -390,7 +390,7 @@ test("D8. a registered driver has ZERO memberships and ZERO shifts — no tenant
   // The fake-tenant failure mode this forbids: a Company created to hang a
   // "personal" membership off. Nothing registered may have created one.
   assert.equal(
-    await prisma.company.count({ where: { OR: [{ name: { contains: email } }, { joinCode: { contains: email } }] } }),
+    await prisma.company.count({ where: { name: { contains: email } } }),
     0,
     "no Company may be created by a driver registration",
   );

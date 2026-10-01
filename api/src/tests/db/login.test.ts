@@ -500,7 +500,7 @@ test("L20. a driver whose ONLY membership is inactive authenticates with identit
   assert.ok(account !== null, "registration must have persisted the account");
 
   const company = await prisma.company.create({
-    data: { name: `${TAG}-inactive-co`, joinCode: `${TAG}-join-${String(seq)}` },
+    data: { name: `${TAG}-inactive-co` },
   });
   await prisma.companyMembership.create({
     data: { companyId: company.id, userId: account.id, role: "driver", active: false },

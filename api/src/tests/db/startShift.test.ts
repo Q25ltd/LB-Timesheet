@@ -147,8 +147,8 @@ async function cleanup(): Promise<void> {
 
 before(async () => {
   await cleanup();
-  const a = await prisma.company.create({ data: { name: `${TAG}-A`, joinCode: `${TAG}-A`, timezone: LONDON } });
-  const b = await prisma.company.create({ data: { name: `${TAG}-B`, joinCode: `${TAG}-B`, timezone: SYDNEY } });
+  const a = await prisma.company.create({ data: { name: `${TAG}-A`, timezone: LONDON } });
+  const b = await prisma.company.create({ data: { name: `${TAG}-B`, timezone: SYDNEY } });
   companyA = a.id;
   companyB = b.id;
 });
