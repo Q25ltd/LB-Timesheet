@@ -173,3 +173,8 @@
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+
+/* A lone action in the column sizes to its label rather than the column. */
+.auth__inner > .button {
+  justify-self: start;
+}

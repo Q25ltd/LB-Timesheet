@@ -13,3 +13,7 @@ coverage/
 
 # Development-only account emails (api/src/lib/mailer.ts)
 api/.mail-outbox/
+
+# Playwright output (web/playwright.config.ts)
+web/test-results/
+web/playwright-report/

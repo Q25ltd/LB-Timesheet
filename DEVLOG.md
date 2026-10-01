@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-10-01 — Company / web authentication (D46–D50)
+
+**Decided by the owner at the session's stop (B1–B8), recorded as D46–D50.**
+Browser session 7 days absolute with an explicit Session client kind (closes
+O10); `Company.joinCode` removed (closes F-18); company creation by a
+verified identity for itself; email verification (24 h) and password reset
+(30 min) tokens; bcryptjs unchanged (F-28 stays at its deployment gate);
+endpoint limits with no lockout; Playwright approved.
+
+**Built, in nine pushed commits** — each RED first, mutation-tested, through
+the full gate and exact-SHA CI. What exists is STATUS.md's to state:
+`joinCode` removal · `Session.clientKind` (body refresh redeems mobile
+sessions only) · `/auth/web/*` cookie transport with one Origin guard and
+per-request credentialed CORS · email verification + the mailer · `POST
+/companies` · forgot / reset / change password · endpoint limits and
+per-address email throttles · the web account pages · Playwright.
+
+**Found and fixed on the way.** A Playwright wait asserted the heading "Your
+account" and matched the registration page's own "Create your account"
+(substring matching), so a second browser logged in before the account
+existed and the API rightly answered 401 — traced from the API's own request
+log, and every e2e name/text assertion made exact. The password-reset
+transaction's removal SURVIVED its first mutation run (no test failed a write
+inside it); repository-level tests that make a write fail mid-transaction
+were added and now kill it. `@fastify/cors` emits `Allow-Credentials` even to
+an origin it refuses; the delegator now grants it only to an allowed origin.
+
+**Gate noise, not investigated.** One mobile Jest test
+(`checkRevision.test.tsx`) timed out at 5 s in one full-gate run with
+`mobile/` untouched; it passed 3/3 in isolation and the gate passed on rerun
+— the same load-sensitive class recorded on 2026-09-30.
+
+**Stopped short of, deliberately.** Production `trustProxy` (no deployment
+configuration exists to establish it — F-15 stays open and blocks public
+deployment); any company capability (O11 open); invitations; the homepage's
+"company accounts are not open yet" copy and the site header (unchanged).
+
+---
+
 ## 2026-09-30 — Web foundation and the public homepage (D43, D44) — local, uncommitted for review
 
 **Built.** The `web/` workspace — Vite 8, React 19, TypeScript 6, React Router

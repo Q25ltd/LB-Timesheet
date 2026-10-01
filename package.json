@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "validate:schema": "npm run validate --prefix api",
     "test:db": "npm run test:db --prefix api",
+    "test:e2e": "npm run test:e2e --prefix web",
     "generate": "npm run generate --prefix api"
   },
   "devDependencies": {

@@ -3,10 +3,12 @@
   "workspaces": {
     "web": {
       "entry": [
-        "src/**/*.test.tsx"
+        "src/**/*.test.tsx",
+        "e2e/**/*.spec.ts"
       ],
       "project": [
-        "src/**/*.{ts,tsx}"
+        "src/**/*.{ts,tsx}",
+        "e2e/**/*.ts"
       ]
     },
     "mobile": {

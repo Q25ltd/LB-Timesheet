@@ -68,3 +68,52 @@ jobs:
       # `npm run check` adds it to CI automatically; do not re-list steps here.
       - name: Check
         run: npm run check
+
+  # Real-browser tests of the account flows (owner decision B8). A separate
+  # job, so the authoritative gate above (`npm run check`) gains no
+  # dependency on a browser download. It needs only what the gate needs —
+  # a Postgres service — plus Playwright's Chromium.
+  e2e:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/lb_timesheet_test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: lb_timesheet_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+            web/package-lock.json
+
+      - name: Install (api)
+        run: npm ci --prefix api
+
+      - name: Install (web)
+        run: npm ci --prefix web
+
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: npm run test:e2e --prefix web

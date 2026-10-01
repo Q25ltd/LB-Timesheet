@@ -1,0 +1,9 @@
+{
+  // The browser tests run in Node (Playwright), not in the page: they get
+  // Node's types, which the app's own code under src/ deliberately does not.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}
