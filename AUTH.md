@@ -238,18 +238,18 @@ authenticates anyone. What the daily unlock avoids is retyping a password — no
 the round trip. A local PIN was considered and is NOT built; nothing requires
 one.
 
-## Browser clients (D45, 2026-09-30) — APPROVED TARGET, NOT BUILT
+## Browser clients (D45, 2026-09-30; D46, 2026-10-01)
 
 The company web application (DECISIONS D43, D44) is a browser client of this
 API. What a browser holds, and how it presents the refresh credential, differs
-from the phone. **Nothing in this section is implemented:** today CORS has
-`credentials: false`, the API sets and reads no cookie, and the refresh secret
-travels only in JSON bodies. STATUS.md owns what is built.
+from the phone. *(2026-10-01:)* the API side of this section is implemented
+by `POST /auth/web/register|login|refresh|logout`; STATUS.md owns exactly what
+is built.
 
-| | Mobile (built — D25, D26) | Browser (approved target — D45) |
+| | Mobile (D25, D26) | Browser (D45, D46) |
 |---|---|---|
 | Access token (identity / tenant) | memory only | memory only — never `localStorage`, `sessionStorage`, IndexedDB, a readable cookie or any persistent store |
-| Refresh credential at rest | SecureStore | `HttpOnly` cookie, `Secure` in production, **host-only** on the Timesheets API host — never a parent domain such as `.logisticbay.com` |
+| Refresh credential at rest | SecureStore | `HttpOnly` cookie, `Secure` in production, **host-only** on the Timesheets API host — never a parent domain such as `.logisticbay.com`. In production named `__Host-lbts_refresh`, so the browser itself refuses a `Domain`-scoped or non-Secure copy; `Path=/` (the prefix requires it), `SameSite=Strict` as defence in depth, `Max-Age` = the Session's remaining lifetime |
 | Refresh credential in transit | JSON body | the cookie, on a credentialed request |
 | After a restart / page reload | biometric gate (optional), then `POST /auth/refresh` | refresh via the cookie |
 | Session lifetime | 90 days, absolute | **7 days, absolute** (D46, 2026-10-01) |

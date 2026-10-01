@@ -25,11 +25,14 @@
  * the trusted context, to the service (AUTH.md's trust boundary).
  *
  * There is deliberately no route here that can produce a `TenantContext`.
+ *
+ * These are the PHONE's transport (refresh secret in the body). The browser's
+ * transport for the same lifecycle — the secret in an HttpOnly cookie — is
+ * `routes/webAuth.ts`, calling the same services (D45, D46).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ZodError } from "zod";
 import type { IdentityContext } from "../lib/auth.js";
-import { AppError } from "../lib/errors.js";
+import { invalidRequest } from "../lib/requestValidation.js";
 import type { IdentityRepository } from "../repositories/identityRepository.js";
 import type { RefreshRepository } from "../repositories/refreshRepository.js";
 import { SwitchCompanyBody, switchCompany } from "../services/companySwitch.js";
@@ -52,23 +55,6 @@ function identified(identity: IdentityContext | undefined): IdentityContext {
   return identity;
 }
 
-/**
- * A Zod failure in the project's one error envelope.
- *
- * Only the field path and the message travel. `password` is EXCLUDED from
- * the details entirely: Zod's issues do not carry the input value, but a
- * future custom refinement could easily interpolate one into its message,
- * and a validation response is the last place a credential should be able to
- * appear. The rule the driver needs is stable text the client already knows.
- */
-function invalidRequest(error: ZodError): AppError {
-  const details = error.issues.map(issue => ({
-    path:    issue.path.join("."),
-    message: issue.path[0] === "password" ? "Password does not meet the requirements" : issue.message,
-  }));
-  return new AppError(400, "Invalid request", "VALIDATION", details);
-}
-
 export function registerAuthRoutes(
   app: FastifyInstance,
   accounts: IdentityRepository,
@@ -84,7 +70,8 @@ export function registerAuthRoutes(
       // `app.jwt` is the minter. The route hands it over rather than the
       // service reaching for a global, so the signing capability travels
       // through one visible parameter.
-      const result = await register(parsed.data, accounts, app.jwt);
+      // The phone's endpoint: a MOBILE session, its secret in the body (D46).
+      const { result } = await register(parsed.data, "mobile", accounts, app.jwt);
       return reply.status(201).send(result);
     },
   );
@@ -102,7 +89,7 @@ export function registerAuthRoutes(
       // 200, not 201: authenticating creates a Session, but the resource the
       // caller asked about — the account — already existed. Registration's
       // 201 is for the account it creates.
-      const result = await login(parsed.data, accounts, app.jwt);
+      const { result } = await login(parsed.data, "mobile", accounts, app.jwt);
       return reply.status(200).send(result);
     },
   );
@@ -120,7 +107,7 @@ export function registerAuthRoutes(
 
       // The BODY transport is the phone's (B1): only a mobile Session's
       // credential may be redeemed here.
-      const result = await refresh(parsed.data, "mobile", sessions, app.jwt);
+      const { result } = await refresh(parsed.data, "mobile", sessions, app.jwt);
       return reply.status(200).send(result);
     },
   );

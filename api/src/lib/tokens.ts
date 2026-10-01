@@ -80,6 +80,17 @@ export const SESSION_LIFETIME_MS: Record<SessionClientKind, number> = {
 };
 
 /**
+ * A service result together with the absolute expiry of the Session it was
+ * issued under. The expiry is for the TRANSPORT only — the browser route sizes
+ * its cookie's Max-Age from it (B1) — and is never part of a response body:
+ * each route sends `result`, or a narrowing of it, and nothing else.
+ */
+export interface IssuedUnderSession<T> {
+  result: T;
+  sessionExpiresAt: Date;
+}
+
+/**
  * The registered claims whose PRESENCE is required. Not optional hardening:
  * `allowedIss`/`allowedAud` are VALUE validators that skip a claim which is
  * absent, and expiry is only checked when `exp` exists — so without this, a

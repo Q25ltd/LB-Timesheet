@@ -25,6 +25,7 @@
  */
 import { z } from "zod";
 import type { JWT } from "@fastify/jwt";
+import type { SessionClientKind } from "../generated/enums.js";
 import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
 import { LoginPasswordField, verifyAgainstUnknownAccount, verifyPassword } from "../lib/password.js";
@@ -34,6 +35,7 @@ import {
   mintRefreshToken,
   mintTenantToken,
   SESSION_LIFETIME_MS,
+  type IssuedUnderSession,
 } from "../lib/tokens.js";
 import type {
   AccountMembership,
@@ -112,11 +114,16 @@ function notAuthenticated(): AppError {
   return new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 }
 
+/**
+ * `clientKind` is decided by the ROUTE that owns the transport — the phone's
+ * body route or the browser's cookie route — never by the request (D46).
+ */
 export async function login(
   input: LoginInput,
+  clientKind: SessionClientKind,
   accounts: IdentityRepository,
   jwt: JWT,
-): Promise<LoginResult> {
+): Promise<IssuedUnderSession<LoginResult>> {
   const email = normaliseEmail(input.email);
 
   const credential = await accounts.findCredentialByEmail(email);
@@ -144,6 +151,7 @@ export async function login(
   // value returned: the plaintext exists only in this scope and in the
   // response, and is never written anywhere.
   const refreshToken = mintRefreshToken();
+  const sessionExpiresAt = new Date(Date.now() + SESSION_LIFETIME_MS[clientKind]);
 
   // A NEW session on every successful login (owner decision, 2026-09-11).
   // Device-session reuse is not expressible honestly: `Session` carries no
@@ -156,11 +164,10 @@ export async function login(
   // company switching, and a switch reuses this same session (AUTH.md).
   const { sessionId } = await accounts.createSession({
     userId:           credential.user.id,
-    // This endpoint is the PHONE's: its refresh secret travels in the body.
-    clientKind:       "mobile",
-    // AUTH.md: ABSOLUTE, 90 days. Not sliding, and not extended by anything
-    // later — rotation will not move it either.
-    expiresAt:        new Date(Date.now() + SESSION_LIFETIME_MS.mobile),
+    clientKind,
+    // ABSOLUTE — 90 days mobile, 7 days browser (D46). Not sliding, and not
+    // extended by anything later — rotation will not move it either.
+    expiresAt:        sessionExpiresAt,
     refreshTokenHash: hashRefreshToken(refreshToken),
   });
 
@@ -201,5 +208,5 @@ export async function login(
     });
   }
 
-  return result;
+  return { result, sessionExpiresAt };
 }

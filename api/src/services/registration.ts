@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 import type { JWT } from "@fastify/jwt";
+import type { SessionClientKind } from "../generated/enums.js";
 import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
 import { hashPassword, PasswordPolicy } from "../lib/password.js";
@@ -21,6 +22,7 @@ import {
   mintIdentityToken,
   mintRefreshToken,
   SESSION_LIFETIME_MS,
+  type IssuedUnderSession,
 } from "../lib/tokens.js";
 import {
   prismaErrorCode,
@@ -72,11 +74,17 @@ function emailInUse(): AppError {
   return new AppError(409, "Email already registered", "EMAIL_IN_USE");
 }
 
+/**
+ * `clientKind` is decided by the ROUTE that owns the transport — the phone's
+ * body route or the browser's cookie route — never by the request (D46). It
+ * fixes the Session's kind and its absolute lifetime.
+ */
 export async function register(
   input: RegisterInput,
+  clientKind: SessionClientKind,
   accounts: IdentityRepository,
   jwt: JWT,
-): Promise<RegistrationResult> {
+): Promise<IssuedUnderSession<RegistrationResult>> {
   const email = normaliseEmail(input.email);
 
   // A courtesy pre-read, NOT the guarantee — between this and the insert,
@@ -91,6 +99,7 @@ export async function register(
   // value returned: the plaintext exists only in this scope and in the
   // response, and is never written anywhere.
   const refreshToken = mintRefreshToken();
+  const sessionExpiresAt = new Date(Date.now() + SESSION_LIFETIME_MS[clientKind]);
 
   let created;
   try {
@@ -99,11 +108,10 @@ export async function register(
       firstName:        input.firstName,
       lastName:         input.lastName,
       passwordHash,
-      // This endpoint is the PHONE's: its refresh secret travels in the body.
-      sessionClientKind: "mobile",
-      // AUTH.md: ABSOLUTE, 90 days from login. Not sliding, and not extended
-      // by anything later.
-      sessionExpiresAt: new Date(Date.now() + SESSION_LIFETIME_MS.mobile),
+      sessionClientKind: clientKind,
+      // ABSOLUTE from creation — 90 days mobile, 7 days browser (D46). Not
+      // sliding, and not extended by anything later.
+      sessionExpiresAt,
       refreshTokenHash: hashRefreshToken(refreshToken),
     });
   } catch (error) {
@@ -116,13 +124,16 @@ export async function register(
   }
 
   return {
-    user:          created.user,
-    identityToken: mintIdentityToken(jwt, { userId: created.user.id, sessionId: created.sessionId }),
-    refreshToken,
-    // Always empty at registration — a brand-new account has no employer.
-    // Stated explicitly rather than omitted, so the client reads "none" as
-    // data instead of inferring it from an absent field.
-    memberships:   [],
+    result: {
+      user:          created.user,
+      identityToken: mintIdentityToken(jwt, { userId: created.user.id, sessionId: created.sessionId }),
+      refreshToken,
+      // Always empty at registration — a brand-new account has no employer.
+      // Stated explicitly rather than omitted, so the client reads "none" as
+      // data instead of inferring it from an absent field.
+      memberships:   [],
+    },
+    sessionExpiresAt,
   };
 }
 

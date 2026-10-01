@@ -1663,10 +1663,11 @@ principle for mobile, applied to the web: a workspace CI ignores rots.
 
 ### D45 — Browser credential transport: access token in memory, refresh credential in an `HttpOnly` host-only cookie (2026-09-30)
 
-Owner decision. **APPROVED TARGET ARCHITECTURE — NOT IMPLEMENTED.** The API
+Owner decision. ~~**APPROVED TARGET ARCHITECTURE — NOT IMPLEMENTED.** The API
 today is unchanged by it: CORS has `credentials: false`, no cookie is set or
 read anywhere, and the refresh secret travels only in JSON request and response
-bodies. STATUS.md owns build state.
+bodies.~~ *(2026-10-01: the API side is implemented — `/auth/web/*`, with the
+Session client kind of D46.)* STATUS.md owns build state.
 
 **Mobile is unchanged.** D25 and D26 stand exactly: SecureStore holds the
 refresh secret, access tokens live in memory. Nothing here weakens or replaces
@@ -1697,8 +1698,9 @@ cookie — credentialed requests.
 
 **CORS.** Credentialed browser requests will need credentialed CORS. When
 implemented, CORS keeps its **explicit origin allowlist**: no wildcard, no
-reflected origin, and no trust extended to sibling subdomains. Until then
-`credentials: false` stands (`api/src/app.ts`).
+reflected origin, and no trust extended to sibling subdomains. *(2026-10-01:
+credentials are granted per request, only to an allowed origin on a
+`/auth/web/*` route — `api/src/app.ts`.)*
 
 **CSRF.** A cookie is attached automatically, so the endpoints that act on the
 cookie — refresh and logout — need explicit CSRF protection. **`SameSite` is

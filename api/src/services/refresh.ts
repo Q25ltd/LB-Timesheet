@@ -33,6 +33,7 @@ import {
   mintIdentityToken,
   mintRefreshToken,
   REFRESH_GRACE_MS,
+  type IssuedUnderSession,
 } from "../lib/tokens.js";
 import type { RefreshRepository } from "../repositories/refreshRepository.js";
 
@@ -88,7 +89,7 @@ export async function refresh(
   transport: SessionClientKind,
   sessions: RefreshRepository,
   jwt: JWT,
-): Promise<RefreshResult> {
+): Promise<IssuedUnderSession<RefreshResult>> {
   const now = new Date();
   const presentedDigest = hashRefreshToken(input.refreshToken);
 
@@ -153,8 +154,11 @@ export async function refresh(
     if (!recovered) throw notAuthenticated();
 
     return {
-      identityToken: mintIdentityToken(jwt, { userId: session.userId, sessionId: session.id }),
-      refreshToken:  nextToken,
+      result: {
+        identityToken: mintIdentityToken(jwt, { userId: session.userId, sessionId: session.id }),
+        refreshToken:  nextToken,
+      },
+      sessionExpiresAt: session.expiresAt,
     };
   }
 
@@ -174,8 +178,12 @@ export async function refresh(
   if (!rotated) throw notAuthenticated();
 
   return {
-    identityToken: mintIdentityToken(jwt, { userId: session.userId, sessionId: session.id }),
-    refreshToken:  nextToken,
+    result: {
+      identityToken: mintIdentityToken(jwt, { userId: session.userId, sessionId: session.id }),
+      refreshToken:  nextToken,
+    },
+    // Unchanged by rotation — the conditional write never touches it.
+    sessionExpiresAt: session.expiresAt,
   };
 }
 
@@ -193,4 +201,30 @@ export async function refresh(
  */
 export async function logout(sessionId: string, sessions: RefreshRepository): Promise<void> {
   await sessions.revoke(sessionId, new Date());
+}
+
+/**
+ * Log out by the refresh CREDENTIAL — the browser's logout, where the cookie
+ * is the one thing the browser reliably holds (its in-memory access token may
+ * already be gone).
+ *
+ * The credential names the session, through the same F-21 resolution refresh
+ * uses (current first, previous only if current missed), and only a session
+ * of the transport's own kind may be revoked: the cookie transport cannot act
+ * on a phone's session (D46).
+ *
+ * Idempotent and silent: no credential, an unknown one or one of the wrong
+ * kind is not an error. The caller's goal — "this browser holds no usable
+ * session" — is achieved by clearing the cookie either way, and answering
+ * differently would make logout an oracle for which credentials exist.
+ */
+export async function logoutByCredential(
+  refreshToken: string | null,
+  transport: SessionClientKind,
+  sessions: RefreshRepository,
+): Promise<void> {
+  if (refreshToken === null) return;
+  const resolved = await sessions.resolve(hashRefreshToken(refreshToken));
+  if (resolved === null || resolved.session.clientKind !== transport) return;
+  await sessions.revoke(resolved.session.id, new Date());
 }

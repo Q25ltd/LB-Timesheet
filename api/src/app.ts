@@ -13,6 +13,8 @@ import { identityRepository, type IdentityDatabase } from "./repositories/identi
 import { refreshRepository, type RefreshDatabase } from "./repositories/refreshRepository.js";
 import { registerShiftRoutes } from "./routes/shifts.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerWebAuthRoutes, WEB_AUTH_PREFIX } from "./routes/webAuth.js";
+import { refreshCookiePolicy } from "./lib/refreshCookie.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -40,10 +42,28 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   });
 
   // An explicit, normalised allowlist — never `origin: true`, which reflects
-  // whatever Origin the caller sent and lets any site read the response.
-  // `credentials` stays false: authority travels in an Authorization header
-  // (AUTH.md), not a cookie. Enabling it is an architectural change.
-  await app.register(cors, { origin: allowedOrigins(env), credentials: false });
+  // whatever Origin the caller sent and lets any site read the response. The
+  // same list is the Origin guard's on the cookie routes (D45).
+  //
+  // `credentials` is decided PER REQUEST, and is true ONLY on the browser's
+  // cookie-transport routes (`/auth/web/*`), which cannot work without it.
+  // Everywhere else authority travels in an Authorization header (AUTH.md),
+  // so the rest of the API stays uncredentialed — it is not converted to
+  // cookie authentication.
+  //
+  // Both conditions, because the plugin would otherwise emit
+  // `Access-Control-Allow-Credentials` even to an origin it refuses; a
+  // browser would still block that response, but the grant should not be
+  // made at all.
+  const origins = allowedOrigins(env);
+  await app.register(cors, {
+    delegator: (request, callback) => {
+      const origin = request.headers.origin;
+      const credentialed = request.url.startsWith(WEB_AUTH_PREFIX)
+        && typeof origin === "string" && origins.includes(origin);
+      callback(null, { origin: origins, credentials: credentialed });
+    },
+  });
 
   // AUTH.md's tokens. `algorithms` is pinned so an `alg: none` or
   // algorithm-confusion token cannot verify, and iss/aud make a LogisticBay
@@ -133,6 +153,17 @@ export async function buildApp(prisma: AppDatabase): Promise<FastifyInstance> {
   // `refreshRepository` owns credential resolution and rotation and is the
   // narrow surface that makes F-21's ambiguous lookup unexpressible.
   registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma));
+
+  // The BROWSER transport for the same lifecycle (D45, D46): the same
+  // services and repositories, the refresh credential in an HttpOnly cookie,
+  // every route behind the Origin guard its own scope registers.
+  await registerWebAuthRoutes(
+    app,
+    identityRepository(prisma),
+    refreshRepository(prisma),
+    refreshCookiePolicy(env.NODE_ENV),
+    origins,
+  );
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
