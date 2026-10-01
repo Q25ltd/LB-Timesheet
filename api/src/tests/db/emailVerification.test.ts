@@ -113,7 +113,7 @@ async function webRegistered(): Promise<{ email: string; userId: string; identit
   const email = freshEmail();
   const res = await inject({ url: "/auth/web/register", payload: { firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `web registration must succeed — got ${res.raw}`);
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
   return { email, userId: user.id, identityToken: stringField(res.body, "identityToken"), token: tokenSentTo(email) };
 }
 

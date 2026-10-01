@@ -91,7 +91,9 @@ export async function register(
   // another request can create the same identity. The unique constraint is
   // what actually decides; this only turns the common case into a clean 409
   // instead of a caught database error.
-  if (await accounts.findByEmail(email) !== null) throw emailInUse();
+  // Every registration creates a DRIVER account until company registration
+  // exists (next increments); the email is unique within that kind only.
+  if (await accounts.findByEmail("driver", email) !== null) throw emailInUse();
 
   const passwordHash = await hashPassword(input.password);
 
@@ -104,6 +106,7 @@ export async function register(
   let created;
   try {
     created = await accounts.createAccount({
+      accountKind: "driver",
       email,
       firstName:        input.firstName,
       lastName:         input.lastName,

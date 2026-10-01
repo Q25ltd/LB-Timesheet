@@ -96,7 +96,7 @@ async function registerDriver(): Promise<{ email: string; userId: string }> {
     payload: { firstName: "Nerijus", lastName: "Kuizinas", email, password: PASSWORD },
   });
   assert.equal(result.statusCode, 201, `registration must succeed — got ${result.raw}`);
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(user !== null, "the account must exist");
   return { email, userId: user.id };
 }

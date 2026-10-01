@@ -82,7 +82,7 @@ async function account(options: { verified?: boolean } = {}): Promise<Account> {
   const email = `${fresh("user")}@example.com`;
   const res = await inject({ url: "/auth/register", payload: { firstName: "Comp", lastName: "Any", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `registration must succeed — got ${res.raw}`);
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
   if (options.verified !== false) {
     await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
   }

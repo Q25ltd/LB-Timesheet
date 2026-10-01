@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change. D50 — endpoint abuse limits)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change. D50 — endpoint abuse limits. D51 — driver accounts and company accounts are separate)
 
 ---
 
@@ -509,6 +509,10 @@ taken at Start Shift, and is never recomputed from a later name change.
 **not** applied: `+`-tag stripping, dot removal, or any provider-specific
 transformation — those merge mailboxes that genuinely belong to different
 people.
+
+*Amended 2026-10-01 by D51:* email is the account identity **within an
+account kind** — one driver account and one company account may share an
+address; two accounts of one kind may not.
 
 **The database carries the uniqueness guarantee**, not application code
 (D16). Application-side normalization alone is insufficient: one forgotten
@@ -1851,6 +1855,43 @@ Owner decision (B6). Starting limits, per caller IP:
 - **Proxy trust is set only on evidence.** `trustProxy` stays off until the
   production proxy topology is established from deployment configuration;
   local development never trusts a forwarded header. F-15 tracks it.
+
+### D51 — Driver accounts (phone) and company accounts (website) are separate accounts (2026-10-01)
+
+Owner decision. Supersedes or clarifies D12, D21, D22, D46 and D48 as noted
+on each; those records are kept as they were decided. STATUS.md owns which
+parts are built.
+
+| | Driver account | Company account |
+|---|---|---|
+| Surface | the phone app only | the website only |
+| Created by | driver registration (phone) | company registration (website) |
+| Email | one driver account per email | one company account per email |
+| Companies | many, through `driver` memberships (D12) | administers its company |
+| Sessions | mobile, 90 days, body refresh (D46) | browser, 7 days, HttpOnly cookie (D46) |
+
+- **The same email may exist once per kind.** `john@abc.co.uk` can be a driver
+  account AND a company account: separate rows, passwords, sessions and
+  authority. **A matching email never relates them** — it is not membership,
+  authorization or consent.
+- **Company ↔ driver relationships are NOT built now.** Later the company adds
+  its drivers explicitly through the website; even a company whose login email
+  equals a driver's email does not get that driver until then. That mechanism
+  is not designed here.
+- **Company registration is company-first:** "Register your company" — company
+  name plus the administrator's details → a pending registration and a
+  restricted, signed-in "check your email" state → confirming the email, in ONE
+  transaction, verifies it, creates the Company and the initial administrator
+  membership, and consumes the pending registration. No Company exists before.
+- **One INITIAL administrator** is created by registration. This is not a rule
+  that a company has only one administrator: additional company users are a
+  later feature, and nothing may be built that forbids them. O11 stays open.
+- **Mobile authenticates driver accounts only; the website company accounts
+  only.** The wrong kind fails exactly like invalid credentials. Company
+  accounts never start shifts; driver accounts never administer a company.
+- An unconfirmed company registration stays pending; no automatic deletion
+  (O1 stays open).
+- Company names are not unique; ≤200 characters, trimmed, never empty.
 
 ## ❓ Open — ask the user, do not guess
 

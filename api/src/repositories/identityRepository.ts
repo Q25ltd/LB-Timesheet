@@ -16,7 +16,7 @@
  * pattern — so widening what the account boundary can reach is a visible act
  * rather than a side effect of passing a bigger object.
  */
-import type { MembershipRole, SessionClientKind } from "../generated/enums.js";
+import type { AccountKind, MembershipRole, SessionClientKind } from "../generated/enums.js";
 
 /** Only the User columns anything above this boundary is allowed to see. */
 export interface AccountUser {
@@ -65,6 +65,7 @@ export interface NewSession {
 
 /** Everything a new account is created from. Already normalised and hashed. */
 export interface NewAccount {
+  accountKind: AccountKind;
   email: string;
   firstName: string;
   lastName: string;
@@ -117,7 +118,7 @@ interface MembershipRow {
 /** The subset available inside the transaction callback. */
 interface IdentityTransaction {
   user: {
-    create(args: { data: { email: string; firstName: string; lastName: string; passwordHash: string } }): Promise<UserRow>;
+    create(args: { data: { accountKind: AccountKind; email: string; firstName: string; lastName: string; passwordHash: string } }): Promise<UserRow>;
   };
   session: {
     create(args: { data: { userId: string; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
@@ -130,10 +131,13 @@ interface IdentityTransaction {
  */
 export interface IdentityDatabase extends IdentityTransaction {
   user: IdentityTransaction["user"] & {
-    findUnique(args: { where: { email: string } | { id: string } }): Promise<UserRow | null>;
+    // An email identifies an account only WITHIN its kind: the same address
+    // may be one driver account and one company account. There is no lookup
+    // by email alone, so a driver and a company sharing one cannot be confused.
+    findUnique(args: { where: { accountKind_email: { accountKind: AccountKind; email: string } } | { id: string } }): Promise<UserRow | null>;
     // Login's read, named separately from the two above because it returns
     // credential material. One call site, one signature, greppable.
-    findFirst(args: { where: { email: string } }): Promise<CredentialRow | null>;
+    findFirst(args: { where: { accountKind: AccountKind; email: string } }): Promise<CredentialRow | null>;
   };
   session: IdentityTransaction["session"];
   companyMembership: {
@@ -199,6 +203,7 @@ export function identityRepository(db: IdentityDatabase) {
       return db.$transaction(async tx => {
         const user = await tx.user.create({
           data: {
+            accountKind:  account.accountKind,
             email:        account.email,
             firstName:    account.firstName,
             lastName:     account.lastName,
@@ -226,8 +231,8 @@ export function identityRepository(db: IdentityDatabase) {
      * lookup finds `Driver@Example.com` when given `driver@example.com`
      * without any `mode: "insensitive"` here to forget.
      */
-    async findByEmail(email: string): Promise<AccountUser | null> {
-      const row = await db.user.findUnique({ where: { email } });
+    async findByEmail(accountKind: AccountKind, email: string): Promise<AccountUser | null> {
+      const row = await db.user.findUnique({ where: { accountKind_email: { accountKind, email } } });
       return row === null ? null : accountUser(row);
     },
 
@@ -252,8 +257,8 @@ export function identityRepository(db: IdentityDatabase) {
      * exactly like `accountUser` — so a future column added to `User` does not
      * silently start travelling into login's service.
      */
-    async findCredentialByEmail(email: string): Promise<AccountCredential | null> {
-      const row = await db.user.findFirst({ where: { email } });
+    async findCredentialByEmail(accountKind: AccountKind, email: string): Promise<AccountCredential | null> {
+      const row = await db.user.findFirst({ where: { accountKind, email } });
       return row === null ? null : { user: accountUser(row), passwordHash: row.passwordHash };
     },
 

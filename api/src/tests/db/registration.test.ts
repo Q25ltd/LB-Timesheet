@@ -256,8 +256,8 @@ test("D2. exactly one unique constraint governs User.email, and it is case-insen
 async function insertUserRaw(id: string, email: string, firstName: string, lastName: string): Promise<string | { unmapped: string } | null> {
   try {
     await prisma.$executeRaw`
-      INSERT INTO "User" ("id", "email", "firstName", "lastName", "passwordHash", "updatedAt")
-      VALUES (${id}, ${email}, ${firstName}, ${lastName}, 'not-a-real-hash', now())
+      INSERT INTO "User" ("id", "accountKind", "email", "firstName", "lastName", "passwordHash", "updatedAt")
+      VALUES (${id}, 'driver'::"AccountKind", ${email}, ${firstName}, ${lastName}, 'not-a-real-hash', now())
     `;
     return null;
   } catch (error) {

@@ -110,7 +110,7 @@ async function main(url: string): Promise<void> {
       const company = await tx.company.create({ data: { name: `${TAG}-A` } });
       const otherCompany = await tx.company.create({ data: { name: `${TAG}-B` } });
       const driver = await tx.user.create({
-        data: { email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
+        data: { accountKind: "driver", email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
       });
       const membership = await tx.companyMembership.create({
         data: { companyId: company.id, userId: driver.id, role: "driver" },

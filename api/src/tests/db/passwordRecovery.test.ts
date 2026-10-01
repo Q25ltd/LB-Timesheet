@@ -120,7 +120,7 @@ async function signedInEverywhere(): Promise<Devices> {
   assert.equal(web.statusCode, 200);
   const cookieSecret = /^lbts_refresh=([^;]+)/.exec(web.setCookie ?? "")?.[1];
   assert.ok(cookieSecret !== undefined);
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
   return {
     email, userId: user.id,
     phone: { identityToken: stringField(reg.body, "identityToken"), refreshToken: stringField(reg.body, "refreshToken") },

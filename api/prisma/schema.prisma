@@ -39,6 +39,19 @@ enum MembershipRole {
   admin
 }
 
+/// Which kind of ACCOUNT a User is (owner decision, 2026-10-01). Two
+/// separate account contexts that share nothing but the database:
+///   driver   the phone app. One email = one driver account; it may work for
+///            several companies through `driver` memberships.
+///   company  the website. Created by company registration; administers a
+///            company.
+/// The same email may exist ONCE PER KIND. A matching email never relates a
+/// driver account to a company account — that would be authority by email.
+enum AccountKind {
+  driver
+  company
+}
+
 /// Which kind of client a Session belongs to, fixed for its whole life
 /// (owner decision B1, 2026-10-01; D45). It decides how the refresh credential
 /// TRAVELS, and the server enforces it:
@@ -107,17 +120,23 @@ model Company {
 model User {
   id           String    @id @default(cuid())
 
-  /// THE account identity (D21, D22). Stored canonically as trim + lowercase,
-  /// and `citext` so the DATABASE — not a remembered `.toLowerCase()` at one
-  /// call site — refuses `Driver@Example.com` once `driver@example.com`
-  /// exists. Application normalisation alone is not the guarantee (D16): one
+  /// driver (phone) or company (website). NO default: every creation path
+  /// states it, and it never changes. Existing accounts were all created by
+  /// the phone and were migrated as `driver`.
+  accountKind  AccountKind
+
+  /// THE account identity WITHIN ITS KIND (D21, D22 as amended 2026-10-01 —
+  /// see the unique key below). Stored canonically as trim + lowercase, and
+  /// `citext` so the DATABASE — not a remembered `.toLowerCase()` at one call
+  /// site — refuses a second `Driver@Example.com` driver account once
+  /// `driver@example.com` exists. Application normalisation alone is not the guarantee (D16): one
   /// forgotten write path would otherwise split a driver's identity in two,
   /// inside the identity system itself.
   ///
   /// Deliberately NOT normalised further: `+`-tags and dots are NOT stripped.
   /// Those forms address genuinely different mailboxes, and merging them
   /// would be a worse bug than the one this fixes.
-  email        String    @unique @db.Citext
+  email        String    @db.Citext
 
   /// The canonical name fields (D22). `name` was replaced, not supplemented —
   /// two columns for one concept disagree eventually. Any display or full
@@ -142,6 +161,11 @@ model User {
   memberships   CompanyMembership[]
   sessions      Session[]
   accountTokens AccountToken[]
+
+  /// One email per KIND (D22 as amended 2026-10-01): a driver and a company
+  /// account may share an address; two accounts of one kind may not. The
+  /// column is `citext`, so the uniqueness is case-insensitive.
+  @@unique([accountKind, email])
 }
 
 /// A one-time credential sent by email: email verification (24 hours) or

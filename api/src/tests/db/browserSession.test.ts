@@ -467,7 +467,7 @@ test("B14. credentialed CORS is granted to the allowed origin on the cookie endp
 
 test("B15. web login with ONE active membership returns a tenant token minted from the row; the identity token reaches no tenant route", async () => {
   const { email } = await webRegister();
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
   const company = await prisma.company.create({ data: { name: `${TAG}-co` } });
   await prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, role: "admin" } });
 

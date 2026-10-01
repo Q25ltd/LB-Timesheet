@@ -127,7 +127,7 @@ async function seedMembership(userId: string, label: string): Promise<{ companyI
 }
 
 async function userIdFor(email: string): Promise<string> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(user !== null, "the account must exist");
   return user.id;
 }

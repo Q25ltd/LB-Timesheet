@@ -126,7 +126,8 @@ export async function login(
 ): Promise<IssuedUnderSession<LoginResult>> {
   const email = normaliseEmail(input.email);
 
-  const credential = await accounts.findCredentialByEmail(email);
+  // The DRIVER account with this email — never a company account sharing it.
+  const credential = await accounts.findCredentialByEmail("driver", email);
 
   // No such account. The verification below matches NOTHING — its only job is
   // to spend the same ~230 ms a real account spends, so the two paths cannot

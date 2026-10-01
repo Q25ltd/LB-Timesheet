@@ -352,7 +352,7 @@ test("L13. an unknown email and a wrong password are INDISTINGUISHABLE from outs
 
 test("L14. no plaintext password, stored hash or refresh-token digest appears in the login response", async () => {
   const email = await registerDriver(freshEmail());
-  const stored = await prisma.user.findUnique({ where: { email } });
+  const stored = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(stored !== null, "registration must have persisted the account");
 
   const result = await login(email, PASSWORD);
@@ -421,7 +421,7 @@ test("L16. no token anywhere in the login response carries the TENANT audience",
 
 test("L17. the returned refresh secret resolves to exactly one live Session owned by the authenticated user", async () => {
   const email = await registerDriver(freshEmail());
-  const account = await prisma.user.findUnique({ where: { email } });
+  const account = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(account !== null, "registration must have persisted the account");
 
   const result = await login(email, PASSWORD);
@@ -447,7 +447,7 @@ test("L17. the returned refresh secret resolves to exactly one live Session owne
 
 test("L18. authenticating creates no Company, no CompanyMembership and no Shift for the driver", async () => {
   const email = await registerDriver(freshEmail());
-  const account = await prisma.user.findUnique({ where: { email } });
+  const account = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(account !== null, "registration must have persisted the account");
   const userId = account.id;
 
@@ -470,14 +470,14 @@ test("L18. authenticating creates no Company, no CompanyMembership and no Shift 
 
 test("L19. a FAILED login creates nothing and leaves the account untouched", async () => {
   const email = await registerDriver(freshEmail());
-  const priorAccount = await prisma.user.findUnique({ where: { email } });
+  const priorAccount = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(priorAccount !== null, "registration must have persisted the account");
   const sessionsBefore = await prisma.session.count({ where: { userId: priorAccount.id } });
 
   const result = await login(email, "not-the-right-password");
   assert.equal(result.statusCode, 401, `a wrong password must be 401 — got ${result.raw}`);
 
-  const laterAccount = await prisma.user.findUnique({ where: { email } });
+  const laterAccount = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(laterAccount !== null, "a failed login must not delete the account");
   assert.equal(laterAccount.passwordHash, priorAccount.passwordHash, "a failed login must not rewrite the stored credential");
   assert.equal(
@@ -496,7 +496,7 @@ test("L19. a FAILED login creates nothing and leaves the account untouched", asy
 
 test("L20. a driver whose ONLY membership is inactive authenticates with identity alone — no tenant token, and the membership is not offered", async () => {
   const email = await registerDriver(freshEmail());
-  const account = await prisma.user.findUnique({ where: { email } });
+  const account = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(account !== null, "registration must have persisted the account");
 
   const company = await prisma.company.create({
@@ -535,7 +535,7 @@ test("L20. a driver whose ONLY membership is inactive authenticates with identit
 
 test("L21. two sequential logins create two DISTINCT Sessions", async () => {
   const email = await registerDriver(freshEmail());
-  const account = await prisma.user.findUnique({ where: { email } });
+  const account = await prisma.user.findUnique({ where: { accountKind_email: { accountKind: "driver", email } } });
   assert.ok(account !== null, "registration must have persisted the account");
 
   const first  = await login(email, PASSWORD);
@@ -598,7 +598,7 @@ test("L23. a stored hash this build cannot read is refused as a credential failu
   for (const passwordHash of unreadable) {
     const email = freshEmail("legacy");
     await prisma.user.create({
-      data: { email, firstName: "Legacy", lastName: "Driver", passwordHash },
+      data: { accountKind: "driver", email, firstName: "Legacy", lastName: "Driver", passwordHash },
     });
 
     const result = await login(email, PASSWORD);
@@ -625,6 +625,7 @@ test("L24. an account whose password is shorter than Registration's minimum can 
   const email = freshEmail("legacy-short");
   await prisma.user.create({
     data: {
+      accountKind: "driver",
       email,
       firstName:    "Legacy",
       lastName:     "Driver",

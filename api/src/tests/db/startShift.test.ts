@@ -112,7 +112,7 @@ async function newDriver(
   const lastName  = label;
   const name      = `${firstName} ${lastName}`;
   const user = await prisma.user.create({
-    data: { email: `${TAG}-${String(seq)}-${label}@example.com`, firstName, lastName, passwordHash: "not-a-real-hash" },
+    data: { accountKind: "driver", email: `${TAG}-${String(seq)}-${label}@example.com`, firstName, lastName, passwordHash: "not-a-real-hash" },
   });
   const membership = await prisma.companyMembership.create({
     data: { companyId, userId: user.id, role: options.role ?? "driver", active: options.active ?? true },
