@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-09-30 (D43–D45 — web surface, web framework, browser credential transport; O5 closed; O10, O11 opened)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed)
 
 ---
 
@@ -183,7 +183,7 @@ Full contract in **AUTH.md**. Summary of what was chosen and why:
   window.** Long TTL because drivers are offline for whole shifts and away for
   weeks; grace because strict rotation logs a driver out when signal drops
   mid-rotation. *(2026-09-30:)* that reasoning is the phone's; it is **not**
-  carried to a company browser session, whose lifetime is open — **O10**.
+  carried to a company browser session, whose lifetime is **7 days** (D46, closing O10).
 - **The daily unlock is a local PIN/biometric**, not a server login.
 - ~~**0 memberships → denied.**~~ **SUPERSEDED by D21 (2026-09-10).** A
   zero-membership driver now authenticates with an **identity token** that
@@ -1713,7 +1713,41 @@ protection is presented for decision — the model is never silently weakened.
 
 **Not decided here:** the browser session lifetime (**O10**) — the 90-day
 mobile lifetime is deliberately not assumed — and company authorization
-(**O11**).
+(**O11**). *(2026-10-01: O10 closed by D46 — 7 days, absolute.)*
+
+### D46 — A Session has a client kind; a browser Session lives 7 days, absolute (2026-10-01)
+
+Owner decision (B1); closes **O10**.
+
+**`Session.clientKind` — `mobile` or `browser` — is fixed when the Session is
+created and never changes.** It is what makes the browser/phone transport
+boundary a SERVER rule rather than a client habit:
+
+| | Refresh credential travels | Absolute lifetime |
+|---|---|---|
+| `mobile` | JSON body (`POST /auth/refresh`) — unchanged | **90 days** — unchanged |
+| `browser` | `HttpOnly` cookie only (D45) | **7 days** |
+
+- A browser Session's credential is **refused** by the body endpoint, and a
+  mobile Session's credential is refused by the cookie transport — identically
+  to an unknown credential, and **without** revoking anything: a credential
+  through the wrong transport is not, by any decision made, a reuse event.
+- **One** Session / rotation / grace / reuse / revocation implementation
+  (`services/refresh.ts`, `repositories/refreshRepository.ts`); the kind is a
+  condition it checks and restates in every conditional write — not a second
+  engine.
+- **Absolute, not sliding.** Rotation never moves `expiresAt` for either kind.
+  A browser refresh cookie's lifetime never exceeds the Session's remaining
+  lifetime.
+- The column has **no default**: every creation path states its kind. Sessions
+  that existed before the column were all created by the phone — the API had no
+  browser transport — and were backfilled `mobile` by the migration.
+
+*Why 7 days:* a company user at an office PC, who uses the application a few
+times a week; a weekly sign-in costs little, bounds a stolen cookie's life, and
+fits the existing absolute model with no idle-tracking schema. The phone's 90
+days were chosen for a driver offline for whole shifts and away for weeks, and
+are not carried over.
 
 ## ❓ Open — ask the user, do not guess
 
@@ -1787,7 +1821,10 @@ thereafter. See D18.
 ### O9 — Multi-company drivers — ✅ CLOSED 2026-08-25
 Resolved: **supported**, and modelled from the first migration. See D12.
 
-### O10 — Browser session lifetime
+### O10 — Browser session lifetime — ✅ CLOSED 2026-10-01
+Resolved: **7 days, absolute, not sliding**, with an explicit Session client
+kind. See D46. The original question follows.
+
 How long a company browser session lives before its user must sign in again —
 session-only, a fixed number of days, or something else — and whether it is
 absolute or sliding. The mobile 90 days (AUTH.md, D13) was chosen for a driver

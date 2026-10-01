@@ -233,6 +233,7 @@ test("4. inactive is denied on the ordinary path whatever the role, and the ordi
 interface SessionRow {
   id: string;
   userId: string;
+  clientKind: "mobile" | "browser";
   expiresAt: Date;
   revokedAt: Date | null;
   /** Read by the refresh boundary; null on every session these files build. */
@@ -312,6 +313,7 @@ function accessToken(): string {
 function activeIdentity(): IdentityReads {
   const session: SessionRow = {
     id: SESSION_ID, userId: USER_ID,
+    clientKind: "mobile",
     expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), revokedAt: null,
     previousRefreshTokenGraceUntil: null,
   };

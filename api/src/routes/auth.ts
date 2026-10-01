@@ -118,7 +118,9 @@ export function registerAuthRoutes(
       const parsed = RefreshBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
 
-      const result = await refresh(parsed.data, sessions, app.jwt);
+      // The BODY transport is the phone's (B1): only a mobile Session's
+      // credential may be redeemed here.
+      const result = await refresh(parsed.data, "mobile", sessions, app.jwt);
       return reply.status(200).send(result);
     },
   );

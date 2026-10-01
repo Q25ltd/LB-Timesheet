@@ -111,6 +111,7 @@ before(async () => {
   const session = await prisma.session.create({
     data: {
       userId:           user.id,
+      clientKind:       "mobile",
       expiresAt:        new Date(Date.now() + 90 * DAY),
       refreshTokenHash: createHmac("sha256", TAG).update("refresh").digest("hex"),
     },

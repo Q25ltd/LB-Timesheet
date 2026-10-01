@@ -26,6 +26,7 @@
  */
 import { z } from "zod";
 import type { JWT } from "@fastify/jwt";
+import type { SessionClientKind } from "../generated/enums.js";
 import { AppError } from "../lib/errors.js";
 import {
   hashRefreshToken,
@@ -68,8 +69,23 @@ function notAuthenticated(): AppError {
   return new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 }
 
+/**
+ * THE rotation authority, for every transport (owner decision B1).
+ *
+ * `transport` is the client kind whose transport delivered the credential —
+ * `mobile` for the JSON body, `browser` for the HttpOnly cookie — and it is
+ * supplied by the ROUTE that owns that transport, never by the caller's
+ * request. A credential belonging to a Session of the other kind is refused
+ * exactly like an unknown one: a browser secret in a body has left its
+ * cookie, and a mobile secret in a cookie never belonged in one.
+ *
+ * The refusal does NOT revoke. Revocation is the reuse decision AUTH.md
+ * specifies; a credential arriving through the wrong transport is a different
+ * event, and no decision has been made to treat it as reuse.
+ */
 export async function refresh(
   input: RefreshInput,
+  transport: SessionClientKind,
   sessions: RefreshRepository,
   jwt: JWT,
 ): Promise<RefreshResult> {
@@ -83,6 +99,11 @@ export async function refresh(
   if (resolved === null) throw notAuthenticated();
 
   const { session, matched } = resolved;
+
+  // Checked BEFORE reuse detection, so a credential presented through the
+  // wrong transport can neither rotate nor trigger a revocation. Restated in
+  // every conditional write below, so the database refuses it as well.
+  if (session.clientKind !== transport) throw notAuthenticated();
 
   // Read here for the fast, common rejections. They are NOT the guarantee —
   // every conditional write below restates them in its `where` clause, so a
@@ -121,6 +142,7 @@ export async function refresh(
     // stretch the window.
     const recovered = await sessions.rotateFromGrace({
       sessionId:       session.id,
+      clientKind:      transport,
       presentedDigest,
       nextDigest,
       now,
@@ -140,6 +162,7 @@ export async function refresh(
   // becomes the grace credential with a fresh 60-second deadline.
   const rotated = await sessions.rotateCurrent({
     sessionId:       session.id,
+    clientKind:      transport,
     presentedDigest,
     nextDigest,
     graceUntil:      new Date(now.getTime() + REFRESH_GRACE_MS),

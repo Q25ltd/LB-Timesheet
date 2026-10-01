@@ -39,6 +39,18 @@ enum MembershipRole {
   admin
 }
 
+/// Which kind of client a Session belongs to, fixed for its whole life
+/// (owner decision B1, 2026-10-01; D45). It decides how the refresh credential
+/// TRAVELS, and the server enforces it:
+///   mobile   SecureStore on the phone, presented in a JSON body
+///   browser  an HttpOnly cookie, never readable by JavaScript
+/// A credential presented through the other transport is refused. It is also
+/// what selects the Session's absolute lifetime at creation.
+enum SessionClientKind {
+  mobile
+  browser
+}
+
 enum ShiftStatus {
   draft     /// created; checks not yet complete
   active    /// day underway
@@ -134,9 +146,16 @@ model Session {
   id        String   @id @default(cuid())
   userId    String
 
-  /// THE authoritative lifetime of this authenticated device: ABSOLUTE, 90
-  /// days from login. Rotation does not extend it and there is no sliding
-  /// window or separate cap — one lifetime, one column.
+  /// The client this session was created for (SessionClientKind). NO default
+  /// on purpose: every creation path must state its kind, so none can inherit
+  /// one silently, and it never changes afterwards — a browser session never
+  /// becomes a mobile one, nor the reverse.
+  clientKind SessionClientKind
+
+  /// THE authoritative lifetime of this authenticated device: ABSOLUTE from
+  /// login — 90 days for a mobile session, 7 days for a browser one (B1).
+  /// Rotation does not extend it and there is no sliding window or separate
+  /// cap — one lifetime, one column.
   expiresAt DateTime
 
   /// Explicit termination — logout, refresh-token reuse outside the grace

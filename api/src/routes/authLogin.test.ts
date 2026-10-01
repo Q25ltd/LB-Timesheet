@@ -70,6 +70,7 @@ interface StubUserRow {
 interface StubSessionRow {
   id: string;
   userId: string;
+  clientKind: "mobile" | "browser";
   expiresAt: Date;
   revokedAt: Date | null;
   /** Read by the refresh boundary; no case in this file refreshes. */

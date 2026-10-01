@@ -126,6 +126,7 @@ function claimsWithout(...omitted: string[]): Record<string, string | number> {
 interface SessionRow {
   id: string;
   userId: string;
+  clientKind: "mobile" | "browser";
   expiresAt: Date;
   revokedAt: Date | null;
   /** Read by the refresh boundary; null on every session these files build. */
@@ -212,7 +213,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
 }
 
 function liveSession(): SessionRow {
-  return { id: SESSION_ID, userId: USER_ID, expiresAt: new Date(Date.now() + 90 * 24 * 60 * MINUTE), revokedAt: null, previousRefreshTokenGraceUntil: null };
+  return { id: SESSION_ID, userId: USER_ID, clientKind: "mobile", expiresAt: new Date(Date.now() + 90 * 24 * 60 * MINUTE), revokedAt: null, previousRefreshTokenGraceUntil: null };
 }
 
 /**

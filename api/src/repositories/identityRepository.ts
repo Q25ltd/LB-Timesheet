@@ -16,7 +16,7 @@
  * pattern — so widening what the account boundary can reach is a visible act
  * rather than a side effect of passing a bigger object.
  */
-import type { MembershipRole } from "../generated/enums.js";
+import type { MembershipRole, SessionClientKind } from "../generated/enums.js";
 
 /** Only the User columns anything above this boundary is allowed to see. */
 export interface AccountUser {
@@ -58,6 +58,7 @@ export interface AccountCredential {
 /** A new device session for an already-authenticated account (AUTH.md). */
 export interface NewSession {
   userId: string;
+  clientKind: SessionClientKind;
   expiresAt: Date;
   refreshTokenHash: string;
 }
@@ -68,6 +69,7 @@ export interface NewAccount {
   firstName: string;
   lastName: string;
   passwordHash: string;
+  sessionClientKind: SessionClientKind;
   sessionExpiresAt: Date;
   refreshTokenHash: string;
 }
@@ -107,7 +109,7 @@ interface IdentityTransaction {
     create(args: { data: { email: string; firstName: string; lastName: string; passwordHash: string } }): Promise<UserRow>;
   };
   session: {
-    create(args: { data: { userId: string; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
+    create(args: { data: { userId: string; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
   };
 }
 
@@ -196,6 +198,7 @@ export function identityRepository(db: IdentityDatabase) {
         const session = await tx.session.create({
           data: {
             userId:           user.id,
+            clientKind:       account.sessionClientKind,
             expiresAt:        account.sessionExpiresAt,
             refreshTokenHash: account.refreshTokenHash,
           },
@@ -256,6 +259,7 @@ export function identityRepository(db: IdentityDatabase) {
       const row = await db.session.create({
         data: {
           userId:           session.userId,
+          clientKind:       session.clientKind,
           expiresAt:        session.expiresAt,
           refreshTokenHash: session.refreshTokenHash,
         },

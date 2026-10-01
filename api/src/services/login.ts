@@ -156,9 +156,11 @@ export async function login(
   // company switching, and a switch reuses this same session (AUTH.md).
   const { sessionId } = await accounts.createSession({
     userId:           credential.user.id,
+    // This endpoint is the PHONE's: its refresh secret travels in the body.
+    clientKind:       "mobile",
     // AUTH.md: ABSOLUTE, 90 days. Not sliding, and not extended by anything
     // later — rotation will not move it either.
-    expiresAt:        new Date(Date.now() + SESSION_LIFETIME_MS),
+    expiresAt:        new Date(Date.now() + SESSION_LIFETIME_MS.mobile),
     refreshTokenHash: hashRefreshToken(refreshToken),
   });
 

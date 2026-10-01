@@ -99,9 +99,11 @@ export async function register(
       firstName:        input.firstName,
       lastName:         input.lastName,
       passwordHash,
+      // This endpoint is the PHONE's: its refresh secret travels in the body.
+      sessionClientKind: "mobile",
       // AUTH.md: ABSOLUTE, 90 days from login. Not sliding, and not extended
       // by anything later.
-      sessionExpiresAt: new Date(Date.now() + SESSION_LIFETIME_MS),
+      sessionExpiresAt: new Date(Date.now() + SESSION_LIFETIME_MS.mobile),
       refreshTokenHash: hashRefreshToken(refreshToken),
     });
   } catch (error) {

@@ -78,6 +78,7 @@ function fixtures(options: { active?: boolean } = {}) {
     session: {
       findUnique: () => Promise.resolve({
         id: SESSION_ID, userId: USER_ID,
+        clientKind: "mobile" as const,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), revokedAt: null,
         previousRefreshTokenGraceUntil: null,
       }),

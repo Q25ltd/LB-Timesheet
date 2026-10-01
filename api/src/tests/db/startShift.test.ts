@@ -120,6 +120,7 @@ async function newDriver(
   const session = await prisma.session.create({
     data: {
       userId:           user.id,
+      clientKind:       "mobile",
       expiresAt:        new Date(Date.now() + 90 * DAY),
       refreshTokenHash: createHmac("sha256", TAG).update(`refresh-${String(seq)}`).digest("hex"),
     },

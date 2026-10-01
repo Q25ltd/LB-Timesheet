@@ -507,6 +507,7 @@ test("C4. rotateCurrent applies ONLY to the digest the caller presented — the 
   // below is attributable to the condition and not to an impossible call.
   const applied = await sessions.rotateCurrent({
     sessionId:       driver.sessionId,
+    clientKind:      "mobile",
     presentedDigest: digest(live),
     nextDigest:      appliedDigest,
     graceUntil:      new Date(now.getTime() + 60_000),
@@ -518,6 +519,7 @@ test("C4. rotateCurrent applies ONLY to the digest the caller presented — the 
   // Only the row has moved on; every argument but `nextDigest` is identical.
   const stale = await sessions.rotateCurrent({
     sessionId:       driver.sessionId,
+    clientKind:      "mobile",
     presentedDigest: digest(live),
     nextDigest:      staleDigest,
     graceUntil:      new Date(now.getTime() + 60_000),
@@ -683,6 +685,7 @@ test("R15. the grace deadline is enforced by the atomic DB predicate, not only b
   // deadline rather than to a call that could never have applied.
   const inside = await sessions.rotateFromGrace({
     sessionId: driver.sessionId,
+    clientKind:      "mobile",
     presentedDigest,
     nextDigest: insideDigest,
     now:        new Date(deadline.getTime() - 1000),
@@ -693,6 +696,7 @@ test("R15. the grace deadline is enforced by the atomic DB predicate, not only b
   // `graceUntil > now`, which is false, so the write must match no row.
   const outside = await sessions.rotateFromGrace({
     sessionId: driver.sessionId,
+    clientKind:      "mobile",
     presentedDigest,
     nextDigest: outsideDigest,
     now:        new Date(deadline.getTime()),

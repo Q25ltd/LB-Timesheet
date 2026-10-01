@@ -12,7 +12,8 @@
 > an independent audit measured to be stronger than the design it describes.
 > That clarification changed no behaviour. Amended 2026-09-30 by D45: the
 > browser credential transport ("Browser clients" below) — an APPROVED TARGET,
-> NOT BUILT; mobile and the server-side contract are unchanged.**
+> NOT BUILT; mobile and the server-side contract are unchanged. Amended
+> 2026-10-01 by D46: Session `clientKind` and the 7-day browser lifetime.**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -169,8 +170,8 @@ the Session row, never in plaintext.
 - **TTL 90 days.** Drivers work offline for whole shifts and go on holiday for
   weeks; a short refresh TTL means a forced re-login at exactly the wrong moment,
   which is the friction PRODUCT.md §19 exists to avoid. This is the **mobile**
-  lifetime. A company browser session's lifetime is open (DECISIONS O10) and
-  is not assumed to be 90 days.
+  lifetime. A company browser session lives **7 days**, absolute (DECISIONS
+  D46, 2026-10-01); the Session's `clientKind` selects which at creation.
 - **Rotated on every use, with a grace window.** The previous token stays valid
   for a short period (60s) so a driver who loses signal mid-rotation is not
   logged out. Strict rotation without grace is a real failure mode on a lorry.
@@ -207,7 +208,8 @@ issued, and a caller refused by the race still recovers with the credential it
 holds. This is a clarification of the recovery design already specified above —
 it is not a change to it.
 
-**Rotation NEVER moves `Session.expiresAt`.** The 90-day lifetime is the
+**Rotation NEVER moves `Session.expiresAt`.** The absolute lifetime (90 days
+mobile, 7 days browser — D46) is the
 Session's; rotating credentials inside it is not a reason to extend it.
 
 **Reuse detection is ONE GENERATION deep, by construction.** The schema holds a
@@ -250,7 +252,8 @@ travels only in JSON bodies. STATUS.md owns what is built.
 | Refresh credential at rest | SecureStore | `HttpOnly` cookie, `Secure` in production, **host-only** on the Timesheets API host — never a parent domain such as `.logisticbay.com` |
 | Refresh credential in transit | JSON body | the cookie, on a credentialed request |
 | After a restart / page reload | biometric gate (optional), then `POST /auth/refresh` | refresh via the cookie |
-| Session lifetime | 90 days, absolute | **open — DECISIONS O10** |
+| Session lifetime | 90 days, absolute | **7 days, absolute** (D46, 2026-10-01) |
+| Session `clientKind` (D46) | `mobile` — refreshable through the body only | `browser` — refreshable through the cookie only |
 
 **Authority is unchanged.** Session validation, rotation with its 60-second
 grace, one-generation reuse detection, revocation, token issuance, membership

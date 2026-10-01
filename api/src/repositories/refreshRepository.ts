@@ -38,7 +38,7 @@
  * row count is the caller's proof it won. There is no read-then-write
  * anywhere in this file.
  */
-import type { ShiftStatus } from "../generated/enums.js";
+import type { SessionClientKind, ShiftStatus } from "../generated/enums.js";
 import { OPEN_SHIFT_STATUSES } from "../lib/shiftStatus.js";
 import { prismaErrorCode, UNIQUE_VIOLATION_CODE } from "./identityRepository.js";
 
@@ -80,6 +80,8 @@ type RefreshMatch = "current" | "previous";
 export interface RefreshSession {
   id: string;
   userId: string;
+  /** The transport this Session's credential may arrive through (B1). */
+  clientKind: SessionClientKind;
   expiresAt: Date;
   revokedAt: Date | null;
   previousRefreshTokenGraceUntil: Date | null;
@@ -94,6 +96,7 @@ export interface ResolvedRefresh {
 interface SessionRow {
   id: string;
   userId: string;
+  clientKind: SessionClientKind;
   expiresAt: Date;
   revokedAt: Date | null;
   previousRefreshTokenGraceUntil: Date | null;
@@ -116,6 +119,7 @@ export interface RefreshDatabase {
     updateMany(args: {
       where: {
         id: string;
+        clientKind?: SessionClientKind;
         revokedAt?: null;
         expiresAt?: { gt: Date };
         refreshTokenHash?: string;
@@ -145,9 +149,10 @@ export interface RefreshDatabase {
 
 function refreshSession(row: SessionRow): RefreshSession {
   return {
-    id:        row.id,
-    userId:    row.userId,
-    expiresAt: row.expiresAt,
+    id:         row.id,
+    userId:     row.userId,
+    clientKind: row.clientKind,
+    expiresAt:  row.expiresAt,
     revokedAt: row.revokedAt,
     previousRefreshTokenGraceUntil: row.previousRefreshTokenGraceUntil,
   };
@@ -180,9 +185,10 @@ export function refreshRepository(db: RefreshDatabase) {
     /**
      * Rotate a CURRENT credential, atomically.
      *
-     * The `where` clause restates every assumption: this Session, still
-     * holding exactly the digest that was presented, still unrevoked, still
-     * inside its absolute lifetime. Two simultaneous refreshes of the same
+     * The `where` clause restates every assumption: this Session, of the
+     * client kind whose transport presented the credential, still holding
+     * exactly the digest that was presented, still unrevoked, still inside
+     * its absolute lifetime. Two simultaneous refreshes of the same
      * credential therefore both attempt the same conditional update and
      * exactly ONE of them can match — the loser sees `count === 0` and is
      * refused, instead of overwriting the winner's brand-new credential and
@@ -195,6 +201,7 @@ export function refreshRepository(db: RefreshDatabase) {
      */
     async rotateCurrent(input: {
       sessionId: string;
+      clientKind: SessionClientKind;
       presentedDigest: string;
       nextDigest: string;
       graceUntil: Date;
@@ -203,6 +210,7 @@ export function refreshRepository(db: RefreshDatabase) {
       return appliedOrNot(db.session.updateMany({
         where: {
           id:               input.sessionId,
+          clientKind:       input.clientKind,
           refreshTokenHash: input.presentedDigest,
           revokedAt:        null,
           expiresAt:        { gt: input.now },
@@ -241,6 +249,7 @@ export function refreshRepository(db: RefreshDatabase) {
      */
     async rotateFromGrace(input: {
       sessionId: string;
+      clientKind: SessionClientKind;
       presentedDigest: string;
       nextDigest: string;
       now: Date;
@@ -248,6 +257,7 @@ export function refreshRepository(db: RefreshDatabase) {
       return appliedOrNot(db.session.updateMany({
         where: {
           id:                             input.sessionId,
+          clientKind:                     input.clientKind,
           previousRefreshTokenHash:       input.presentedDigest,
           previousRefreshTokenGraceUntil: { gt: input.now },
           revokedAt:                      null,

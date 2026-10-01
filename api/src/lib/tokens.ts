@@ -23,6 +23,7 @@
  */
 import { randomBytes, createHash } from "node:crypto";
 import type { FastifyJWTOptions, JWT } from "@fastify/jwt";
+import type { SessionClientKind } from "../generated/enums.js";
 
 /**
  * The plugin's own verify-option type. Borrowed rather than restated so
@@ -59,8 +60,24 @@ const IDENTITY_AUDIENCE = "timesheets-identity";
  */
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
-/** AUTH.md: the device session's ABSOLUTE lifetime. Not sliding, not extended. */
-export const SESSION_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A Session's ABSOLUTE lifetime, chosen once at creation by its client kind.
+ * Not sliding, and never extended — rotation does not move `expiresAt`.
+ *
+ *   mobile   90 days (AUTH.md): a driver offline for whole shifts and away
+ *            for weeks must not be forced to log in at the wrong moment.
+ *   browser   7 days (owner decision B1, 2026-10-01): a company user at an
+ *            office PC; that reasoning is the phone's and is not carried over.
+ *
+ * A Record over the enum, so a third client kind cannot exist without a
+ * lifetime being decided for it.
+ */
+export const SESSION_LIFETIME_MS: Record<SessionClientKind, number> = {
+  mobile:  90 * DAY_MS,
+  browser:  7 * DAY_MS,
+};
 
 /**
  * The registered claims whose PRESENCE is required. Not optional hardening:
