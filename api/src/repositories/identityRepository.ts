@@ -58,6 +58,7 @@ export interface AccountCredential {
 /** A new device session for an already-authenticated account (AUTH.md). */
 export interface NewSession {
   userId: string;
+  accountKind: AccountKind;
   clientKind: SessionClientKind;
   expiresAt: Date;
   refreshTokenHash: string;
@@ -83,6 +84,7 @@ export interface CreatedAccount {
 
 interface UserRow {
   id: string;
+  accountKind: AccountKind;
   firstName: string;
   lastName: string;
   email: string;
@@ -96,6 +98,8 @@ interface UserRow {
  */
 export interface AccountState {
   user: AccountUser;
+  /** Which side of the product this account belongs to (D51). Not part of any response. */
+  accountKind: AccountKind;
   emailVerified: boolean;
 }
 
@@ -121,7 +125,7 @@ interface IdentityTransaction {
     create(args: { data: { accountKind: AccountKind; email: string; firstName: string; lastName: string; passwordHash: string } }): Promise<UserRow>;
   };
   session: {
-    create(args: { data: { userId: string; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
+    create(args: { data: { userId: string; accountKind: AccountKind; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
   };
 }
 
@@ -214,6 +218,7 @@ export function identityRepository(db: IdentityDatabase) {
         const session = await tx.session.create({
           data: {
             userId:           user.id,
+            accountKind:      account.accountKind,
             clientKind:       account.sessionClientKind,
             expiresAt:        account.sessionExpiresAt,
             refreshTokenHash: account.refreshTokenHash,
@@ -239,7 +244,7 @@ export function identityRepository(db: IdentityDatabase) {
     /** The account behind an authenticated identity, and its verification state, or null if it is gone. */
     async findAccountState(userId: string): Promise<AccountState | null> {
       const row = await db.user.findUnique({ where: { id: userId } });
-      return row === null ? null : { user: accountUser(row), emailVerified: row.emailVerifiedAt !== null };
+      return row === null ? null : { user: accountUser(row), accountKind: row.accountKind, emailVerified: row.emailVerifiedAt !== null };
     },
 
     /**
@@ -275,6 +280,7 @@ export function identityRepository(db: IdentityDatabase) {
       const row = await db.session.create({
         data: {
           userId:           session.userId,
+          accountKind:      session.accountKind,
           clientKind:       session.clientKind,
           expiresAt:        session.expiresAt,
           refreshTokenHash: session.refreshTokenHash,

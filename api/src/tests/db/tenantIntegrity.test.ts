@@ -65,8 +65,8 @@ before(async () => {
   outsider = o.id;
 
   // The driver holds memberships in BOTH companies — the multi-company case (D12).
-  const mA = await prisma.companyMembership.create({ data: { companyId: companyA, userId: driver } });
-  const mB = await prisma.companyMembership.create({ data: { companyId: companyB, userId: driver } });
+  const mA = await prisma.companyMembership.create({ data: { companyId: companyA, userId: driver , accountKind: "driver" } });
+  const mB = await prisma.companyMembership.create({ data: { companyId: companyB, userId: driver , accountKind: "driver" } });
   membershipA = mA.id;
   membershipB = mB.id;
 
@@ -94,8 +94,13 @@ test("a membership defaults to driver and accepts the explicit admin role", asyn
   const defaulted = await prisma.companyMembership.findUniqueOrThrow({ where: { id: membershipA } });
   assert.equal(defaulted.role, "driver");
 
+  // The admin role belongs to a COMPANY account (D51); `outsider` stays a
+  // driver with no membership in A, as the shift-binding cases below need.
+  const companyUser = await prisma.user.create({
+    data: { accountKind: "company", email: `${TAG}-company-admin@example.com`, firstName: TAG, lastName: "admin", passwordHash: "not-a-real-hash" },
+  });
   const admin = await prisma.companyMembership.create({
-    data: { companyId: companyA, userId: outsider, role: "admin" },
+    data: { companyId: companyA, userId: companyUser.id, accountKind: "company", role: "admin" },
   });
   assert.equal(admin.role, "admin");
 });

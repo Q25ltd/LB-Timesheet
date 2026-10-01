@@ -34,6 +34,7 @@ import {
   mintIdentityToken,
   mintRefreshToken,
   mintTenantToken,
+  ACCOUNT_KIND_FOR_CLIENT,
   SESSION_LIFETIME_MS,
   type IssuedUnderSession,
 } from "../lib/tokens.js";
@@ -126,8 +127,12 @@ export async function login(
 ): Promise<IssuedUnderSession<LoginResult>> {
   const email = normaliseEmail(input.email);
 
-  // The DRIVER account with this email — never a company account sharing it.
-  const credential = await accounts.findCredentialByEmail("driver", email);
+  // The account of THIS surface's kind (D51): the phone finds the driver
+  // account, the website the company account — never the other kind sharing
+  // the address. A miss is answered exactly like a wrong password, so a
+  // surface cannot be asked whether the other kind exists.
+  const accountKind = ACCOUNT_KIND_FOR_CLIENT[clientKind];
+  const credential = await accounts.findCredentialByEmail(accountKind, email);
 
   // No such account. The verification below matches NOTHING — its only job is
   // to spend the same ~230 ms a real account spends, so the two paths cannot
@@ -165,6 +170,7 @@ export async function login(
   // company switching, and a switch reuses this same session (AUTH.md).
   const { sessionId } = await accounts.createSession({
     userId:           credential.user.id,
+    accountKind,
     clientKind,
     // ABSOLUTE — 90 days mobile, 7 days browser (D46). Not sliding, and not
     // extended by anything later — rotation will not move it either.

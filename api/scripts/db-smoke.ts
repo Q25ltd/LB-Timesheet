@@ -113,7 +113,7 @@ async function main(url: string): Promise<void> {
         data: { accountKind: "driver", email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
       });
       const membership = await tx.companyMembership.create({
-        data: { companyId: company.id, userId: driver.id, role: "driver" },
+        data: { companyId: company.id, userId: driver.id, accountKind: "driver", role: "driver" },
       });
 
       await assertRejectsWithCode(

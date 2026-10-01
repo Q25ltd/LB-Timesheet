@@ -131,6 +131,7 @@ interface MembershipRow {
 /** The driver's own row as the identity posture reads it back (D22). */
 interface UserRow {
   id: string;
+  accountKind: "driver" | "company";
   firstName: string;
   lastName: string;
   email: string;
@@ -142,6 +143,7 @@ interface UserRow {
 function driverRow(): UserRow {
   return {
     id:        USER_ID,
+    accountKind: "driver",
     firstName: "Nerijus",
     lastName:  "Kuizinas",
     email:     "driver@example.com",
@@ -162,6 +164,7 @@ function driverRow(): UserRow {
 function otherUserRow(): UserRow {
   return {
     id:        OTHER_USER,
+    accountKind: "driver",
     firstName: "Someone",
     lastName:  "Else",
     email:     "someone.else@example.com",

@@ -111,16 +111,21 @@ async function newDriver(
   const firstName = TAG;
   const lastName  = label;
   const name      = `${firstName} ${lastName}`;
+  // An `admin` membership belongs to a COMPANY account, with a browser
+  // session (D51); everything else here is a driver on the phone.
+  const role = options.role ?? "driver";
+  const accountKind = role === "admin" ? "company" : "driver";
   const user = await prisma.user.create({
-    data: { accountKind: "driver", email: `${TAG}-${String(seq)}-${label}@example.com`, firstName, lastName, passwordHash: "not-a-real-hash" },
+    data: { accountKind, email: `${TAG}-${String(seq)}-${label}@example.com`, firstName, lastName, passwordHash: "not-a-real-hash" },
   });
   const membership = await prisma.companyMembership.create({
-    data: { companyId, userId: user.id, role: options.role ?? "driver", active: options.active ?? true },
+    data: { companyId, userId: user.id, accountKind, role, active: options.active ?? true },
   });
   const session = await prisma.session.create({
     data: {
       userId:           user.id,
-      clientKind:       "mobile",
+      accountKind,
+      clientKind:       accountKind === "company" ? "browser" : "mobile",
       expiresAt:        new Date(Date.now() + 90 * DAY),
       refreshTokenHash: createHmac("sha256", TAG).update(`refresh-${String(seq)}`).digest("hex"),
     },
@@ -131,7 +136,7 @@ async function newDriver(
 /** A second membership for a driver who works for two companies (D12). */
 async function addMembership(driver: Driver, companyId: string): Promise<Driver> {
   const membership = await prisma.companyMembership.create({
-    data: { companyId, userId: driver.userId, role: "driver", active: true },
+    data: { companyId, userId: driver.userId, accountKind: "driver", role: "driver", active: true },
   });
   return { ...driver, companyId, membershipId: membership.id };
 }
@@ -269,18 +274,16 @@ test("an active driver starts one ACTIVE shift with ZERO segments, owned by the 
 // B — role
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("an active ADMIN membership may start its OWN shift, bound to its own identity", async () => {
+// D51 supersedes D19's "an active driver OR admin membership starts a shift":
+// an `admin` membership now belongs to a COMPANY account, and company
+// accounts do not drive. (This case previously asserted the opposite, 201.)
+test("an active ADMIN membership — a company account — may NOT start a shift", async () => {
   const admin = await newDriver("admin", companyA, { role: "admin" });
 
   const res = await startShift(admin, body(yesterdayMorning()));
-  assert.equal(res.statusCode, 201, "admin is not a role gate for starting your own shift");
-
-  const rows = await shiftsOf(admin);
-  assert.equal(rows.length, 1);
-  const [shift] = rows;
-  assert.ok(shift !== undefined);
-  assert.equal(shift.userId, admin.userId,             "an admin's shift is still their own");
-  assert.equal(shift.membershipId, admin.membershipId, "admin confers no authority over another membership");
+  assert.equal(res.statusCode, 403, "a company account is not a driver");
+  assert.deepEqual(res.json(), { error: "Not allowed", code: "FORBIDDEN" }, "refused generically (D17)");
+  assert.equal((await shiftsOf(admin)).length, 0, "and nothing was written");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

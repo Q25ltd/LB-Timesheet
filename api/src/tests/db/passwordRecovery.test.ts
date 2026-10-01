@@ -12,8 +12,11 @@
  * Reset: the 30-minute token, stored only as a digest, single use, newest
  * issue wins; the new password is held to the canonical policy; and ONE
  * transaction consumes the token, replaces the hash and revokes EVERY session
- * the account has — phone and browser — so no device stays signed in after a
- * recovery.
+ * the account has, so no device stays signed in after a recovery.
+ *
+ * These are the WEBSITE's flows, so they act on COMPANY accounts (D51). Each
+ * fixture also has a DRIVER account with the same email, signed in on a phone,
+ * which every case must leave untouched.
  *
  * Change: the authenticated account, its current password, the canonical
  * policy for the new one; every OTHER session revoked, the current one kept.
@@ -107,24 +110,41 @@ function stringField(body: unknown, key: string): string {
 interface Devices {
   email: string;
   userId: string;
-  phone: { identityToken: string; refreshToken: string };
-  browser: { identityToken: string; cookieSecret: string };
+  /** The browser this test acts from. */
+  here: { identityToken: string; cookieSecret: string };
+  /** A second browser signed in to the SAME company account. */
+  other: { identityToken: string; cookieSecret: string };
+  /** A separate DRIVER account with the same email, on a phone (D51). */
+  driver: { userId: string; refreshToken: string };
 }
 
-/** One account, signed in on a phone AND in a browser. */
+function cookieSecretOf(res: Injected): string {
+  const secret = /^lbts_refresh=([^;]+)/.exec(res.setCookie ?? "")?.[1];
+  assert.ok(secret !== undefined, "a browser sign-in sets the refresh cookie");
+  return secret;
+}
+
+/**
+ * One COMPANY account (the website's — D51) signed in on two browsers, and a
+ * DRIVER account with the same email signed in on a phone. Website password
+ * recovery and change act on the company account; the driver account must
+ * come through every case untouched.
+ */
 async function signedInEverywhere(): Promise<Devices> {
   const email = freshEmail();
-  const reg = await inject({ url: "/auth/register", payload: { firstName: "Pat", lastName: "Word", email, password: OLD_PASSWORD } });
+  const reg = await inject({ url: "/auth/web/register", origin: true, payload: { firstName: "Pat", lastName: "Word", email, password: OLD_PASSWORD } });
   assert.equal(reg.statusCode, 201);
-  const web = await inject({ url: "/auth/web/login", origin: true, payload: { email, password: OLD_PASSWORD } });
-  assert.equal(web.statusCode, 200);
-  const cookieSecret = /^lbts_refresh=([^;]+)/.exec(web.setCookie ?? "")?.[1];
-  assert.ok(cookieSecret !== undefined);
-  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
+  const second = await inject({ url: "/auth/web/login", origin: true, payload: { email, password: OLD_PASSWORD } });
+  assert.equal(second.statusCode, 200);
+  const driver = await inject({ url: "/auth/register", payload: { firstName: "Pat", lastName: "Word", email, password: OLD_PASSWORD } });
+  assert.equal(driver.statusCode, 201, "the same email may also be a driver account");
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });
+  outbox.length = 0;   // registration's verification email is not under test here
   return {
     email, userId: user.id,
-    phone: { identityToken: stringField(reg.body, "identityToken"), refreshToken: stringField(reg.body, "refreshToken") },
-    browser: { identityToken: stringField(web.body, "identityToken"), cookieSecret },
+    here:   { identityToken: stringField(reg.body, "identityToken"), cookieSecret: cookieSecretOf(reg) },
+    other:  { identityToken: stringField(second.body, "identityToken"), cookieSecret: cookieSecretOf(second) },
+    driver: { userId: stringField(field(driver.body, "user"), "id"), refreshToken: stringField(driver.body, "refreshToken") },
   };
 }
 
@@ -145,16 +165,20 @@ function resetTokenSentTo(to: string, nth = 0): string {
   return match[1];
 }
 
+/** The COMPANY account signs in on the website with this password. */
 async function canLogIn(email: string, password: string): Promise<boolean> {
-  return (await inject({ url: "/auth/login", payload: { email, password } })).statusCode === 200;
+  return (await inject({ url: "/auth/web/login", origin: true, payload: { email, password } })).statusCode === 200;
 }
 
-async function phoneRefreshWorks(devices: Devices): Promise<boolean> {
-  return (await inject({ url: "/auth/refresh", payload: { refreshToken: devices.phone.refreshToken } })).statusCode === 200;
+async function cookieRefreshWorks(secret: string): Promise<boolean> {
+  return (await inject({ url: "/auth/web/refresh", origin: true, cookie: `lbts_refresh=${secret}` })).statusCode === 200;
 }
 
-async function browserRefreshWorks(devices: Devices): Promise<boolean> {
-  return (await inject({ url: "/auth/web/refresh", origin: true, cookie: `lbts_refresh=${devices.browser.cookieSecret}` })).statusCode === 200;
+/** The same-email DRIVER account: still signs in on the phone with its own password, still refreshes. */
+async function driverUntouched(devices: Devices): Promise<boolean> {
+  const login = await inject({ url: "/auth/login", payload: { email: devices.email, password: OLD_PASSWORD } });
+  const refreshed = await inject({ url: "/auth/refresh", payload: { refreshToken: devices.driver.refreshToken } });
+  return login.statusCode === 200 && refreshed.statusCode === 200;
 }
 
 async function storedHash(userId: string): Promise<string> {
@@ -186,8 +210,10 @@ test("PR1. forgot answers BYTE-IDENTICALLY for a known and an unknown address; o
     assert.equal(res.raw, known.raw, "no body difference discloses whether an account exists");
   }
   assert.deepEqual(outbox.map(m => m.to), [devices.email, devices.email], "one message per request for the real account; none for the unknown");
+  const driverTokens = await prisma.accountToken.count({ where: { userId: devices.driver.userId } });
+  assert.equal(driverTokens, 0, "the website's recovery issues nothing to the DRIVER account sharing the email (D51)");
 
-  const rows = await prisma.$queryRaw<{ row: string }[]>`SELECT row_to_json(t)::text AS row FROM "AccountToken" t WHERE "userId" = ${devices.userId}`;
+  const rows = await prisma.$queryRaw<{ row: string }[]>`SELECT row_to_json(t)::text AS row FROM "AccountToken" t WHERE "userId" = ${devices.userId} AND purpose = 'password_reset'`;
   const token = resetTokenSentTo(devices.email, 1);
   assert.equal(rows.length, 1, "one reset row — the second request replaced the first");
   assert.ok(!(rows[0]?.row ?? "").includes(token), "the plaintext appears in no column");
@@ -198,9 +224,10 @@ test("PR1. forgot answers BYTE-IDENTICALLY for a known and an unknown address; o
 // Reset
 // ═════════════════════════════════════════════════════════════════════════════
 
-test("PR2. reset replaces the password and revokes EVERY session — phone and browser — in one act", async () => {
+test("PR2. reset replaces the company account's password and revokes EVERY one of its sessions in one act — the same-email driver account untouched", async () => {
   const devices = await signedInEverywhere();
-  assert.ok(await phoneRefreshWorks(devices));
+  assert.ok(await cookieRefreshWorks(devices.other.cookieSecret));
+  const driverHashBefore = await storedHash(devices.driver.userId);
   await forgot(devices.email);
 
   const res = await reset(resetTokenSentTo(devices.email));
@@ -214,12 +241,16 @@ test("PR2. reset replaces the password and revokes EVERY session — phone and b
   // The two `canLogIn` checks above created sessions AFTER the reset; only
   // those may be live. Every session from before is revoked.
   assert.equal(live, 1, "only the session created by logging in with the new password is live");
-  assert.ok(!await phoneRefreshWorks(devices), "the phone's refresh credential is dead");
-  assert.ok(!await browserRefreshWorks(devices), "the browser's cookie is dead");
-  for (const token of [devices.phone.identityToken, devices.browser.identityToken]) {
+  assert.ok(!await cookieRefreshWorks(devices.here.cookieSecret), "this browser's cookie is dead");
+  assert.ok(!await cookieRefreshWorks(devices.other.cookieSecret), "and the other browser's");
+  for (const token of [devices.here.identityToken, devices.other.identityToken]) {
     const me = await inject({ method: "GET", url: "/auth/me", token });
     assert.equal(me.statusCode, 401, "and so is every access token issued before the reset");
   }
+
+  // The DRIVER account with the same email is a different account (D51).
+  assert.equal(await storedHash(devices.driver.userId), driverHashBefore, "its password is unchanged");
+  assert.ok(await driverUntouched(devices), "and its phone stays signed in");
 });
 
 test("PR3. used, expired, tampered, superseded and wrong-purpose tokens are refused identically and change NOTHING", async () => {
@@ -237,7 +268,7 @@ test("PR3. used, expired, tampered, superseded and wrong-purpose tokens are refu
   assert.equal(field(superseded.body, "code"), "TOKEN_INVALID");
   for (const res of [tampered, unknown]) assert.equal(res.raw, superseded.raw);
   assert.equal(await storedHash(devices.userId), hashBefore, "nothing changed");
-  assert.ok(await phoneRefreshWorks(devices), "and nobody was signed out");
+  assert.ok(await cookieRefreshWorks(devices.other.cookieSecret), "and nobody was signed out");
 
   await prisma.$executeRaw`UPDATE "AccountToken" SET "issuedAt" = now() - interval '40 minutes', "expiresAt" = now() - interval '10 minutes' WHERE "userId" = ${devices.userId}`;
   const expired = await reset(second);
@@ -253,7 +284,7 @@ test("PR3. used, expired, tampered, superseded and wrong-purpose tokens are refu
   assert.ok(await canLogIn(devices.email, NEW_PASSWORD), "the reuse changed nothing");
 
   // An email-verification token is not a reset token.
-  const signedIn = await inject({ url: "/auth/login", payload: { email: devices.email, password: NEW_PASSWORD } });
+  const signedIn = await inject({ url: "/auth/web/login", origin: true, payload: { email: devices.email, password: NEW_PASSWORD } });
   const verify = await inject({ url: "/auth/email-verification", token: stringField(signedIn.body, "identityToken") });
   assert.equal(verify.statusCode, 204);
   const verificationMessage = outbox.find(m => m.subject.includes("Confirm"));
@@ -311,32 +342,33 @@ function change(token: string, payload: object): Promise<Injected> {
   return inject({ url: "/auth/password/change", token, payload });
 }
 
-test("PC1. change keeps the CURRENT session and revokes every OTHER one", async () => {
+test("PC1. change keeps the CURRENT session and revokes every OTHER one — and never touches the same-email driver account", async () => {
   const devices = await signedInEverywhere();
-  // The browser is the device making the change.
-  const res = await change(devices.browser.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD });
+  // `here` is the browser making the change.
+  const res = await change(devices.here.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD });
 
   assert.equal(res.statusCode, 204, `a correct current password changes it — got ${res.raw}`);
   assert.ok(await canLogIn(devices.email, NEW_PASSWORD));
   assert.ok(!await canLogIn(devices.email, OLD_PASSWORD));
   assert.ok(/^\$2[aby]\$12\$/.test(await storedHash(devices.userId)), "bcrypt at the unchanged cost 12");
 
-  const me = await inject({ method: "GET", url: "/auth/me", token: devices.browser.identityToken });
+  const me = await inject({ method: "GET", url: "/auth/me", token: devices.here.identityToken });
   assert.equal(me.statusCode, 200, "the session that made the change is still signed in");
-  assert.ok(await browserRefreshWorks(devices), "and can still refresh");
-  assert.ok(!await phoneRefreshWorks(devices), "every OTHER session — the phone — is revoked");
-  const phoneMe = await inject({ method: "GET", url: "/auth/me", token: devices.phone.identityToken });
-  assert.equal(phoneMe.statusCode, 401);
+  assert.ok(await cookieRefreshWorks(devices.here.cookieSecret), "and can still refresh");
+  assert.ok(!await cookieRefreshWorks(devices.other.cookieSecret), "every OTHER session of this account is revoked");
+  const otherMe = await inject({ method: "GET", url: "/auth/me", token: devices.other.identityToken });
+  assert.equal(otherMe.statusCode, 401);
+  assert.ok(await driverUntouched(devices), "the driver account with the same email is a different account (D51)");
 });
 
 test("PC2. a wrong current password is the generic 403 and changes nothing", async () => {
   const devices = await signedInEverywhere();
   const hashBefore = await storedHash(devices.userId);
-  const res = await change(devices.phone.identityToken, { currentPassword: "not-my-password-at-all", newPassword: NEW_PASSWORD });
+  const res = await change(devices.other.identityToken, { currentPassword: "not-my-password-at-all", newPassword: NEW_PASSWORD });
   assert.equal(res.statusCode, 403);
   assert.deepEqual(res.body, CANONICAL_403);
   assert.equal(await storedHash(devices.userId), hashBefore);
-  assert.ok(await browserRefreshWorks(devices), "nobody was signed out");
+  assert.ok(await cookieRefreshWorks(devices.here.cookieSecret), "nobody was signed out");
 });
 
 test("PC3. change requires an identity token, the canonical policy, and can name nobody else", async () => {
@@ -345,12 +377,12 @@ test("PC3. change requires an identity token, the canonical policy, and can name
   assert.equal(anonymous.statusCode, 401);
   assert.deepEqual(anonymous.body, CANONICAL_401);
 
-  assert.equal((await change(devices.phone.identityToken, { currentPassword: OLD_PASSWORD, newPassword: "short" })).statusCode, 400);
-  assert.equal((await change(devices.phone.identityToken, { currentPassword: OLD_PASSWORD, newPassword: "é".repeat(37) })).statusCode, 400);
+  assert.equal((await change(devices.other.identityToken, { currentPassword: OLD_PASSWORD, newPassword: "short" })).statusCode, 400);
+  assert.equal((await change(devices.other.identityToken, { currentPassword: OLD_PASSWORD, newPassword: "é".repeat(37) })).statusCode, 400);
 
   const victim = await signedInEverywhere();
   for (const extra of [{ userId: victim.userId }, { email: victim.email }, { membershipId: "m" }, { companyId: "c" }]) {
-    const res = await change(devices.phone.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD, ...extra });
+    const res = await change(devices.other.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD, ...extra });
     assert.equal(res.statusCode, 400, `refused, not ignored: ${Object.keys(extra).join(",")}`);
   }
   assert.ok(await canLogIn(victim.email, OLD_PASSWORD), "no other account's password can be touched");
@@ -379,7 +411,7 @@ test("PR7. a reset that fails part-way leaves the token unspent, the password un
   }));
 
   assert.equal(await storedHash(devices.userId), hashBefore);
-  assert.ok(await phoneRefreshWorks(devices), "no session was revoked");
+  assert.ok(await cookieRefreshWorks(devices.other.cookieSecret), "no session was revoked");
   assert.equal((await reset(token)).statusCode, 204, "and the token was NOT consumed — it still works");
 });
 

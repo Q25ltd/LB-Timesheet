@@ -113,7 +113,8 @@ async function webRegistered(): Promise<{ email: string; userId: string; identit
   const email = freshEmail();
   const res = await inject({ url: "/auth/web/register", payload: { firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `web registration must succeed — got ${res.raw}`);
-  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
+  // The website registers a COMPANY account (D51).
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });
   return { email, userId: user.id, identityToken: stringField(res.body, "identityToken"), token: tokenSentTo(email) };
 }
 
@@ -237,16 +238,24 @@ test("V5. resend is IDENTITY-posture: an anonymous caller is refused; a verified
   assert.equal(outbox.length, 0, "an already-verified address is not mailed again");
 });
 
-test("V6. a phone-registered account is NOT mailed at registration (mobile unchanged) but can verify through resend, and still logs in unverified", async () => {
+test("V6. a phone-registered DRIVER account is NOT mailed at registration (mobile unchanged) but can verify through resend, and still logs in unverified — on the phone only", async () => {
   const email = freshEmail();
   const registered = await inject({ url: "/auth/register", origin: false, payload: { firstName: "Mo", lastName: "Bile", email, password: PASSWORD } });
   assert.equal(registered.statusCode, 201);
   assert.equal(outbox.length, 0, "mobile registration sends no email");
 
   const login = await inject({ url: "/auth/login", origin: false, payload: { email, password: PASSWORD } });
-  assert.equal(login.statusCode, 200, "an unverified account logs in on the phone");
+  assert.equal(login.statusCode, 200, "an unverified driver account logs in on the phone");
+  // A driver account is not a website account (D51) — refused as bad credentials.
   const webLogin = await inject({ url: "/auth/web/login", payload: { email, password: PASSWORD } });
-  assert.equal(webLogin.statusCode, 200, "and in the browser");
+  assert.equal(webLogin.statusCode, 401, "a driver account does not sign in on the website");
+
+  // An unverified COMPANY account does sign in on the website: verification
+  // gates what it may do, not signing in.
+  const company = await webRegistered();
+  const companyLogin = await inject({ url: "/auth/web/login", payload: { email: company.email, password: PASSWORD } });
+  assert.equal(companyLogin.statusCode, 200, "an unverified company account signs in on the website");
+  outbox.length = 0;
 
   const resend = await inject({ url: "/auth/email-verification", token: stringField(registered.body, "identityToken"), origin: false });
   assert.equal(resend.statusCode, 204);

@@ -98,7 +98,7 @@ function fixtures(options: { active?: boolean } = {}) {
     // from them, so DRIVER_NAME below is the DERIVED value, not a column.
     user: {
       findUnique: () => Promise.resolve({
-        id: USER_ID, email: "fixture-driver@example.com",
+        id: USER_ID, accountKind: "driver" as const, email: "fixture-driver@example.com",
         firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME, emailVerifiedAt: null,
         passwordHash: "not-a-real-hash",
       }),

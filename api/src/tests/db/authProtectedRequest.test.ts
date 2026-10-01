@@ -101,17 +101,19 @@ before(async () => {
   const company = await prisma.company.create({ data: { name: `${TAG}-A` } });
   const other   = await prisma.company.create({ data: { name: `${TAG}-B` } });
   const user    = await prisma.user.create({
-    data: { accountKind: "driver", email: `${TAG}-driver@example.com`, firstName: TAG, lastName: "driver", passwordHash: "not-a-real-hash" },
+    data: { accountKind: "company", email: `${TAG}-admin@example.com`, firstName: TAG, lastName: "admin", passwordHash: "not-a-real-hash" },
   });
   // role admin, while the token carries no role at all — so observing "admin"
-  // can only mean the pipeline read this row.
+  // can only mean the pipeline read this row. An administrator is a COMPANY
+  // account (D51): the database refuses an admin membership on a driver.
   const membership = await prisma.companyMembership.create({
-    data: { companyId: company.id, userId: user.id, role: "admin", active: true },
+    data: { companyId: company.id, userId: user.id, accountKind: "company", role: "admin", active: true },
   });
   const session = await prisma.session.create({
     data: {
       userId:           user.id,
-      clientKind:       "mobile",
+      accountKind:      "company",
+      clientKind:       "browser",
       expiresAt:        new Date(Date.now() + 90 * DAY),
       refreshTokenHash: createHmac("sha256", TAG).update("refresh").digest("hex"),
     },

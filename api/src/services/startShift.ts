@@ -154,6 +154,10 @@ export async function startShift(
   // (D17). AUTH.md's narrow exceptions for a deactivated membership concern an
   // ALREADY-OPEN shift; starting a new one is named as denied.
   const ctx = authorizeTenant(auth);
+  // Only a DRIVER membership starts a shift (D51). A company account's
+  // membership is never `driver` — the database guarantees it — so this
+  // refuses every company-side identity, whatever tenant authority it holds.
+  if (auth.role !== "driver") throw new AppError(403, "Not allowed", "FORBIDDEN");
   const startedAt = new Date(input.startedAt);
 
   // The common offline case: the phone never saw the first response and is

@@ -114,7 +114,7 @@ async function seedMembership(
     data: { name: companyName },
   });
   const membership = await prisma.companyMembership.create({
-    data: { companyId: company.id, userId, role: "driver", active },
+    data: { companyId: company.id, userId, accountKind: "driver", role: "driver", active },
   });
   return { companyId: company.id, companyName, membershipId: membership.id };
 }

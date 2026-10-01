@@ -62,6 +62,7 @@ const CANONICAL_401 = { error: "Not authenticated", code: "UNAUTHENTICATED" };
 
 interface StubUserRow {
   id: string;
+  accountKind: "driver" | "company";
   firstName: string;
   lastName: string;
   email: string;

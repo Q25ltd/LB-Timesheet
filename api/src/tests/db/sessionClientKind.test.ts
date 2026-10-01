@@ -96,19 +96,25 @@ async function registered(): Promise<{ email: string; userId: string; sessionId:
 }
 
 /**
- * A BROWSER session, seeded directly: the browser login that creates one is
- * the next increment's, and this file proves the body endpoint's refusal
+ * A BROWSER session, seeded directly — on a COMPANY account, because only a
+ * company account may hold one (D51: the database refuses a browser session
+ * on a driver account). The browser login that creates one is covered in
+ * browserSession.test.ts; this file proves the BODY endpoint's refusal
  * independently of it.
  */
-async function browserSession(userId: string, options: { previous?: string } = {}): Promise<{ sessionId: string; refreshToken: string }> {
+async function browserSession(options: { previous?: string } = {}): Promise<{ sessionId: string; refreshToken: string }> {
+  const userId = randomUUID();
+  await prisma.$executeRaw`
+    INSERT INTO "User" ("id", "accountKind", "email", "firstName", "lastName", "passwordHash", "updatedAt")
+    VALUES (${userId}, 'company'::"AccountKind", ${freshEmail()}, 'Co', 'Admin', 'not-a-real-hash', now())`;
   const refreshToken = randomBytes(32).toString("base64url");
   const sessionId = randomUUID();
   const previousHash = options.previous === undefined ? null : digest(options.previous);
   const graceUntil = options.previous === undefined ? null : new Date(Date.now() + 60_000);
   await prisma.$executeRaw`
-    INSERT INTO "Session" ("id", "userId", "clientKind", "expiresAt", "refreshTokenHash",
+    INSERT INTO "Session" ("id", "userId", "accountKind", "clientKind", "expiresAt", "refreshTokenHash",
                            "previousRefreshTokenHash", "previousRefreshTokenGraceUntil", "updatedAt")
-    VALUES (${sessionId}, ${userId}, 'browser'::"SessionClientKind", ${new Date(Date.now() + 7 * DAY)},
+    VALUES (${sessionId}, ${userId}, 'company'::"AccountKind", 'browser'::"SessionClientKind", ${new Date(Date.now() + 7 * DAY)},
             ${digest(refreshToken)}, ${previousHash}, ${graceUntil}, now())`;
   return { sessionId, refreshToken };
 }
@@ -172,8 +178,7 @@ test("K3. a mobile session still refreshes through the body — positive control
 });
 
 test("K4. a BROWSER session's CURRENT credential is refused by the body endpoint, and nothing rotates", async () => {
-  const account = await registered();
-  const browser = await browserSession(account.userId);
+  const browser = await browserSession();
   const prior = await prisma.session.findUniqueOrThrow({ where: { id: browser.sessionId } });
 
   const res = await post("/auth/refresh", { refreshToken: browser.refreshToken });
@@ -188,9 +193,8 @@ test("K4. a BROWSER session's CURRENT credential is refused by the body endpoint
 });
 
 test("K5. a BROWSER session's PREVIOUS credential inside grace is refused by the body endpoint too", async () => {
-  const account = await registered();
   const superseded = randomBytes(32).toString("base64url");
-  const browser = await browserSession(account.userId, { previous: superseded });
+  const browser = await browserSession({ previous: superseded });
   const prior = await prisma.session.findUniqueOrThrow({ where: { id: browser.sessionId } });
 
   const res = await post("/auth/refresh", { refreshToken: superseded });
@@ -206,8 +210,7 @@ test("K6. the repository's conditional writes restate the kind — a mismatched 
   // The service refuses a mismatch first, so this proves the WRITE carries the
   // condition too (the F-26 discipline): a caller that got the kind wrong
   // cannot rotate even if the service check were removed.
-  const account = await registered();
-  const browser = await browserSession(account.userId);
+  const browser = await browserSession();
   const { refreshRepository } = await import("../../repositories/refreshRepository.js");
   const sessions = refreshRepository(prisma);
   const now = new Date();
@@ -233,9 +236,8 @@ test("K7. a BROWSER session's stale credential in a body cannot trigger REUSE re
   // browser session — the body transport would still be able to ACT on a
   // browser session. The conditional writes cannot catch this: revocation is
   // not a rotation. This case is what makes the service check load-bearing.
-  const account = await registered();
   const superseded = randomBytes(32).toString("base64url");
-  const browser = await browserSession(account.userId, { previous: superseded });
+  const browser = await browserSession({ previous: superseded });
   await prisma.session.update({
     where: { id: browser.sessionId },
     data:  { previousRefreshTokenGraceUntil: new Date(Date.now() - 1000) },
@@ -250,9 +252,8 @@ test("K7. a BROWSER session's stale credential in a body cannot trigger REUSE re
 });
 
 test("K8. the recovery rotation's conditional write restates the kind as well", async () => {
-  const account = await registered();
   const superseded = randomBytes(32).toString("base64url");
-  const browser = await browserSession(account.userId, { previous: superseded });
+  const browser = await browserSession({ previous: superseded });
   const { refreshRepository } = await import("../../repositories/refreshRepository.js");
   const sessions = refreshRepository(prisma);
   const now = new Date();

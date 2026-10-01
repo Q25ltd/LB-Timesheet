@@ -146,6 +146,10 @@ Agency and casual driving is normal in UK haulage, so a driver identity is globa
 and holds a **membership per company** — the same shape the TMS already uses
 (`CompanyMembership`). This reverses the earlier lean in O9, now closed.
 
+*Clarified 2026-10-01 by D51:* this is the **driver** account. A company's
+own login is a separate company account; a driver account holds only
+`driver` memberships (enforced by the database).
+
 Consequences — all cheap now, all expensive to retrofit:
 
 - **Schema.** Driver ↔ membership ↔ company. A shift belongs to one company and
@@ -348,9 +352,11 @@ one shift starting at 06:00, and until the truck arrives it has no asset
 segment — not a placeholder vehicle, not `"UNKNOWN"`, not zero mileage, not an
 empty segment. Vehicle type belongs to the asset flow, not to starting work.
 
-**Both roles may start their own shift.** An active `driver` and an active
+~~**Both roles may start their own shift.** An active `driver` and an active
 `admin` membership may each start a shift for *itself*; there is no role gate
-and no RBAC. Admin confers no authority over another user or membership —
+and no RBAC.~~ *Superseded 2026-10-01 by D51:* an `admin` membership now
+belongs to a company account, and company accounts never start shifts — only
+a `driver` membership starts one (generic 403 otherwise). Admin confers no authority over another user or membership —
 ownership comes from `TenantContext` in every case.
 
 **One open shift, and the refusal says nothing.** A genuinely new start while
@@ -437,6 +443,9 @@ This applies to both ends of a shift. Finish Shift is unbuilt; the rule is
 recorded now so it is not re-litigated when `endedAt` arrives.
 
 ### D21 — A driver account exists without a company; identity tokens carry no tenant authority (2026-09-10)
+
+*Clarified 2026-10-01 by D51:* this is the **driver** account, registered on
+the phone. Registration on the website creates a separate COMPANY account.
 
 **Implemented for registration in Registration Increment 1** — identity
 tokens, the three route postures and `/auth/me`. The login and company-switch
@@ -1727,6 +1736,10 @@ mobile lifetime is deliberately not assumed — and company authorization
 
 Owner decision (B1); closes **O10**.
 
+*Clarified 2026-10-01 by D51:* the client kind follows the ACCOUNT kind — a
+driver account only ever holds mobile sessions and a company account only
+browser sessions, enforced by the database (`Session_kind_matches_client`).
+
 **`Session.clientKind` — `mobile` or `browser` — is fixed when the Session is
 created and never changes.** It is what makes the browser/phone transport
 boundary a SERVER rule rather than a client habit:
@@ -1789,6 +1802,10 @@ D24's `409 EMAIL_IN_USE`.
 
 Owner decision (B3). Account registration and company creation stay
 **separate** concepts:
+
+*Superseded 2026-10-01 by D51 — company-first registration (not yet built;
+STATUS.md owns build state). Already true: only a COMPANY account may create a
+company; a driver account is refused with the generic 403.*
 
 1. a person creates and authenticates their OWN identity (phone or web);
 2. proves ownership of their email (D47);

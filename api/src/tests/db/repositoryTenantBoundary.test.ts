@@ -53,8 +53,8 @@ before(async () => {
   const driverB = await prisma.user.create({
     data: { accountKind: "driver", email: `${TAG}-b@example.com`, firstName: TAG, lastName: "b", passwordHash: "not-a-real-hash" },
   });
-  const memberA = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA.id } });
-  const memberB = await prisma.companyMembership.create({ data: { companyId: companyB.id, userId: driverB.id } });
+  const memberA = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA.id , accountKind: "driver" } });
+  const memberB = await prisma.companyMembership.create({ data: { companyId: companyB.id, userId: driverB.id , accountKind: "driver" } });
 
   ctxA = TenantContext.trust({ companyId: companyA.id, userId: driverA.id, membershipId: memberA.id });
   ctxB = TenantContext.trust({ companyId: companyB.id, userId: driverB.id, membershipId: memberB.id });
@@ -79,7 +79,7 @@ before(async () => {
   const driverA2 = await prisma.user.create({
     data: { accountKind: "driver", email: `${TAG}-a2@example.com`, firstName: TAG, lastName: "a2", passwordHash: "not-a-real-hash" },
   });
-  const memberA2 = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA2.id } });
+  const memberA2 = await prisma.companyMembership.create({ data: { companyId: companyA.id, userId: driverA2.id , accountKind: "driver" } });
   ctxA2 = TenantContext.trust({ companyId: companyA.id, userId: driverA2.id, membershipId: memberA2.id });
 
   const segA = await repo.addSegment(ctxA, shiftA, {

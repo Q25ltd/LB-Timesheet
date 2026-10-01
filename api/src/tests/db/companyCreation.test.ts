@@ -33,6 +33,7 @@ if (connectionString === undefined || connectionString === "") {
 process.env.JWT_SECRET = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
 process.env.NODE_ENV   = "test";
 process.env.WEB_ORIGIN = "https://allowed.example.com";
+const ORIGIN = "https://allowed.example.com";
 
 const { buildApp } = await import("../../app.js");
 
@@ -52,11 +53,13 @@ function fresh(label: string): string {
 interface Injected { statusCode: number; body: unknown; raw: string }
 
 async function inject(options: { url: string; method?: "GET" | "POST"; payload?: object; token?: string }): Promise<Injected> {
-  const app = await buildApp(prisma);
+  // The website's routes need the allowlisted Origin; the account emails go nowhere.
+  const app = await buildApp(prisma, { mailer: { send: () => Promise.resolve() } });
   try {
+    const headers: Record<string, string> = { origin: ORIGIN };
+    if (options.token !== undefined) headers["authorization"] = `Bearer ${options.token}`;
     const res = await app.inject({
-      method: options.method ?? "POST", url: options.url,
-      headers: options.token === undefined ? {} : { authorization: `Bearer ${options.token}` },
+      method: options.method ?? "POST", url: options.url, headers,
       ...(options.payload === undefined ? {} : { payload: options.payload }),
     });
     return { statusCode: res.statusCode, body: res.body === "" ? null : (JSON.parse(res.body) as unknown), raw: res.body };
@@ -77,12 +80,15 @@ function stringField(body: unknown, key: string): string {
 
 interface Account { email: string; userId: string; identityToken: string }
 
-/** A phone-registered account; verified directly unless told otherwise. */
+/**
+ * A COMPANY account, registered on the website (D51) — only a company account
+ * may create a company; verified directly unless told otherwise.
+ */
 async function account(options: { verified?: boolean } = {}): Promise<Account> {
   const email = `${fresh("user")}@example.com`;
-  const res = await inject({ url: "/auth/register", payload: { firstName: "Comp", lastName: "Any", email, password: PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", payload: { firstName: "Comp", lastName: "Any", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `registration must succeed — got ${res.raw}`);
-  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });
   if (options.verified !== false) {
     await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
   }
@@ -205,7 +211,7 @@ test("CC6. Company A and Company B: neither creator learns of the other", async 
     assert.ok(listed.includes(own), "a creator sees their own company");
     assert.ok(!listed.includes(other), "and never the other's");
 
-    const login = await inject({ url: "/auth/login", payload: { email: who.email, password: PASSWORD } });
+    const login = await inject({ url: "/auth/web/login", payload: { email: who.email, password: PASSWORD } });
     assert.ok(!login.raw.includes(other), "login lists only the caller's own memberships");
   }
 
@@ -223,7 +229,7 @@ test("CC7. a second company makes the creator a 2+ member: login lists both and 
   assert.equal((await createCompany(me.identityToken, { name: fresh("One") })).statusCode, 201);
   assert.equal((await createCompany(me.identityToken, { name: fresh("Two") })).statusCode, 201);
 
-  const login = await inject({ url: "/auth/login", payload: { email: me.email, password: PASSWORD } });
+  const login = await inject({ url: "/auth/web/login", payload: { email: me.email, password: PASSWORD } });
   assert.equal(login.statusCode, 200);
   assert.equal((field(login.body, "memberships") as unknown[]).length, 2);
   assert.equal(field(login.body, "tenantToken"), undefined, "two companies are a choice, made through switch-company");

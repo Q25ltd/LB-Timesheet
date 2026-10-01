@@ -72,7 +72,10 @@ export function forgotPassword(
     // B6, counted per request for the ADDRESS — before the lookup, so an
     // address with no account is counted exactly like one with an account.
     if (!mail.throttles.password_reset.allow(email)) return;
-    const user = await accounts.findByEmail("driver", email);
+    // The website's recovery: COMPANY accounts only (D51). A driver account
+    // sharing the address is never found here, and its absence is answered
+    // like any other — the reply was sent before this ran.
+    const user = await accounts.findByEmail("company", email);
     if (user === null) return;
 
     const token = mintAccountToken();

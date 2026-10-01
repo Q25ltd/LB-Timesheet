@@ -14,7 +14,9 @@
 > browser credential transport ("Browser clients" below); mobile and the
 > server-side contract are unchanged. Amended 2026-10-01 by D46 (Session
 > `clientKind`, the 7-day browser lifetime) and D49 (password reset/change
-> session revocation, see "Logout").**
+> session revocation, see "Logout"), and by D51: driver accounts (phone) and
+> company accounts (website) are separate accounts; each surface
+> authenticates only its own kind.**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -255,6 +257,7 @@ is built.
 | After a restart / page reload | biometric gate (optional), then `POST /auth/refresh` | refresh via the cookie |
 | Session lifetime | 90 days, absolute | **7 days, absolute** (D46, 2026-10-01) |
 | Session `clientKind` (D46) | `mobile` — refreshable through the body only | `browser` — refreshable through the cookie only |
+| Account kind (D51) | DRIVER accounts only — the phone signs in nothing else | COMPANY accounts only — the website signs in nothing else |
 
 **Authority is unchanged.** Session validation, rotation with its 60-second
 grace, one-generation reuse detection, revocation, token issuance, membership

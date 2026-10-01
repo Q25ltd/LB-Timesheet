@@ -636,7 +636,7 @@ test("R14. refresh issues no tenant token, even for a driver who holds an active
   const driver = await registeredDriver();
   const company = await prisma.company.create({ data: { name: `${TAG}-co` } });
   await prisma.companyMembership.create({
-    data: { companyId: company.id, userId: driver.userId, role: "driver", active: true },
+    data: { companyId: company.id, userId: driver.userId, accountKind: "driver", role: "driver", active: true },
   });
 
   const result = await postRefresh(driver.refreshToken);

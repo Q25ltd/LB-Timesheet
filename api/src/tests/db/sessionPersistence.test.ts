@@ -143,6 +143,7 @@ function sqlStateOf(error: unknown): string | null {
 interface SessionRow {
   id: string;
   userId: string;
+  accountKind: "driver" | "company";
   clientKind: "mobile" | "browser";
   expiresAt: Date;
   refreshTokenHash: string;
@@ -160,11 +161,11 @@ interface SessionRow {
 function insertSessionRow(row: SessionRow): Promise<number> {
   return prisma.$executeRaw`
     INSERT INTO "Session" (
-      "id", "userId", "clientKind", "expiresAt", "revokedAt", "refreshTokenHash",
+      "id", "userId", "accountKind", "clientKind", "expiresAt", "revokedAt", "refreshTokenHash",
       "previousRefreshTokenHash", "previousRefreshTokenGraceUntil",
       "createdAt", "updatedAt"
     ) VALUES (
-      ${row.id}, ${row.userId}, ${row.clientKind}::"SessionClientKind", ${row.expiresAt}, NULL, ${row.refreshTokenHash},
+      ${row.id}, ${row.userId}, ${row.accountKind}::"AccountKind", ${row.clientKind}::"SessionClientKind", ${row.expiresAt}, NULL, ${row.refreshTokenHash},
       ${row.previousRefreshTokenHash}, ${row.previousRefreshTokenGraceUntil},
       NOW(), NOW()
     )
@@ -222,7 +223,7 @@ test("a Session belongs to a User and carries no company authority", async () =>
   const session = await prisma.session.create({
     data: {
       userId: loner,
-      clientKind: "mobile",
+      accountKind: "driver", clientKind: "mobile",
       expiresAt: new Date(Date.now() + 90 * DAY),
       refreshTokenHash: hash("loner-current"),
     },
@@ -242,12 +243,12 @@ test("a duplicate refreshTokenHash is rejected", async () => {
   const shared = hash("shared-current");
 
   await prisma.session.create({
-    data: { userId: first, clientKind: "mobile", expiresAt: new Date(Date.now() + 90 * DAY), refreshTokenHash: shared },
+    data: { userId: first, accountKind: "driver", clientKind: "mobile", expiresAt: new Date(Date.now() + 90 * DAY), refreshTokenHash: shared },
   });
 
   await assert.rejects(
     prisma.session.create({
-      data: { userId: second, clientKind: "mobile", expiresAt: new Date(Date.now() + 90 * DAY), refreshTokenHash: shared },
+      data: { userId: second, accountKind: "driver", clientKind: "mobile", expiresAt: new Date(Date.now() + 90 * DAY), refreshTokenHash: shared },
     }),
     UNIQUE_VIOLATION,
   );
@@ -261,9 +262,9 @@ test("many sessions may have a null previousRefreshTokenHash", async () => {
   const user = await makeUser("many-null-previous");
   const expiresAt = new Date(Date.now() + 90 * DAY);
 
-  await prisma.session.create({ data: { userId: user, clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-1") } });
-  await prisma.session.create({ data: { userId: user, clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-2") } });
-  await prisma.session.create({ data: { userId: user, clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-3") } });
+  await prisma.session.create({ data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-1") } });
+  await prisma.session.create({ data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-2") } });
+  await prisma.session.create({ data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt, refreshTokenHash: hash("null-prev-3") } });
 
   // Several devices per person is normal; only the credential must be unique.
   const count = await prisma.session.count({ where: { userId: user, previousRefreshTokenHash: null } });
@@ -281,7 +282,7 @@ test("a duplicate non-null previousRefreshTokenHash is rejected", async () => {
   await prisma.session.create({
     data: {
       userId: first,
-      clientKind: "mobile",
+      accountKind: "driver", clientKind: "mobile",
       expiresAt,
       refreshTokenHash: hash("dup-previous-current-a"),
       previousRefreshTokenHash: sharedPrevious,
@@ -293,7 +294,7 @@ test("a duplicate non-null previousRefreshTokenHash is rejected", async () => {
     prisma.session.create({
       data: {
         userId: second,
-        clientKind: "mobile",
+        accountKind: "driver", clientKind: "mobile",
         expiresAt,
         refreshTokenHash: hash("dup-previous-current-b"),
         previousRefreshTokenHash: sharedPrevious,
@@ -313,7 +314,7 @@ test("a fully-formed rotated Session row inserts through the same raw statement"
   const inserted = await insertSessionRow({
     id,
     userId: user,
-    clientKind: "mobile",
+    accountKind: "driver", clientKind: "mobile",
     expiresAt: new Date(Date.now() + 90 * DAY),
     refreshTokenHash: hash("control-current"),
     previousRefreshTokenHash: hash("control-previous"),
@@ -331,7 +332,7 @@ test("a previousRefreshTokenHash without a grace deadline is rejected", async ()
     {
       id: `${TAG}-previous-without-grace`,
       userId: user,
-      clientKind: "mobile",
+      accountKind: "driver", clientKind: "mobile",
       expiresAt: new Date(Date.now() + 90 * DAY),
       refreshTokenHash: hash("orphan-hash-current"),
       previousRefreshTokenHash: hash("orphan-hash-previous"),
@@ -347,7 +348,7 @@ test("a grace deadline without a previousRefreshTokenHash is rejected", async ()
     {
       id: `${TAG}-grace-without-previous`,
       userId: user,
-      clientKind: "mobile",
+      accountKind: "driver", clientKind: "mobile",
       expiresAt: new Date(Date.now() + 90 * DAY),
       refreshTokenHash: hash("orphan-grace-current"),
       previousRefreshTokenHash: null,
@@ -367,7 +368,7 @@ test("a previousRefreshTokenHash equal to the current hash is rejected", async (
     {
       id: `${TAG}-previous-equals-current`,
       userId: user,
-      clientKind: "mobile",
+      accountKind: "driver", clientKind: "mobile",
       expiresAt: new Date(Date.now() + 90 * DAY),
       refreshTokenHash: same,
       previousRefreshTokenHash: same,
@@ -381,8 +382,8 @@ test("a previousRefreshTokenHash equal to the current hash is rejected", async (
 test("deleting a User deletes that User's Sessions", async () => {
   const user = await makeUser("cascade");
   const expiresAt = new Date(Date.now() + 90 * DAY);
-  await prisma.session.create({ data: { userId: user, clientKind: "mobile", expiresAt, refreshTokenHash: hash("cascade-1") } });
-  await prisma.session.create({ data: { userId: user, clientKind: "mobile", expiresAt, refreshTokenHash: hash("cascade-2") } });
+  await prisma.session.create({ data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt, refreshTokenHash: hash("cascade-1") } });
+  await prisma.session.create({ data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt, refreshTokenHash: hash("cascade-2") } });
   assert.equal(await prisma.session.count({ where: { userId: user } }), 2);
 
   await prisma.user.delete({ where: { id: user } });
@@ -402,13 +403,13 @@ test("expiresAt and revokedAt represent live, expired and revoked sessions", asy
   const past = new Date(Date.now() - HOUR);
 
   const live = await prisma.session.create({
-    data: { userId: user, clientKind: "mobile", expiresAt: future, refreshTokenHash: hash("state-live") },
+    data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt: future, refreshTokenHash: hash("state-live") },
   });
   const expired = await prisma.session.create({
-    data: { userId: user, clientKind: "mobile", expiresAt: past, refreshTokenHash: hash("state-expired") },
+    data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt: past, refreshTokenHash: hash("state-expired") },
   });
   const revoked = await prisma.session.create({
-    data: { userId: user, clientKind: "mobile", expiresAt: future, revokedAt: past, refreshTokenHash: hash("state-revoked") },
+    data: { userId: user, accountKind: "driver", clientKind: "mobile", expiresAt: future, revokedAt: past, refreshTokenHash: hash("state-revoked") },
   });
 
   assert.equal(expired.revokedAt, null, "an expired session need not be revoked");

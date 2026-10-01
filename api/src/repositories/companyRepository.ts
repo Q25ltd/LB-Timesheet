@@ -10,7 +10,7 @@
  *
  * Delegates are named individually, so widening this is a visible act.
  */
-import type { MembershipRole } from "../generated/enums.js";
+import type { AccountKind, MembershipRole } from "../generated/enums.js";
 import type { AccountMembership } from "./identityRepository.js";
 
 interface CompanyTransaction {
@@ -19,7 +19,7 @@ interface CompanyTransaction {
   };
   companyMembership: {
     create(args: {
-      data: { companyId: string; userId: string; role: MembershipRole; active: boolean };
+      data: { companyId: string; userId: string; accountKind: AccountKind; role: MembershipRole; active: boolean };
     }): Promise<{ id: string; companyId: string; role: MembershipRole }>;
   };
 }
@@ -44,7 +44,9 @@ export function companyRepository(db: CompanyDatabase) {
       return db.$transaction(async tx => {
         const company = await tx.company.create({ data: { name: input.name } });
         const membership = await tx.companyMembership.create({
-          data: { companyId: company.id, userId: input.userId, role: "admin", active: true },
+          // A COMPANY account's membership (D51); the database refuses an
+          // `admin` membership on a driver account.
+          data: { companyId: company.id, userId: input.userId, accountKind: "company", role: "admin", active: true },
         });
         return {
           membershipId: membership.id,

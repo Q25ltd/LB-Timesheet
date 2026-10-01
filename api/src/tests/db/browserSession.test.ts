@@ -198,7 +198,7 @@ test("B1. web registration creates a BROWSER session and puts the secret ONLY in
   assert.ok(Math.abs(lifetime - 7 * DAY) < 60_000, `a browser session lives 7 days, lived ${String(lifetime)}ms`);
 });
 
-test("B2. web login creates a NEW browser session with the same cookie discipline; mobile login is unchanged", async () => {
+test("B2. web login creates a NEW browser session with the same cookie discipline; the phone signs in only its DRIVER account", async () => {
   const { email } = await webRegister();
 
   const res = await inject({ url: "/auth/web/login", payload: { email, password: PASSWORD } });
@@ -210,7 +210,16 @@ test("B2. web login creates a NEW browser session with the same cookie disciplin
   assert.ok(session !== null);
   assert.equal(await kindOf(session.id), "browser");
 
-  // Positive control on the phone's endpoint: still a body secret, still mobile.
+  // The website's account is a COMPANY account (D51): the phone does not
+  // sign it in, and answers exactly as for bad credentials.
+  const companyOnPhone = await inject({ url: "/auth/login", payload: { email, password: PASSWORD }, origin: null });
+  assert.equal(companyOnPhone.statusCode, 401);
+  assert.deepEqual(companyOnPhone.body, CANONICAL_401);
+
+  // Positive control on the phone's endpoint, with a DRIVER account of the
+  // same email: still a body secret, still mobile.
+  const driver = await inject({ url: "/auth/register", origin: null, payload: { firstName: "Mo", lastName: "Bile", email, password: PASSWORD } });
+  assert.equal(driver.statusCode, 201, "the same email may also be a driver account");
   const mobile = await inject({ url: "/auth/login", payload: { email, password: PASSWORD }, origin: null });
   assert.equal(mobile.statusCode, 200);
   assert.equal(mobile.setCookies.length, 0, "the phone's login sets no cookie");
@@ -467,9 +476,9 @@ test("B14. credentialed CORS is granted to the allowed origin on the cookie endp
 
 test("B15. web login with ONE active membership returns a tenant token minted from the row; the identity token reaches no tenant route", async () => {
   const { email } = await webRegister();
-  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "driver", email } } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });
   const company = await prisma.company.create({ data: { name: `${TAG}-co` } });
-  await prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, role: "admin" } });
+  await prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, accountKind: "company", role: "admin" } });
 
   const res = await inject({ url: "/auth/web/login", payload: { email, password: PASSWORD } });
   assert.equal(res.statusCode, 200);

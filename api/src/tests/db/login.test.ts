@@ -503,7 +503,7 @@ test("L20. a driver whose ONLY membership is inactive authenticates with identit
     data: { name: `${TAG}-inactive-co` },
   });
   await prisma.companyMembership.create({
-    data: { companyId: company.id, userId: account.id, role: "driver", active: false },
+    data: { companyId: company.id, userId: account.id, accountKind: "driver", role: "driver", active: false },
   });
 
   const result = await login(email, PASSWORD);

@@ -20,6 +20,7 @@ import { hashPassword, PasswordPolicy } from "../lib/password.js";
 import {
   hashRefreshToken,
   mintIdentityToken,
+  ACCOUNT_KIND_FOR_CLIENT,
   mintRefreshToken,
   SESSION_LIFETIME_MS,
   type IssuedUnderSession,
@@ -86,14 +87,15 @@ export async function register(
   jwt: JWT,
 ): Promise<IssuedUnderSession<RegistrationResult>> {
   const email = normaliseEmail(input.email);
+  // The phone registers DRIVER accounts and the website COMPANY accounts
+  // (D51). The email is unique within that kind only.
+  const accountKind = ACCOUNT_KIND_FOR_CLIENT[clientKind];
 
   // A courtesy pre-read, NOT the guarantee — between this and the insert,
   // another request can create the same identity. The unique constraint is
   // what actually decides; this only turns the common case into a clean 409
   // instead of a caught database error.
-  // Every registration creates a DRIVER account until company registration
-  // exists (next increments); the email is unique within that kind only.
-  if (await accounts.findByEmail("driver", email) !== null) throw emailInUse();
+  if (await accounts.findByEmail(accountKind, email) !== null) throw emailInUse();
 
   const passwordHash = await hashPassword(input.password);
 
@@ -106,7 +108,7 @@ export async function register(
   let created;
   try {
     created = await accounts.createAccount({
-      accountKind: "driver",
+      accountKind,
       email,
       firstName:        input.firstName,
       lastName:         input.lastName,

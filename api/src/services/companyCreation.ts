@@ -39,7 +39,9 @@ export async function createCompany(
 ): Promise<CreateCompanyResult> {
   const state = await accounts.findAccountState(userId);
   if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
-  if (!state.emailVerified) throw new AppError(403, "Not allowed", "FORBIDDEN");
+  // Only a COMPANY account administers a company (D51); a driver account is
+  // refused like any other unauthorised caller.
+  if (state.accountKind !== "company" || !state.emailVerified) throw new AppError(403, "Not allowed", "FORBIDDEN");
 
   const membership = await companies.createWithAdminMembership({ userId: state.user.id, name: input.name });
   return { membership };

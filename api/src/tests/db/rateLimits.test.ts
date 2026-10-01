@@ -151,7 +151,12 @@ test("RL3. registration: 5 per hour per IP, one bucket for the phone and the bro
 });
 
 test("RL4. forgot password: 5 per hour per IP; at most 3 emails per hour per address — SILENTLY, identically for a known and an unknown address", async () => {
-  const known = await registered("10.0.4.0");
+  // The website's recovery serves COMPANY accounts (D51), so the known
+  // address is a company account registered on the website.
+  const knownEmail = freshEmail();
+  const reg = await call(app, { url: "/auth/web/register", ip: "10.0.4.0", web: true, payload: { firstName: "Re", lastName: "Set", email: knownEmail, password: PASSWORD } });
+  assert.equal(reg.statusCode, 201);
+  const known = { email: knownEmail };
   const unknown = freshEmail();
 
   for (let i = 0; i < 5; i += 1) {
@@ -170,7 +175,8 @@ test("RL4. forgot password: 5 per hour per IP; at most 3 emails per hour per add
   }
   await closeApp();
   assert.equal(new Set(answers).size, 1);
-  assert.equal(outbox.filter(m => m.to === known.email).length, 3, "3 emails per hour per address");
+  const resets = outbox.filter(m => m.to === known.email && m.subject.startsWith("Reset your password"));
+  assert.equal(resets.length, 3, "3 reset emails per hour per address");
 });
 
 test("RL5. verification resend: at most 3 emails per hour per address — registration's email counts", async () => {

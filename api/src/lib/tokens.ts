@@ -23,7 +23,7 @@
  */
 import { randomBytes, createHash } from "node:crypto";
 import type { FastifyJWTOptions, JWT } from "@fastify/jwt";
-import type { SessionClientKind } from "../generated/enums.js";
+import type { AccountKind, SessionClientKind } from "../generated/enums.js";
 
 /**
  * The plugin's own verify-option type. Borrowed rather than restated so
@@ -77,6 +77,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const SESSION_LIFETIME_MS: Record<SessionClientKind, number> = {
   mobile:  90 * DAY_MS,
   browser:  7 * DAY_MS,
+};
+
+/**
+ * Which kind of ACCOUNT each client authenticates (D51): the phone is the
+ * driver's, the website the company's. The route chooses the transport; the
+ * account kind follows from it here and nowhere else — and the database's
+ * `Session_kind_matches_client` refuses any pairing other than these.
+ */
+export const ACCOUNT_KIND_FOR_CLIENT: Record<SessionClientKind, AccountKind> = {
+  mobile:  "driver",
+  browser: "company",
 };
 
 /**

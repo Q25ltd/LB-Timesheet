@@ -96,7 +96,7 @@ export async function registerWebAuthRoutes(
         // verification email is sent with the account. Delivery runs after
         // the reply — the account exists either way, a failure is logged,
         // and the account page can send another.
-        const issued = await issueEmailVerification({ user: result.user, emailVerified: false }, tokens, mail);
+        const issued = await issueEmailVerification({ user: result.user, accountKind: "company", emailVerified: false }, tokens, mail);
         if (issued.kind === "ready") work.run("email-verification", issued.deliver);
 
         const { refreshToken, ...body } = result;
