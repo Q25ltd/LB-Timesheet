@@ -66,6 +66,7 @@ interface StubUserRow {
   lastName: string;
   email: string;
   emailVerifiedAt: Date | null;
+  passwordHash: string;
 }
 
 interface StubSessionRow {

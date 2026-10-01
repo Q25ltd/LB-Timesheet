@@ -100,6 +100,7 @@ function fixtures(options: { active?: boolean } = {}) {
       findUnique: () => Promise.resolve({
         id: USER_ID, email: "fixture-driver@example.com",
         firstName: DRIVER_FIRST_NAME, lastName: DRIVER_LAST_NAME, emailVerifiedAt: null,
+        passwordHash: "not-a-real-hash",
       }),
       // Login's credential read. Declared because `AppDatabase` requires it;
       // no case in this Start Shift file logs in.

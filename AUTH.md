@@ -11,9 +11,10 @@
 > 2026-09-12 by owner decision (F-27): the refresh concurrency wording, which
 > an independent audit measured to be stronger than the design it describes.
 > That clarification changed no behaviour. Amended 2026-09-30 by D45: the
-> browser credential transport ("Browser clients" below) — an APPROVED TARGET,
-> NOT BUILT; mobile and the server-side contract are unchanged. Amended
-> 2026-10-01 by D46: Session `clientKind` and the 7-day browser lifetime.**
+> browser credential transport ("Browser clients" below); mobile and the
+> server-side contract are unchanged. Amended 2026-10-01 by D46 (Session
+> `clientKind`, the 7-day browser lifetime) and D49 (password reset/change
+> session revocation, see "Logout").**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -340,9 +341,15 @@ logout that could name its own session could log out somebody else's device.
 Revoking an already-revoked session is a success: the caller's goal is already
 true.
 
-**Revocation is per SESSION, never per user.** Logging out one phone leaves
-another phone's session, tokens and refresh credential fully working. The same
-is true of reuse-triggered revocation.
+**Logout and reuse revoke per SESSION, never per user.** Logging out one phone
+leaves another phone's session, tokens and refresh credential fully working.
+The same is true of reuse-triggered revocation.
+
+*Amended 2026-10-01 by D49 (owner decision B7) — the two credential events
+that deliberately reach every session of the user:* a successful **password
+reset** revokes ALL of that user's sessions, phone and browser, in the same
+transaction that consumes the token and replaces the hash; an authenticated
+**password change** revokes every OTHER session and keeps the caller's.
 
 **All three credentials die together**, because `requireAuth`, `requireSession`
 and the refresh boundary all read the Session row on every request: the identity

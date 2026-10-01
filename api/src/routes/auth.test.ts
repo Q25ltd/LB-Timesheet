@@ -135,6 +135,8 @@ interface UserRow {
   lastName: string;
   email: string;
   emailVerifiedAt: Date | null;
+  /** Every real User row carries one; nothing in this file verifies it. */
+  passwordHash: string;
 }
 
 function driverRow(): UserRow {
@@ -144,6 +146,7 @@ function driverRow(): UserRow {
     lastName:  "Kuizinas",
     email:     "driver@example.com",
     emailVerifiedAt: null,
+    passwordHash:    "not-a-real-hash",
   };
 }
 
@@ -163,6 +166,7 @@ function otherUserRow(): UserRow {
     lastName:  "Else",
     email:     "someone.else@example.com",
     emailVerifiedAt: null,
+    passwordHash:    "not-a-real-hash",
   };
 }
 

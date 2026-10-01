@@ -21,6 +21,8 @@ import { accountTokenRepository, type AccountTokenDatabase } from "./repositorie
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
 import { companyRepository, type CompanyDatabase } from "./repositories/companyRepository.js";
 import { registerCompanyRoutes } from "./routes/companies.js";
+import { passwordRepository, type PasswordDatabase } from "./repositories/passwordRepository.js";
+import { registerPasswordRoutes } from "./routes/password.js";
 
 /**
  * Only the surface the app actually uses today. Structural rather than a Pick of
@@ -38,7 +40,7 @@ import { registerCompanyRoutes } from "./routes/companies.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & CompanyDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & CompanyDatabase & PasswordDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -198,6 +200,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // A verified identity creates a company and its own admin membership (B3).
   // Tenant authority still comes only from /auth/switch-company.
   registerCompanyRoutes(app, identityRepository(prisma), companyRepository(prisma));
+
+  // Password recovery and change (B7). Reset revokes every session; change
+  // revokes every session but the caller's.
+  registerPasswordRoutes(app, identityRepository(prisma), tokens, passwordRepository(prisma), mail, work);
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

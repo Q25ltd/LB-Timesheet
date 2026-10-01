@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company)
+> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change)
 
 ---
 
@@ -1804,6 +1804,29 @@ the caller's. An unverified caller gets D17's generic 403.
 membership carries; it confers no authority over other users or memberships,
 no capability is inferred from it, and no company administration is built.
 O11 stays open.
+
+### D49 — Password recovery and change, and what each does to sessions (2026-10-01)
+
+Owner decision (B7, with B4's token rules).
+
+**Recovery** — `POST /auth/password/forgot` (public, `{ email }`) always
+answers `204`; the lookup, a **30-minute** single-use token (digest only,
+newest issue wins — the D47 token model, purpose `password_reset`) and the
+email all happen after the reply, so neither body nor timing says whether
+the address has an account. `POST /auth/password/reset` (public,
+`{ token, password }`): the new password meets D23; ONE transaction consumes
+the token, replaces the hash and revokes **every** session of the user,
+phone and browser. No previously authenticated device stays signed in.
+
+**Change** — `POST /auth/password/change` (identity,
+`{ currentPassword, newPassword }`): the current password is verified (a
+wrong one is D17's generic 403), the new one meets D23, and ONE transaction
+replaces the hash and revokes every **other** session, keeping the caller's.
+
+**No one changes another account's password.** No input in any of these
+names an account other than the token's or the caller's; a company — admin
+or not — has no path to a user's global credential. bcryptjs at cost 12 is
+unchanged (B5); F-28 stays open at its deployment gate.
 
 ## ❓ Open — ask the user, do not guess
 

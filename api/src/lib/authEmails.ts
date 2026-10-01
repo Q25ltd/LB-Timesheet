@@ -63,3 +63,29 @@ export function verificationEmail(input: AccountEmailInput): MailMessage {
     ),
   };
 }
+
+/** Self-service password recovery (B7): the link is valid for 30 minutes, once. */
+export function passwordResetEmail(input: AccountEmailInput): MailMessage {
+  return {
+    to: input.to,
+    subject: "Reset your password — LogisticBay Timesheets",
+    text: [
+      `Hello ${input.firstName},`,
+      "",
+      "Someone asked to reset the password for this LogisticBay Timesheets account. To choose a new password, open the link below. It works once and expires in 30 minutes.",
+      "",
+      input.link,
+      "",
+      "Resetting your password signs you out on every device. If you did not ask for this, ignore this email — your password has not changed.",
+      "",
+      "LogisticBay Timesheets",
+    ].join("\n"),
+    html: htmlBody(
+      input.firstName,
+      "Someone asked to reset the password for this account. The link works once and expires in 30 minutes. Resetting your password signs you out on every device.",
+      input.link,
+      "Choose a new password",
+      "If you did not ask for this, ignore this email — your password has not changed.",
+    ),
+  };
+}

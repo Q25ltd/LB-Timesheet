@@ -25,3 +25,12 @@ test("in test with no key, every send FAILS loudly — never a silent no-op, nev
   const mailer = mailerFor({ SENDGRID_API_KEY: "", MAIL_FROM: "timesheets@logisticbay.com", NODE_ENV: "test" });
   await assert.rejects(mailer.send({ to: "a@example.com", subject: "s", text: "t", html: "h" }));
 });
+
+test("the password-reset email escapes the same way and goes only to the account's own address", async () => {
+  const { passwordResetEmail } = await import("./authEmails.js");
+  const message = passwordResetEmail({ to: "driver@example.com", firstName: "<b>Pat</b>", link: "https://t.example.com/reset-password#token=a&b" });
+  assert.equal(message.to, "driver@example.com");
+  assert.ok(message.html.includes("&lt;b&gt;Pat&lt;/b&gt;"));
+  assert.ok(message.html.includes("#token=a&amp;b"));
+  assert.ok(!message.html.includes("<b>Pat</b>"));
+});
