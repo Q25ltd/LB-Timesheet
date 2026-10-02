@@ -188,24 +188,28 @@ model User {
 /// Guaranteed by the database (migration 20261002090000):
 ///   - only a company account owns one: composite foreign key to
 ///     User(id, accountKind) and CHECK accountKind = 'company';
-///   - one per company account (`userId` is unique) — a rule about one
-///     account's unfinished registration, NOT about how many administrators
-///     a Company may have;
+///   - one per company account: the unique key on (userId, accountKind).
+///     The composite foreign key gives each userId exactly one possible
+///     accountKind, so that pair is unique exactly when userId is. A rule
+///     about one account's unfinished registration, NOT about how many
+///     administrators a Company may have;
 ///   - the name is 1–200 characters with no leading or trailing whitespace.
 ///     Names are not unique.
 /// No expiry and no clean-up job: an unconfirmed registration stays (O1).
 /// The administrator's details are the account's own; nothing is copied here.
 model PendingCompanyRegistration {
   id          String      @id @default(cuid())
-  userId      String      @unique
+  userId      String
   accountKind AccountKind
   companyName String
   createdAt   DateTime    @default(now())
 
   user User @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)
 
-  /// Redundant with `userId @unique` as far as the data goes; Prisma needs a
-  /// unique key over the relation's own fields to model it as one-to-one.
+  /// THE one-per-account rule — and the unique key over the relation's own
+  /// fields that Prisma needs to model it as one-to-one. Deliberately the
+  /// only one: a separate unique index on `userId` alone would enforce the
+  /// same rule twice (removed in migration 20261002100000).
   @@unique([userId, accountKind])
 }
 

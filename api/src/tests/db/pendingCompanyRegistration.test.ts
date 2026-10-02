@@ -192,3 +192,25 @@ test("P11. deleting the company account removes its pending registration with it
   await prisma.$executeRaw`DELETE FROM "User" WHERE id = ${owner}`;
   assert.deepEqual(await storedNames(owner), []);
 });
+
+test("P12. exactly ONE uniqueness rule enforces one-per-account — the (userId, accountKind) key Prisma's one-to-one relation needs, and no redundant second index", async () => {
+  // The catalog, not behaviour: a duplicate insert is refused whether one
+  // unique index exists or two, so only the metadata can tell them apart.
+  const unique = await prisma.$queryRaw<{ name: string; columns: string }[]>`
+    SELECT i.relname AS name,
+           string_agg(a.attname, ',' ORDER BY array_position(x.indkey::int2[], a.attnum)) AS columns
+      FROM pg_index x
+      JOIN pg_class i ON i.oid = x.indexrelid
+      JOIN pg_class t ON t.oid = x.indrelid
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY (x.indkey)
+     WHERE t.relname = 'PendingCompanyRegistration' AND x.indisunique AND NOT x.indisprimary
+     GROUP BY i.relname
+     ORDER BY i.relname`;
+  assert.deepEqual(unique, [{ name: "PendingCompanyRegistration_userId_accountKind_key", columns: "userId,accountKind" }]);
+
+  // It is enough on its own: the composite foreign key gives each userId one
+  // possible accountKind, so (userId, accountKind) is unique iff userId is.
+  const owner = await account("company");
+  assert.equal(await pending(owner, "company", "Only Once Ltd"), null);
+  assert.equal(sqlStateOf(await pending(owner, "company", "Twice Ltd")), UNIQUE_VIOLATION);
+});
