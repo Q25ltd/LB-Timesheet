@@ -161,6 +161,7 @@ model User {
   memberships   CompanyMembership[]
   sessions      Session[]
   accountTokens AccountToken[]
+  pendingCompanyRegistration PendingCompanyRegistration?
 
   /// One email per KIND (D22 as amended 2026-10-01): a driver and a company
   /// account may share an address; two accounts of one kind may not. The
@@ -171,6 +172,41 @@ model User {
   /// its Sessions and memberships, so the DATABASE can check them against it
   /// (D51) — the Shift ↔ membership pattern of D15.
   @@unique([id, accountKind])
+}
+
+/// A company registration that is not finished yet (D51): a COMPANY account
+/// has given its company's name, and its email address is not confirmed.
+///
+/// It is NOT a Company. Holding one creates no Company and no membership; the
+/// account administers nothing. Confirming the email will — in one
+/// transaction — create the Company and the initial administrator membership
+/// and DELETE this row (the approved design: the row holds the name between
+/// registration and confirmation, and is removed when the company is
+/// created). Replays are stopped by the single-use verification token, and
+/// that transaction will delete exactly one row or none.
+///
+/// Guaranteed by the database (migration 20261002090000):
+///   - only a company account owns one: composite foreign key to
+///     User(id, accountKind) and CHECK accountKind = 'company';
+///   - one per company account (`userId` is unique) — a rule about one
+///     account's unfinished registration, NOT about how many administrators
+///     a Company may have;
+///   - the name is 1–200 characters with no leading or trailing whitespace.
+///     Names are not unique.
+/// No expiry and no clean-up job: an unconfirmed registration stays (O1).
+/// The administrator's details are the account's own; nothing is copied here.
+model PendingCompanyRegistration {
+  id          String      @id @default(cuid())
+  userId      String      @unique
+  accountKind AccountKind
+  companyName String
+  createdAt   DateTime    @default(now())
+
+  user User @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)
+
+  /// Redundant with `userId @unique` as far as the data goes; Prisma needs a
+  /// unique key over the relation's own fields to model it as one-to-one.
+  @@unique([userId, accountKind])
 }
 
 /// A one-time credential sent by email: email verification (24 hours) or

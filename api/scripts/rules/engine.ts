@@ -154,6 +154,10 @@ const GLOBAL_MODELS = new Set([
   // the User; a company has no part in either, and must not (no company may
   // reset a user's global password).
   "AccountToken",
+  // An unfinished company registration belongs to the company ACCOUNT that
+  // started it; there is no Company yet to scope it to — creating one is
+  // what finishing the registration does (D51).
+  "PendingCompanyRegistration",
 ]);
 
 for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {

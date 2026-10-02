@@ -1,0 +1,194 @@
+/**
+ * Pending company registration — the persistence foundation for company-first
+ * registration (D51; increment 3 of its build).
+ *
+ * A company ACCOUNT that has given its company's name, but whose email has not
+ * yet been confirmed, holds ONE pending registration. It is not a Company:
+ * storing it creates no Company and no membership. (Increment 4 will confirm
+ * the email, create the Company and the initial administrator membership, and
+ * remove the pending row — all in one transaction. Nothing here does that.)
+ *
+ * Guaranteed by the DATABASE:
+ *   - only a COMPANY account can own one (composite foreign key to
+ *     User(id, accountKind) plus a CHECK that the kind is `company`);
+ *   - at most ONE per company account (unique on the account) — which says
+ *     nothing about how many administrators a Company may later have;
+ *   - the company name is 1–200 characters with no leading or trailing
+ *     whitespace. Names are NOT unique: two companies may share one.
+ *
+ * No expiry and no clean-up: an unconfirmed registration stays (O1 open).
+ *
+ * WRITTEN RED — raw SQL throughout, so it does not depend on generated code.
+ *
+ * Requires a live database — run with `npm run test:db`.
+ */
+import { test, before, after, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { hash } from "bcryptjs";
+import { PrismaClient } from "../../generated/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const connectionString = process.env.DATABASE_URL;
+if (connectionString === undefined || connectionString === "") {
+  throw new Error("DATABASE_URL must be set to run the pending company registration tests");
+}
+
+process.env.JWT_SECRET = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
+process.env.NODE_ENV   = "test";
+process.env.WEB_ORIGIN = "https://allowed.example.com";
+
+const { buildApp } = await import("../../app.js");
+
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+
+const TAG = `pending-company-test-${Date.now()}`;
+const PASSWORD = "correct-horse-battery-staple";
+const CHECK_VIOLATION = "23514";
+const UNIQUE_VIOLATION = "23505";
+const FK_VIOLATION = "23503";
+
+let seq = 0;
+function freshEmail(): string {
+  seq += 1;
+  return `${TAG}-${String(seq)}@example.com`;
+}
+
+function sqlStateOf(error: unknown): string | null {
+  const text = error instanceof Error ? error.message : String(error);
+  return /Code: `(\w{5})`/.exec(text)?.[1] ?? null;
+}
+
+async function account(kind: "driver" | "company", email = freshEmail()): Promise<string> {
+  const id = randomUUID();
+  const passwordHash = await hash(PASSWORD, 4);
+  await prisma.$executeRaw`
+    INSERT INTO "User" ("id", "accountKind", "email", "firstName", "lastName", "passwordHash", "updatedAt")
+    VALUES (${id}, ${kind}::"AccountKind", ${email}, 'Ada', 'Admin', ${passwordHash}, now())`;
+  return id;
+}
+
+/** Insert a pending registration; null on success, the error otherwise. */
+async function pending(userId: string, kind: "driver" | "company", companyName: string): Promise<unknown> {
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "PendingCompanyRegistration" ("id", "userId", "accountKind", "companyName")
+      VALUES (${randomUUID()}, ${userId}, ${kind}::"AccountKind", ${companyName})`;
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+async function storedNames(userId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT "companyName" AS name FROM "PendingCompanyRegistration" WHERE "userId" = ${userId}`;
+  return rows.map(r => r.name);
+}
+
+async function cleanup(): Promise<void> {
+  await prisma.$executeRaw`DELETE FROM "Company" WHERE name LIKE ${`${TAG}%`}`;
+  await prisma.$executeRaw`DELETE FROM "User" WHERE email LIKE ${`${TAG}%`}`;
+}
+
+before(cleanup);
+beforeEach(cleanup);
+after(async () => { await cleanup(); await prisma.$disconnect(); });
+
+test("P1. a company account can own a pending registration, stored exactly as given — and it has a creation time", async () => {
+  const owner = await account("company");
+  assert.equal(await pending(owner, "company", "Kuizinas Haulage Ltd"), null);
+
+  const rows = await prisma.$queryRaw<{ name: string; created: Date | null }[]>`
+    SELECT "companyName" AS name, "createdAt" AS created FROM "PendingCompanyRegistration" WHERE "userId" = ${owner}`;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.name, "Kuizinas Haulage Ltd", "spelling and casing are kept");
+  assert.ok(rows[0]?.created instanceof Date, "the database stamps when it was created");
+});
+
+test("P2. a DRIVER account can never own a pending registration — refused by the database", async () => {
+  const driver = await account("driver");
+  // Claiming its true kind: refused by the CHECK (only `company` may own one).
+  assert.equal(sqlStateOf(await pending(driver, "driver", "Driver Co")), CHECK_VIOLATION);
+  // Claiming to be a company: refused by the composite foreign key.
+  assert.equal(sqlStateOf(await pending(driver, "company", "Driver Co")), FK_VIOLATION);
+  assert.deepEqual(await storedNames(driver), []);
+});
+
+test("P3. a company account holds at most ONE pending registration", async () => {
+  const owner = await account("company");
+  assert.equal(await pending(owner, "company", "First Name Ltd"), null);
+  assert.equal(sqlStateOf(await pending(owner, "company", "Second Name Ltd")), UNIQUE_VIOLATION);
+  assert.deepEqual(await storedNames(owner), ["First Name Ltd"]);
+});
+
+test("P4. company names are NOT unique — two company accounts may register the same name", async () => {
+  const a = await account("company");
+  const b = await account("company");
+  assert.equal(await pending(a, "company", "Same Name Haulage"), null);
+  assert.equal(await pending(b, "company", "Same Name Haulage"), null);
+});
+
+test("P5. the name is at most 200 characters — 200 accepted, 201 refused, counted in characters", async () => {
+  const at = await account("company");
+  const over = await account("company");
+  const accented = await account("company");
+  assert.equal(await pending(at, "company", "x".repeat(200)), null);
+  assert.equal(sqlStateOf(await pending(over, "company", "x".repeat(201))), CHECK_VIOLATION);
+  // 200 accented characters are 400 bytes: the limit is characters, as the form's is.
+  assert.equal(await pending(accented, "company", "é".repeat(200)), null);
+});
+
+test("P6. an empty or whitespace-only name is refused", async () => {
+  const owner = await account("company");
+  for (const name of ["", " ", "   ", "\t", "\n"]) {
+    assert.equal(sqlStateOf(await pending(owner, "company", name)), CHECK_VIOLATION, `refused: ${JSON.stringify(name)}`);
+  }
+  assert.deepEqual(await storedNames(owner), []);
+});
+
+test("P7. a stored name is always trimmed — leading or trailing whitespace is refused; inner spacing is kept", async () => {
+  const owner = await account("company");
+  for (const name of [" Acme", "Acme ", "  Acme  ", "\tAcme", "Acme\n"]) {
+    assert.equal(sqlStateOf(await pending(owner, "company", name)), CHECK_VIOLATION, `refused: ${JSON.stringify(name)}`);
+  }
+  assert.equal(await pending(owner, "company", "Acme  Road   Haulage"), null, "spacing inside the name is the owner's spelling");
+  assert.deepEqual(await storedNames(owner), ["Acme  Road   Haulage"]);
+});
+
+test("P8 + P9. storing a pending registration creates NO Company and NO membership", async () => {
+  const owner = await account("company");
+  const name = `${TAG}-not-yet-a-company`;
+
+  assert.equal(await pending(owner, "company", name), null);
+
+  assert.equal(await prisma.company.count({ where: { name } }), 0, "no Company carries the pending name");
+  assert.equal(await prisma.companyMembership.count({ where: { userId: owner } }), 0, "the account holds no membership");
+});
+
+test("P10. a pending company registration changes nothing for the DRIVER account sharing its email", async () => {
+  const email = freshEmail();
+  const app = await buildApp(prisma);
+  try {
+    const driver = await app.inject({ method: "POST", url: "/auth/register", payload: { firstName: "Dee", lastName: "River", email, password: PASSWORD } });
+    assert.equal(driver.statusCode, 201);
+    const company = await account("company", email);
+    assert.equal(await pending(company, "company", "Same Email Haulage"), null);
+
+    const login = await app.inject({ method: "POST", url: "/auth/login", payload: { email, password: PASSWORD } });
+    assert.equal(login.statusCode, 200, "the driver still signs in on the phone");
+    const body: unknown = login.json();
+    assert.ok(typeof body === "object" && body !== null);
+    assert.deepEqual(Reflect.get(body, "memberships"), [], "and gains no company from the pending registration");
+    assert.equal(Reflect.get(body, "tenantToken"), undefined);
+  } finally {
+    await app.close();
+  }
+});
+
+test("P11. deleting the company account removes its pending registration with it", async () => {
+  const owner = await account("company");
+  assert.equal(await pending(owner, "company", "Short Lived Ltd"), null);
+  await prisma.$executeRaw`DELETE FROM "User" WHERE id = ${owner}`;
+  assert.deepEqual(await storedNames(owner), []);
+});

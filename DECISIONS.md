@@ -1900,6 +1900,9 @@ parts are built.
   restricted, signed-in "check your email" state → confirming the email, in ONE
   transaction, verifies it, creates the Company and the initial administrator
   membership, and consumes the pending registration. No Company exists before.
+  *(Clarified 2026-10-02, as in the approved design: "consumes" means the
+  pending row is DELETED by that transaction; replays are stopped by the
+  single-use verification token.)*
 - **One INITIAL administrator** is created by registration. This is not a rule
   that a company has only one administrator: additional company users are a
   later feature, and nothing may be built that forbids them. O11 stays open.
