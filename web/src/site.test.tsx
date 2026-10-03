@@ -85,13 +85,12 @@ describe("account entry points", () => {
     for (const link of links) expect(link.getAttribute("href")).toBe(path);
   });
 
-  test("/register is YOUR OWN account's form — four labelled fields plus a repeat, and no company field", () => {
+  test("/register registers a COMPANY — company details and administrator details on one form", () => {
     renderRoute(PATHS.register);
-    expect(pageHeading()).toBe("Create your account");
-    for (const label of ["First name", "Last name", "Email", "Password", "Repeat password"]) {
+    expect(pageHeading()).toBe("Register your company");
+    for (const label of ["Company name", "First name", "Last name", "Email", "Password", "Repeat password"]) {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
-    expect(screen.queryByLabelText(/company/i)).toBeNull();
     expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
     expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("new-password");
     expect(robotsMeta()).toBe("noindex");

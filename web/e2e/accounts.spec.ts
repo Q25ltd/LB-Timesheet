@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, request as apiRequest, test, type BrowserContext, type Page } from "@playwright/test";
 import { linkSentTo } from "./mailbox";
 
 /**
@@ -6,9 +6,14 @@ import { linkSentTo } from "./mailbox";
  * against the real API and a real database (owner decision B8).
  *
  * Every name and text assertion is EXACT. Playwright matches substrings by
- * default, and "Your account" is a substring of the registration page's own
+ * default, and "Your account" was a substring of the old registration page's
  * heading, "Create your account" — an inexact wait passed before the
  * registration had finished.
+ *
+ * Company registration through the PAGE is not open yet (its API is the next
+ * increment; the page validates and sends nothing). These flows therefore
+ * create the company account directly through the API as SETUP, and then
+ * sign in through the real sign-in page.
  *
  * Registrations per run stay within the API's 5-per-hour-per-IP limit (D50):
  * every browser here shares 127.0.0.1.
@@ -22,14 +27,23 @@ function emailFor(label: string): string {
   return `e2e-${RUN}-${label}@example.com`;
 }
 
+/**
+ * Test setup: a company account created through the API (in its own request
+ * context, so no cookie lands in the browser), then signed in through the
+ * real sign-in page.
+ */
 async function register(page: Page, email: string): Promise<void> {
-  await page.goto("/register");
-  await page.getByLabel("First name").fill("Edith");
-  await page.getByLabel("Last name").fill("Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByLabel("Repeat password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Create account" }).click();
+  const api = await apiRequest.newContext();
+  try {
+    const res = await api.post(`${API}/auth/web/register`, {
+      headers: { origin: WEB },
+      data: { firstName: "Edith", lastName: "Owner", email, password: PASSWORD },
+    });
+    expect(res.status(), "setup: company account created").toBe(201);
+  } finally {
+    await api.dispose();
+  }
+  await signIn(page, email, PASSWORD);
   await expect(page.getByRole("heading", { level: 1, name: "Your account", exact: true })).toBeVisible();
 }
 

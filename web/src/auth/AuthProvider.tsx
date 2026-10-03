@@ -74,7 +74,6 @@ export interface AuthApi {
   state: AuthState;
   /** Restore a session from the refresh cookie, once. Safe to call repeatedly. */
   restore(): Promise<void>;
-  register(input: { firstName: string; lastName: string; email: string; password: string }): Promise<Outcome>;
   login(input: { email: string; password: string }): Promise<Outcome>;
   /** Revoke the server session and forget everything. `serverConfirmed` is false when only the local part could be done. */
   logout(): Promise<{ serverConfirmed: boolean }>;
@@ -183,12 +182,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return company;
   }, []);
 
-  const register = useCallback<AuthApi["register"]>(async input => {
-    const result = await apiRequest("/auth/web/register", { body: input, cookie: true }, parseSignedIn);
-    if (result.kind !== "ok") return { ok: false, failure: failureOf(result) };
-    return loadAccount(enter(result.value));
-  }, [enter, loadAccount]);
-
   const login = useCallback<AuthApi["login"]>(async input => {
     const result = await apiRequest("/auth/web/login", { body: input, cookie: true }, parseSignedIn);
     if (result.kind !== "ok") return { ok: false, failure: failureOf(result) };
@@ -235,8 +228,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [withIdentity]);
 
   const api = useMemo<AuthApi>(() => ({
-    state, restore, register, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword,
-  }), [state, restore, register, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword]);
+    state, restore, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword,
+  }), [state, restore, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

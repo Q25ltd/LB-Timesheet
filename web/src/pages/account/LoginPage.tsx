@@ -57,7 +57,7 @@ export function LoginPage() {
       </form>
       <p className="auth__links">
         <Link to={PATHS.forgotPassword}>Forgotten your password?</Link>
-        <Link to={PATHS.register}>Create an account</Link>
+        <Link to={PATHS.register}>Register your company</Link>
       </p>
     </AuthPanel>
   );

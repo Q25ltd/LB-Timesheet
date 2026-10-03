@@ -174,27 +174,25 @@ describe("sign out", () => {
 });
 
 describe("registration and the emailed links", () => {
-  test("registration sends exactly the four fields — never the repeat box — and a short password sends nothing", async () => {
+  test("the company registration form holds the administrator's password to the rule, and sends nothing — before or after", async () => {
     renderRoute(PATHS.register);
+    fill("Company name", "Kuizinas Haulage Ltd");
     fill("First name", "Nerijus");
     fill("Last name", "Kuizinas");
     fill("Email", "owner@example.com");
     fill("Password", "short");
     fill("Repeat password", "short");
-    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Register company" }));
     expect(await screen.findByText("At least 10 characters", { selector: ".field__error" })).toBeTruthy();
-    expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(false);
 
-    api.on("POST /auth/web/register", { status: 201, body: { user: account().user, identityToken: IDENTITY, memberships: [] } });
-    api.on("GET /auth/me", { status: 200, body: account({ emailVerified: false }) });
     fill("Password", PASSWORD);
     fill("Repeat password", PASSWORD);
-    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
-    await screen.findByText("Email address not confirmed");
-    expect(api.calls.find(c => c.path === "/auth/web/register")?.body).toEqual({
-      firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com", password: PASSWORD,
-    });
-    expect(screen.queryByLabelText("Company name"), "no company is set up before the email is confirmed").toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Register company" }));
+    await screen.findByRole("status");
+    // Company registration is not open yet (its API is the next increment):
+    // the old person-first endpoint is never used in its place.
+    expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(false);
+    expect(storageWrites).toEqual([]);
   });
 
   test("the verification link's token is read from the FRAGMENT, posted once, and removed from the address", async () => {

@@ -178,3 +178,28 @@
 .auth__inner > .button {
   justify-self: start;
 }
+
+/* Company registration: the company's details and the administrator's, as
+   two labelled groups of one form. */
+.auth-fieldset {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.auth-fieldset__legend {
+  padding: 0 var(--space-2);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--brand-dark);
+}
+
+.auth-fieldset__hint {
+  margin: 0;
+  color: var(--text-muted);
+}
