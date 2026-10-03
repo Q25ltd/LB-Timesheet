@@ -102,7 +102,7 @@ export function VehicleFields({
         </View>
       </FormSection>
 
-      <FormSection label="NUMBER PLATE">
+      <FormSection label="VEHICLE REGISTRATION">
         <TextInput
           testID="number-plate"
           value={numberPlate}
@@ -115,7 +115,7 @@ export function VehicleFields({
           autoCorrect={false}
           // No UK format is imposed: plates are international.
           style={formStyles.input}
-          accessibilityLabel="Number plate"
+          accessibilityLabel="Vehicle registration"
         />
       </FormSection>
 

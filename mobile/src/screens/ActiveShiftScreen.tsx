@@ -489,7 +489,7 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
         <SecondaryAction label={changeLabel} onPress={onChangeVehicle} testID="change-vehicle" />
       </View>
       {/* A typing mistake in the plate, put right without changing vehicle. */}
-      <QuietAction label="Correct number plate" onPress={onCorrectPlate} testID="correct-plate" />
+      <QuietAction label="Correct registration number" onPress={onCorrectPlate} testID="correct-plate" />
       {/* Things put INTO this vehicle, so they live in its card — below the
           actions that decide whether the driver is in it at all. */}
       <View style={styles.tiles}>

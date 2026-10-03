@@ -9,7 +9,7 @@
 const ROWS: readonly (readonly [string, string])[] = [
   ["Start", "06:00"],
   ["Finish", "16:30"],
-  ["Vehicle reg", "AB12 CDE"],
+  ["Registration", "AB12 CDE"],
   ["Trailer", "C123 / C827"],
   ["Start mileage", "100,000"],
   ["Fuel", "180 L"],

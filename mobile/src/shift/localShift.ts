@@ -111,12 +111,16 @@ export type WorkingContext =
   | { kind: "personal" }
   | { kind: "company"; membershipId: string; companyId: string; companyName: string };
 
-/** The vehicle classes a driver may book on with. */
+/**
+ * The vehicle classes a driver may book on with. The ids are what is stored
+ * and never change; the labels are what the driver reads, in words used
+ * worldwide (D52) rather than the UK licence categories the ids come from.
+ */
 export type VehicleClass = "class1" | "class2" | "van";
 
 export const VEHICLE_CLASSES: readonly { id: VehicleClass; label: string }[] = [
-  { id: "class1", label: "Class 1" },
-  { id: "class2", label: "Class 2" },
+  { id: "class1", label: "Articulated truck" },
+  { id: "class2", label: "Rigid truck" },
   { id: "van",    label: "Van" },
 ] as const;
 

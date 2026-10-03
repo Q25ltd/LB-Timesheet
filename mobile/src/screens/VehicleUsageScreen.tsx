@@ -100,8 +100,8 @@ export function VehicleUsageScreen({ use, onLeave, onVehicleChecks, onFills, onS
           </Text>
           <Text style={styles.meta} testID="usage-class-hours">{`${classLabel(use.vehicleClass)} · ${hours}`}</Text>
           {editing ? null : (
-            <Pressable testID="usage-correct-plate" onPress={onCorrectPlate} accessibilityRole="button" accessibilityLabel="Correct number plate" hitSlop={8} style={styles.correctName}>
-              <Text style={styles.correctNameLabel}>Correct number plate</Text>
+            <Pressable testID="usage-correct-plate" onPress={onCorrectPlate} accessibilityRole="button" accessibilityLabel="Correct registration number" hitSlop={8} style={styles.correctName}>
+              <Text style={styles.correctNameLabel}>Correct registration number</Text>
             </Pressable>
           )}
         </View>

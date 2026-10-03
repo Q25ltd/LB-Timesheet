@@ -86,7 +86,7 @@ export function TimesheetSummary({ day, inUse, corrections = {} }: {
               lines={[
                 { key: "mileage", text: `${formatMileageRange(use.startMileage, use.endMileage)} · ${formatMileage(usageDistance(use))}` },
                 ...fillLine("fuel", "Fuel", summariseFills(use.fills, FILL_TYPE.fuel)),
-                ...fillLine("adblue", "AdBlue", summariseFills(use.fills, FILL_TYPE.adblue)),
+                ...fillLine("adblue", "AdBlue / DEF", summariseFills(use.fills, FILL_TYPE.adblue)),
               ]}
               checks={use.checks}
               endsNow={endsNow}

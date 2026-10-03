@@ -39,7 +39,7 @@ function PhoneFrame({ label, children }: { label: string; children: ReactNode })
 
 export function ActiveShiftPhone() {
   return (
-    <PhoneFrame label="The Timesheets driver app on a phone, showing an active shift started at 06:00: unit AB12 CDE, Class 1, with its vehicle checks completed, fuel and AdBlue recorded, trailer C827 checked, and a Finish Shift button.">
+    <PhoneFrame label="The Timesheets driver app on a phone, showing an active shift started at 06:00: unit AB12 CDE, an articulated truck, with its vehicle checks completed, fuel and AdBlue / DEF recorded, trailer C827 checked, and a Finish Shift button.">
       <div className="app">
         <div className="app__titlebar">
           <span className="app__title">Active Shift</span>
@@ -69,7 +69,7 @@ export function ActiveShiftPhone() {
         <div className="app__card">
           <div className="app__plate-panel">
             <span className="app__plate">AB12 CDE</span>
-            <span className="app__class">Class 1</span>
+            <span className="app__class">Articulated truck</span>
           </div>
           <div className="app__row">
             <span>Start mileage</span>
@@ -93,7 +93,7 @@ export function ActiveShiftPhone() {
               <span className="app__tile-detail">1 entry</span>
             </span>
             <span className="app__tile">
-              <span className="app__tile-label">AdBlue</span>
+              <span className="app__tile-label">AdBlue / DEF</span>
               <span className="app__tile-amount">20 L</span>
               <span className="app__tile-detail">1 entry</span>
             </span>
@@ -145,7 +145,7 @@ export function UnitCheckPhone() {
         </div>
         <div className="app__check-head">
           <span className="app__title">Unit Check</span>
-          <span className="app__check-meta">AB12 CDE · Class 1 · In progress</span>
+          <span className="app__check-meta">AB12 CDE · Articulated truck · In progress</span>
         </div>
 
         <span className="app__section-label">Brakes</span>

@@ -49,10 +49,14 @@ export const FILL_TYPE = {
 
 export type FillType = (typeof FILL_TYPE)[keyof typeof FILL_TYPE];
 
-/** What each type is called on screen, and the action that adds one. */
+/**
+ * What each type is called on screen, and the action that adds one. The
+ * fluid is named both ways — AdBlue in Europe, DEF in North America (D52);
+ * the stored id stays `adblue`.
+ */
 export const FILL_TYPES: readonly { id: FillType; label: string; action: string }[] = [
-  { id: FILL_TYPE.fuel,   label: "Fuel",   action: "Add Fuel" },
-  { id: FILL_TYPE.adblue, label: "AdBlue", action: "Add AdBlue" },
+  { id: FILL_TYPE.fuel,   label: "Fuel",         action: "Add Fuel" },
+  { id: FILL_TYPE.adblue, label: "AdBlue / DEF", action: "Add AdBlue / DEF" },
 ] as const;
 
 export function fillTypeLabel(type: FillType): string {

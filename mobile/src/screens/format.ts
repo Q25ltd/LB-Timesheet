@@ -7,7 +7,7 @@ import { SafeSaveFailedError, VEHICLE_CLASSES, type VehicleClass } from "../shif
 import { checkStateOf, isCorrected, latestCheck, type VehicleCheck, type VehicleCheckState } from "../shift/vehicleCheck";
 import type { FillSummary } from "../shift/vehicleFill";
 
-/** "class1" → "Class 1". */
+/** "class1" → "Articulated truck". */
 export function classLabel(id: VehicleClass): string {
   return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
 }

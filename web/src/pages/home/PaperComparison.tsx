@@ -18,7 +18,7 @@ const ROWS: readonly { topic: string; paper: string; timesheets: string }[] = [
   {
     topic: "Mileage and fuel",
     paper: "Mileage worked out by hand; fuel noted somewhere else.",
-    timesheets: "Start and end mileage with the distance worked out, and fuel and AdBlue on the vehicle they went into.",
+    timesheets: "Start and end mileage with the distance worked out, and fuel and AdBlue / DEF on the vehicle they went into.",
   },
   {
     topic: "Defects",

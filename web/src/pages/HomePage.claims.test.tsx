@@ -77,6 +77,22 @@ describe("the homepage claims only what exists", () => {
     expect(text.match(/\b(UK|U\.K\.|United Kingdom|Britain|British|GB)\b/)?.[0] ?? null).toBeNull();
   });
 
+  // The page pictures the driver app, so it uses the app's own worldwide
+  // vocabulary (D52): vehicle types, registration and AdBlue / DEF.
+  test("the homepage uses the app's worldwide vehicle vocabulary", () => {
+    renderRoute(PATHS.home);
+    const text = document.body.textContent ?? "";
+    expect(text.match(/Class [12]|number plates?/i)?.[0] ?? null).toBeNull();
+    expect(text).toContain("Articulated truck");
+    expect(text).toContain("Registration number");
+    // Every mention of the fluid names it both ways.
+    expect(text.match(/AdBlue(?! \/ DEF)/)?.[0] ?? null).toBeNull();
+    expect(text).toContain("AdBlue / DEF");
+    // The pictures' descriptions too — what a screen reader hears.
+    const described = [...document.querySelectorAll('[role="img"]')].map(img => img.getAttribute("aria-label") ?? "").join(" ");
+    expect(described.match(/Class [12]|AdBlue(?! \/ DEF)/)?.[0] ?? null).toBeNull();
+  });
+
   test("the rules are live: each one catches the claim it exists for", () => {
     // Guards against a pattern that silently matches nothing.
     expect("Finished timesheets are emailed to your office as a PDF.").toMatch(PLANNED_CAPABILITY);

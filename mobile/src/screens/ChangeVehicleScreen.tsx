@@ -229,7 +229,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
           <OptionRow
             testID="use-different"
             title="Use a different vehicle"
-            detail="Enter its class, number plate and start mileage"
+            detail="Enter its type, registration number and start mileage"
             last
             onPress={() => { setStep({ kind: "new" }); }}
           />
@@ -274,7 +274,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
         {/* Said plainly, because the two are next to each other in a driver's
             head and only one of them files the day's work. */}
         <Text style={styles.hint}>
-          This is not Finish Shift — that is still yours to do at the end of the day. Fuel and AdBlue need a
+          This is not Finish Shift — that is still yours to do at the end of the day. Fuel and AdBlue / DEF need a
           vehicle, so they stay unavailable until you add one.
         </Text>
         {trailerBlocks ? <HandBackTrailerFirst trailerNumber={trailerInUse} because="no-vehicle" /> : null}

@@ -254,7 +254,7 @@ test("no vehicle means NO vehicle detail is rendered from anywhere", async () =>
 test("class, plate and start mileage all come from the shift", async () => {
   const view = await show(shiftWith({ vehicle: LORRY }));
 
-  expect(view.getByTestId("vehicle-class-value").props.children).toBe("Class 2");
+  expect(view.getByTestId("vehicle-class-value").props.children).toBe("Rigid truck");
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("AB24 XYZ");
   expect(view.getByTestId("vehicle-mileage-value").props.children).toBe("184,203 mi");
 });
@@ -371,7 +371,7 @@ test("Finish Shift is LIVE: pressing it only asks for the Finish flow — it fin
   expect(onFinish).toHaveBeenCalledTimes(1);
 });
 
-test.each([["fuel", "Fuel"], ["adblue", "AdBlue"]])("%s is LIVE once there is a vehicle to put it in", async (testID, label) => {
+test.each([["fuel", "Fuel"], ["adblue", "AdBlue / DEF"]])("%s is LIVE once there is a vehicle to put it in", async (testID, label) => {
   // Replaces the Step 3A contract that these do nothing. What they open is
   // proven in `vehicleFill.test.tsx`.
   const view = await show(shiftWith({ vehicle: LORRY }));
@@ -473,8 +473,8 @@ test("the whole workspace scrolls, so nothing is stranded below the fold", async
 // ═══════════════════════════════════════════════════════════════════════════
 
 test.each<[VehicleClass, string]>([
-  ["class1", "Class 1"],
-  ["class2", "Class 2"],
+  ["class1", "Articulated truck"],
+  ["class2", "Rigid truck"],
   ["van",    "Van"],
 ])("a %s shift renders its class as %s", async (vehicleClass, label) => {
   const view = await show(shiftWith({ vehicle: { ...LORRY, vehicleClass } }));

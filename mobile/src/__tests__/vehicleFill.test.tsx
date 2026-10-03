@@ -144,7 +144,7 @@ test("the screen names the type and the vehicle the fill will belong to", async 
 
   const view = await openFill("adblue");
 
-  expect(text(view, "screen-title")).toBe("Add AdBlue");
+  expect(text(view, "screen-title")).toBe("Add AdBlue / DEF");
   expect(text(view, "fill-vehicle")).toBe("AB12 CDE");
 });
 

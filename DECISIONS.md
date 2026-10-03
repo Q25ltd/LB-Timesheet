@@ -2028,15 +2028,29 @@ computes may assume one country.
 - **Wording:** no UK-only wording on the website or in new work. Done for the
   website and the product documents in the commit recording this decision.
 - **Units — the COMPANY chooses:** each company sets its distance unit
-  (kilometres or miles) and fuel unit (litres or gallons) once; its drivers'
-  app and its records use them. Records made before the setting exists are
-  miles and litres. *Not built* — its own increment (schema, company
-  setting, driver app).
-- **Vehicle types — neutral names:** the app's "Class 1", "Class 2" and
-  "Van" (UK licence categories) become "Articulated (tractor unit)", "Rigid
-  truck" and "Van". The same three types and stored ids; only the labels.
-  *Not built* — its own increment (driver app, and the website's app
-  picture with it, which copies the app's wording).
+  and fuel unit once; its drivers' app and its records use them. Records
+  made before the setting exists are miles and litres. *Not built* — its own
+  increment (schema, company setting, driver app). *Clarified 2026-10-03:*
+  "gallons" is not one unit — the model must name at least `KILOMETRE` |
+  `MILE` for distance and `LITRE` | `US_GALLON` | `IMPERIAL_GALLON` for
+  volume.
+- **Vehicle terminology — worldwide words** (*built 2026-10-03*, labels
+  only — no stored value, API value or migration changed):
+  - vehicle types: "Articulated truck", "Rigid truck", "Van" (were the UK
+    licence categories "Class 1", "Class 2"). The same three types under
+    the same stored ids `class1` / `class2` / `van`, so every existing
+    record reads under the new name. Not "tractor unit": where the app
+    calls an articulated truck's powered vehicle a *unit* ("Change Unit"),
+    that is a separate concept and is unchanged.
+  - registration: "Vehicle registration" for the field, "Registration
+    number" for the value ("Correct registration number"); never the US
+    "license plate". Still free text, trimmed and upper-cased; no country's
+    format is validated.
+  - the fluid: "AdBlue / DEF" wherever the app or website names it; stored
+    id `adblue` unchanged.
+  - the website's app pictures use the same words as the app.
+  - walkaround checklist ITEM wording ("Number plate", "AdBlue level") is
+    check content and is unchanged.
 - **Walkaround checks — general:** the existing lists stay, presented as a
   general daily walkaround that suits most countries. No per-country lists.
   They are not, and are never described as, approved by any authority.

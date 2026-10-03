@@ -160,8 +160,8 @@ test("a mileage of 0 is accepted — a new vehicle genuinely reads zero", async 
 });
 
 test.each([
-  ["class1", "Class 1"],
-  ["class2", "Class 2"],
+  ["class1", "Articulated truck"],
+  ["class2", "Rigid truck"],
   ["van",    "Van"],
 ] as const)("a %s is added with a trimmed, upper-cased plate", async (vehicleClass, _label) => {
   const onAdd = jest.fn((_vehicle: VehicleDetails) => Promise.resolve());
@@ -375,7 +375,7 @@ test("returning to Active Shift shows the vehicle IMMEDIATELY — checks still N
   await waitFor(() => { expect(view.queryByTestId("active-vehicle")).not.toBeNull(); });
   expect(view.queryByTestId("no-vehicle")).toBeNull();
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("WGM-4471-KLZ");
-  expect(view.getByTestId("vehicle-class-value").props.children).toBe("Class 1");
+  expect(view.getByTestId("vehicle-class-value").props.children).toBe("Articulated truck");
   expect(view.getByTestId("current-asset-label").props.children).toBe("CURRENT UNIT");
   // Adding a vehicle checked nothing.
   expect(view.getByTestId("vehicle-checks-state").props.children).toBe("Not completed");

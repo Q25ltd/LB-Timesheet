@@ -56,15 +56,15 @@ export function HowItWorks() {
               </span>
               <h3 className="how__title">Start your shift</h3>
               <p className="how__body">
-                Enter the start time. If you have a vehicle, add its class, number plate and start mileage — or start
+                Enter the start time. If you have a vehicle, add its type, registration number and start mileage — or start
                 without one and add it when it arrives.
               </p>
             </div>
             <Snippet>
               <span className="snippet__title">Start Shift</span>
               <SnippetRow label="Start time" value="06:00" />
-              <SnippetRow label="Vehicle" value="Class 1" />
-              <SnippetRow label="Number plate" value="AB12 CDE" />
+              <SnippetRow label="Vehicle" value="Articulated truck" />
+              <SnippetRow label="Registration number" value="AB12 CDE" />
               <SnippetRow label="Start mileage" value="100,000" />
             </Snippet>
           </li>
@@ -77,7 +77,7 @@ export function HowItWorks() {
               </span>
               <h3 className="how__title">Record the day</h3>
               <p className="how__body">
-                Walkaround checks for each vehicle and trailer, changes of unit or trailer, fuel and AdBlue, and any
+                Walkaround checks for each vehicle and trailer, changes of unit or trailer, fuel and AdBlue / DEF, and any
                 defect with a written description — each recorded when it happens.
               </p>
             </div>
@@ -85,7 +85,7 @@ export function HowItWorks() {
               <SnippetEvent icon="checkCircle" label="Unit check completed" value="AB12 CDE" tone="ok" />
               <SnippetEvent icon="swap" label="Trailer changed" value="C123 → C827" />
               <SnippetEvent icon="fuel" label="Fuel" value="180 L" />
-              <SnippetEvent icon="drop" label="AdBlue" value="20 L" />
+              <SnippetEvent icon="drop" label="AdBlue / DEF" value="20 L" />
               <SnippetEvent icon="alert" label="Defect" value="Service brake & pedal" tone="defect" />
             </Snippet>
           </li>

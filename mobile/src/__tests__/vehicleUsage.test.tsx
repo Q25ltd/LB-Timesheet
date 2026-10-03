@@ -182,8 +182,8 @@ test("two uses of ONE plate are two rows, each with its own mileage — never me
 
   const view = await activeShift();
 
-  expect(text(view, `usage-title-${first}`)).toBe("AB12 CDE · Class 1");
-  expect(text(view, `usage-title-${second}`)).toBe("AB12 CDE · Class 1");
+  expect(text(view, `usage-title-${first}`)).toBe("AB12 CDE · Articulated truck");
+  expect(text(view, `usage-title-${second}`)).toBe("AB12 CDE · Articulated truck");
   expect(text(view, `usage-mileage-${first}`)).toBe("100,000 → 100,120 mi · 120 mi");
   expect(text(view, `usage-mileage-${second}`)).toBe("100,500 → 100,620 mi · 120 mi");
 });
@@ -193,7 +193,7 @@ test("a row states its plate, its own class, start → end and what it travelled
 
   const view = await activeShift();
 
-  expect(text(view, `usage-title-${middle}`)).toBe("XY34 ZZZ · Class 2");
+  expect(text(view, `usage-title-${middle}`)).toBe("XY34 ZZZ · Rigid truck");
   expect(text(view, `usage-mileage-${middle}`)).toBe("220,000 → 220,050 mi · 50 mi");
 });
 
@@ -315,13 +315,13 @@ test("the detail is the EXACT use named — the afternoon AB12 is not the mornin
   const { first, second } = await threeUseDay();
 
   const morning = await openUsage(first);
-  expect(text(morning, "usage-class-hours")).toBe("Class 1 · 05:30–10:00");
+  expect(text(morning, "usage-class-hours")).toBe("Articulated truck · 05:30–10:00");
   expect(text(morning, "usage-start-mileage")).toBe("100,000 mi");
   await morning.unmount();
 
   const afternoon = await openUsage(second);
   expect(text(afternoon, "usage-plate")).toBe("AB12 CDE");
-  expect(text(afternoon, "usage-class-hours")).toBe("Class 1 · 12:00–14:00");
+  expect(text(afternoon, "usage-class-hours")).toBe("Articulated truck · 12:00–14:00");
   expect(text(afternoon, "usage-start-mileage")).toBe("100,500 mi");
   expect(text(afternoon, "usage-end-mileage")).toBe("100,620 mi");
   expect(text(afternoon, "usage-travelled")).toBe("120 mi");
@@ -418,7 +418,7 @@ test("Edit offers the start and end times and mileage — and states the rest (D
   expect(view.getByTestId("usage-end-mileage-input").props.value).toBe("100120");
   // Plate, class and hours are still shown, and are not inputs.
   expect(text(view, "usage-plate")).toBe("AB12 CDE");
-  expect(text(view, "usage-class-hours")).toBe("Class 1 · 05:30–10:00");
+  expect(text(view, "usage-class-hours")).toBe("Articulated truck · 05:30–10:00");
 });
 
 test("correcting the end mileage stores it, and the distance follows", async () => {

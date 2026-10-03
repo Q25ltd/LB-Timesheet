@@ -31,7 +31,7 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
   const inFlight = useRef(false);
   const typed = value.trim().toUpperCase();
   const canSave = typed !== "" && typed !== current;
-  const title = asset === "vehicle" ? "Correct number plate" : "Correct trailer number";
+  const title = asset === "vehicle" ? "Correct registration number" : "Correct trailer number";
 
   function save() {
     if (!canSave || inFlight.current) return;
@@ -52,7 +52,7 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
       >
         <BackButton testID="correct-name-back" onPress={onLeave} />
         <Text style={formStyles.title} testID="screen-title" accessibilityRole="header">{title}</Text>
-        <FormSection label={asset === "vehicle" ? "NUMBER PLATE" : "TRAILER NUMBER"}>
+        <FormSection label={asset === "vehicle" ? "REGISTRATION NUMBER" : "TRAILER NUMBER"}>
           <TextInput
             testID="correct-name-input"
             value={value}
@@ -61,11 +61,11 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
             autoCorrect={false}
             placeholderTextColor={colors.placeholder}
             style={formStyles.input}
-            accessibilityLabel={asset === "vehicle" ? "Number plate" : "Trailer number"}
+            accessibilityLabel={asset === "vehicle" ? "Registration number" : "Trailer number"}
           />
         </FormSection>
         <Text style={styles.hint} testID="correct-name-hint">
-          {`Recorded as ${current}. Only the ${asset === "vehicle" ? "plate" : "number"} changes — checks, ${asset === "vehicle" ? "mileage and fuel" : "fridge diesel"} stay as they are.`}
+          {`Recorded as ${current}. Only the ${asset === "vehicle" ? "registration number" : "number"} changes — checks, ${asset === "vehicle" ? "mileage and fuel" : "fridge diesel"} stay as they are.`}
         </Text>
         <View style={formStyles.action}>
           <PrimaryButton label="Save" onPress={save} disabled={!canSave} submitting={submitting} testID="correct-name-save" />

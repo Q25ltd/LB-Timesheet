@@ -184,7 +184,7 @@ test("the vehicle being ended is named — its plate and start mileage", async (
   const view = await openChange();
 
   expect(text(view, "ending-plate")).toBe("AB12 CDE");
-  expect(text(view, "ending-start-mileage")).toBe("Class 1 · start mileage 100,000 mi");
+  expect(text(view, "ending-start-mileage")).toBe("Articulated truck · start mileage 100,000 mi");
 });
 
 test("OPENING the change writes nothing", async () => {
@@ -269,7 +269,7 @@ test("vehicles used earlier are offered MOST RECENTLY USED first", async () => {
   await toNextStep(view, "300100");
 
   expect(candidates(view)).toEqual(["XY34 ZZZ", "AB12 CDE"]);
-  expect(view.getByTestId("candidate-XY34 ZZZ").props.accessibilityLabel).toBe("XY34 ZZZ. Class 1 · last used 11:00");
+  expect(view.getByTestId("candidate-XY34 ZZZ").props.accessibilityLabel).toBe("XY34 ZZZ. Articulated truck · last used 11:00");
 });
 
 test("a vehicle used TWICE is offered once — and still kept as two uses", async () => {
@@ -283,7 +283,7 @@ test("a vehicle used TWICE is offered once — and still kept as two uses", asyn
 
   expect(candidates(view)).toEqual(["AB12 CDE", "XY34 ZZZ"]);
   // The one row it keeps is its MOST RECENT use — 13:00, not the 09:00 one.
-  expect(view.getByTestId("candidate-AB12 CDE").props.accessibilityLabel).toBe("AB12 CDE. Class 1 · last used 13:00");
+  expect(view.getByTestId("candidate-AB12 CDE").props.accessibilityLabel).toBe("AB12 CDE. Articulated truck · last used 13:00");
   expect((await readOpenShift())?.previousVehicles.map(use => use.numberPlate)).toEqual(["AB12 CDE", "XY34 ZZZ", "AB12 CDE"]);
 });
 
@@ -320,7 +320,7 @@ test("every vehicle used earlier is offered back, whatever its class — a rigid
 
   expect(candidates(view)).toEqual(["VN11 BBB", "RG11 AAA"]);
   expect(view.getByTestId("candidate-VN11 BBB").props.accessibilityLabel).toBe("VN11 BBB. Van · last used 11:00");
-  expect(view.getByTestId("candidate-RG11 AAA").props.accessibilityLabel).toBe("RG11 AAA. Class 2 · last used 09:00");
+  expect(view.getByTestId("candidate-RG11 AAA").props.accessibilityLabel).toBe("RG11 AAA. Rigid truck · last used 09:00");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -554,7 +554,7 @@ test("Active Shift shows the NEW vehicle as current, and the one before it under
   const ended = (await readOpenShift())?.previousVehicles[0];
   expect(active.getByTestId(`usage-${ended?.startedAt ?? ""}`)).toBeTruthy();
   expect(String(active.getByTestId(`usage-${ended?.startedAt ?? ""}`).props.accessibilityLabel))
-    .toBe(`AB12 CDE, Class 1. 100,000 → ${(ended?.endMileage ?? 0).toLocaleString("en-GB")} mi · ${(ended?.endMileage ?? 0) - 100_000} mi`);
+    .toBe(`AB12 CDE, Articulated truck. 100,000 → ${(ended?.endMileage ?? 0).toLocaleString("en-GB")} mi · ${(ended?.endMileage ?? 0) - 100_000} mi`);
 });
 
 test("Active Shift lists a truck used twice as TWO entries — the reuse list groups, the history does not", async () => {

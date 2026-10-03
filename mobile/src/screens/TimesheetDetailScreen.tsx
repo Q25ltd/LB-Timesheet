@@ -301,7 +301,7 @@ function VehicleUse({ use, facts, prefix, last, onOpen, onCheck }: {
       <Fact label="End mileage" value={formatMileage(use.endMileage)} testID={`${prefix}-end-mileage`} />
       <Fact label="Travelled" value={formatMileage(usageDistance(use))} testID={`${prefix}-travelled`} />
       <Entries title="Fuel" fills={fillsOfType(use.fills, FILL_TYPE.fuel)} facts={facts} prefix={`${prefix}-fuel`} />
-      <Entries title="AdBlue" fills={fillsOfType(use.fills, FILL_TYPE.adblue)} facts={facts} prefix={`${prefix}-adblue`} />
+      <Entries title="AdBlue / DEF" fills={fillsOfType(use.fills, FILL_TYPE.adblue)} facts={facts} prefix={`${prefix}-adblue`} />
       <Check checks={use.checks} prefix={prefix} />
       <CheckAction prefix={prefix} checks={use.checks} onCheck={onCheck} />
     </View>

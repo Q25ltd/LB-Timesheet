@@ -12,7 +12,7 @@ const FEATURES: readonly { title: string; body: string }[] = [
   },
   {
     title: "The current shift, first",
-    body: "Open the app and the running shift is what you see — its vehicle, its trailer, and the number plate shown large.",
+    body: "Open the app and the running shift is what you see — its vehicle, its trailer, and the registration number shown large.",
   },
   {
     title: "Straightforward checks",

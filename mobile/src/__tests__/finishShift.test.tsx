@@ -304,16 +304,16 @@ test("the Review shows the day as it will be saved — the current vehicle and t
   expect(text(view, "review-night-out")).toBe("Yes");
   expect(text(view, "review-notes")).toBe("Waited at Tilbury");
 
-  expect(text(view, "review-vehicle-0-title")).toBe("AB12 CDE · Class 1");
+  expect(text(view, "review-vehicle-0-title")).toBe("AB12 CDE · Articulated truck");
   expect(text(view, "review-vehicle-0-mileage")).toBe("100,000 → 100,120 · 120 mi");
   expect(text(view, "review-vehicle-0-fuel")).toContain("300 L");
   expect(text(view, "review-vehicle-0-checks")).toBe("Completed");
   expect(text(view, "review-vehicle-0-defect-0")).toContain("Cut in the sidewall");
 
-  expect(text(view, "review-vehicle-1-title")).toBe("XY34 ZZZ · Class 2");
+  expect(text(view, "review-vehicle-1-title")).toBe("XY34 ZZZ · Rigid truck");
   expect(text(view, "review-vehicle-1-times")).toBe("09:00 – 17:00");
   expect(text(view, "review-vehicle-1-mileage")).toBe("220,000 → 220,180 · 180 mi");
-  expect(text(view, "review-vehicle-1-adblue")).toBe("AdBlue: 1 fill · Amount unknown");
+  expect(text(view, "review-vehicle-1-adblue")).toBe("AdBlue / DEF: 1 fill · Amount unknown");
   expect(text(view, "review-vehicle-1-checks")).toBe("In progress");
 
   expect(text(view, "review-trailer-0-title")).toBe("RF77 · Refrigerated");

@@ -374,7 +374,7 @@ test("leaving the Review to correct anything clears the declaration — even wit
 });
 
 test.each([
-  ["a plate", async (shift: LocalShift) => { await correctNumberPlate({ shiftId: shift.id, useId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, value: "XY34 ZZY" }); }, "review-vehicle-1-title", "XY34 ZZY · Class 2"],
+  ["a plate", async (shift: LocalShift) => { await correctNumberPlate({ shiftId: shift.id, useId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, value: "XY34 ZZY" }); }, "review-vehicle-1-title", "XY34 ZZY · Rigid truck"],
   ["a start mileage", async (shift: LocalShift) => { await correctStartMileage({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, startMileage: 220_050 }); }, "review-vehicle-1-mileage", "220,050 → 220,100 · 50 mi"],
   ["a fill", async (shift: LocalShift) => { await recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 80, note: "" }); }, "review-vehicle-0-fuel", "Fuel: 80 L · 1 entry"],
   ["the start and who it is for", async (shift: LocalShift) => { await correctOpenShift({ shiftId: shift.id, workingFor: NORTHGATE, startedAt: at(4) }); }, "review-duration", "13 h 40 min"],

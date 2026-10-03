@@ -383,7 +383,7 @@ test("VEHICLE uses: each separately, in order — the same unit twice stays two 
   const view = await detail((await busyDay()).id);
 
   expect([0, 1, 2].map(index => text(view, `timesheet-vehicle-${String(index)}-title`)))
-    .toEqual(["Class 1 · AB12 CDE", "Class 1 · CD56 EFG", "Class 1 · AB12 CDE"]);
+    .toEqual(["Articulated truck · AB12 CDE", "Articulated truck · CD56 EFG", "Articulated truck · AB12 CDE"]);
   expect(text(view, "timesheet-vehicle-0-started")).toBe("22:00");
   expect(text(view, "timesheet-vehicle-0-ended")).toBe("Sat 19 Sep 2026, 04:30");
   expect(text(view, "timesheet-vehicle-0-start-mileage")).toBe("100,000 mi");
@@ -436,7 +436,7 @@ test("a CORRECTED check says so and shows what it says NOW — the corrected-awa
 
   const view = await detail(done?.id ?? "");
 
-  expect(text(view, "timesheet-vehicle-0-title")).toBe("Class 2 · XY34 ZZZ");
+  expect(text(view, "timesheet-vehicle-0-title")).toBe("Rigid truck · XY34 ZZZ");
   expect(text(view, "timesheet-vehicle-0-checks")).toBe("Checks completed · corrected");
   expect(view.getByTestId("timesheet-vehicle-0-no-defects")).toBeTruthy();
   // The original certificate, defect and all, is still in the record.
