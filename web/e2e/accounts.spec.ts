@@ -115,7 +115,7 @@ test("a company owner: register, confirm the email, survive a reload, set up com
   expect(replay.status()).toBe(401);
 
   await page.goto("/account");
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Company sign-in", exact: true })).toBeVisible();
 });
 
 test("a password reset in another browser signs this one out; the old password stops working", async ({ page, browser }) => {
@@ -137,7 +137,7 @@ test("a password reset in another browser signs this one out; the old password s
 
   // Every session was revoked — including this browser's.
   await page.reload();
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Company sign-in", exact: true })).toBeVisible();
 
   await signIn(page, email, PASSWORD);
   await expect(page.getByText("Email or password is incorrect.", { exact: true })).toBeVisible();
@@ -160,7 +160,7 @@ test("changing the password keeps THIS browser signed in and signs the other one
   await expect(page.getByText("Your password has been changed.", { exact: false })).toBeVisible();
 
   await other.reload();
-  await expect(other.getByRole("heading", { level: 1, name: "Sign in", exact: true })).toBeVisible();
+  await expect(other.getByRole("heading", { level: 1, name: "Company sign-in", exact: true })).toBeVisible();
   await elsewhere.close();
 
   await page.reload();
@@ -170,7 +170,7 @@ test("changing the password keeps THIS browser signed in and signs the other one
 test("signed-out visitors are sent to sign in, and a wrong password is one generic message", async ({ page }) => {
   for (const path of ["/account", "/company"]) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { level: 1, name: "Sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Company sign-in", exact: true })).toBeVisible();
   }
   await signIn(page, emailFor("nobody"), "whatever-password");
   await expect(page.getByText("Email or password is incorrect.", { exact: true })).toBeVisible();

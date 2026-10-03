@@ -86,6 +86,17 @@ describe("the page registers a company", () => {
   });
 });
 
+describe("navigation", () => {
+  test("'Already registered? Sign in' takes an existing company to company sign-in", async () => {
+    renderRoute(PATHS.register);
+    const signIn = within(main()).getByRole("link", { name: "Sign in" });
+    expect(signIn.getAttribute("href")).toBe(PATHS.login);
+    expect(signIn.parentElement?.textContent).toBe("Already registered? Sign in");
+    fireEvent.click(signIn);
+    await screen.findByRole("heading", { level: 1, name: "Company sign-in" });
+  });
+});
+
 describe("company name rules", () => {
   test("required: an empty company name is refused with a message on the field", () => {
     renderRoute(PATHS.register);

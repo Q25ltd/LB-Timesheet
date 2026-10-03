@@ -17,12 +17,15 @@ export function Hero() {
           </p>
           <div className="hero__actions">
             <Link className="button button--primary button--large" to={PATHS.register}>
-              Get started
+              Register company
             </Link>
             <Link className="button button--secondary button--large" to={sectionHref(SECTION.howItWorks)}>
               See how it works
             </Link>
           </div>
+          <p className="hero__signin">
+            Already registered? <Link to={PATHS.login}>Sign in</Link>
+          </p>
         </div>
         <div className="hero__visual">
           <ActiveShiftPhone />

@@ -11,10 +11,10 @@ export function FinalCta() {
         <p className="final-cta__body">Company accounts are not open yet. When they are, this is where you will start.</p>
         <div className="final-cta__actions">
           <Link className="button button--on-dark button--large" to={PATHS.register}>
-            Get started
+            Register company
           </Link>
           <Link className="button button--outline-on-dark button--large" to={PATHS.login}>
-            Company login
+            Sign in
           </Link>
         </div>
       </div>

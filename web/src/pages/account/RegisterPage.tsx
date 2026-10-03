@@ -3,8 +3,9 @@ import { Link, useNavigate } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
 import { PASSWORD_RULE, passwordProblem } from "../../auth/passwordRule";
 import { Field, FormMessage } from "../../components/Field";
+import { Icon } from "../../components/Icon";
 import { PATHS } from "../../paths";
-import { AuthPanel } from "./AuthPanel";
+import { AuthCard } from "./AuthCard";
 
 /** The approved company-name rule (D51): trimmed, never empty, at most 200 characters. Not unique. */
 const COMPANY_NAME_MAX = 200;
@@ -59,48 +60,59 @@ export function RegisterPage() {
   }
 
   return (
-    <AuthPanel
+    <AuthCard
+      wide
       title="Register your company"
-      intro="Register your company with LogisticBay Timesheets and set up the administrator who will manage it on this website."
+      intro="Set up your company on LogisticBay Timesheets, and the administrator who will manage it on this website."
+      note={
+        // A standing notice, not a live region: it is true from the first render.
+        <p className="auth-card__note">
+          <Icon name="clock" className="auth-card__note-icon" />
+          <span>Company registration is not open yet. You can fill in and check your details, but nothing is sent until it opens.</span>
+        </p>
+      }
+      footer={<p className="auth-card__switch">Already registered? <Link to={PATHS.login}>Sign in</Link></p>}
     >
-      {/* A standing notice, not a live region: it is true from the first render. */}
-      <p className="form-message form-message--info">
-        Company registration is not open yet. You can check your details here, but the form cannot be sent until registration opens.
-      </p>
       <form className="auth-form" onSubmit={submit} noValidate>
-        <fieldset className="auth-fieldset">
-          <legend className="auth-fieldset__legend">Company details</legend>
-          <Field label="Company name" name="companyName" autoComplete="organization" required maxLength={COMPANY_NAME_MAX}
-            value={form.companyName} error={problems.companyName ?? null} onChange={event => update("companyName", event.target.value)} />
+        <fieldset className="auth-section">
+          <legend className="auth-section__legend">Company details</legend>
+          <p className="auth-section__hint">Your company&apos;s registered or trading name.</p>
+          <div className="auth-section__fields">
+            <Field label="Company name" name="companyName" autoComplete="organization" required maxLength={COMPANY_NAME_MAX}
+              value={form.companyName} error={problems.companyName ?? null} onChange={event => update("companyName", event.target.value)} />
+          </div>
         </fieldset>
 
-        <fieldset className="auth-fieldset">
-          <legend className="auth-fieldset__legend">Administrator details</legend>
-          <p className="auth-fieldset__hint">The person who will manage your company&apos;s account and sign in here.</p>
-          <Field label="First name" name="firstName" autoComplete="given-name" required maxLength={200}
-            value={form.firstName} error={problems.firstName ?? null} onChange={event => update("firstName", event.target.value)} />
-          <Field label="Last name" name="lastName" autoComplete="family-name" required maxLength={200}
-            value={form.lastName} error={problems.lastName ?? null} onChange={event => update("lastName", event.target.value)} />
-          <Field label="Email" type="email" name="email" autoComplete="username" required maxLength={320}
-            value={form.email} error={problems.email ?? null} onChange={event => update("email", event.target.value)} />
-          <Field label="Password" type="password" name="password" autoComplete="new-password" required hint={PASSWORD_RULE}
-            value={form.password} error={problems.password ?? null} onChange={event => update("password", event.target.value)} />
-          <Field label="Repeat password" type="password" name="repeat" autoComplete="new-password" required
-            value={form.repeat} error={problems.repeat ?? null} onChange={event => update("repeat", event.target.value)} />
+        <fieldset className="auth-section">
+          <legend className="auth-section__legend">Administrator details</legend>
+          <p className="auth-section__hint">The person who will manage your company&apos;s account and sign in here.</p>
+          <div className="auth-section__fields">
+            <div className="auth-section__pair">
+              <Field label="First name" name="firstName" autoComplete="given-name" required maxLength={200}
+                value={form.firstName} error={problems.firstName ?? null} onChange={event => update("firstName", event.target.value)} />
+              <Field label="Last name" name="lastName" autoComplete="family-name" required maxLength={200}
+                value={form.lastName} error={problems.lastName ?? null} onChange={event => update("lastName", event.target.value)} />
+            </div>
+            <Field label="Email" type="email" name="email" autoComplete="username" required maxLength={320}
+              value={form.email} error={problems.email ?? null} onChange={event => update("email", event.target.value)} />
+            <Field label="Password" type="password" name="password" autoComplete="new-password" required hint={PASSWORD_RULE}
+              value={form.password} error={problems.password ?? null} onChange={event => update("password", event.target.value)} />
+            <Field label="Repeat password" type="password" name="repeat" autoComplete="new-password" required
+              value={form.repeat} error={problems.repeat ?? null} onChange={event => update("repeat", event.target.value)} />
+          </div>
         </fieldset>
 
-        {checked ? (
-          <FormMessage tone="success">
-            Your details are complete. Company registration is not open yet, so nothing has been sent.
-          </FormMessage>
-        ) : null}
-        <button className="button button--primary auth-form__submit" type="submit">
-          Register company
-        </button>
+        <div className="auth-form__actions">
+          {checked ? (
+            <FormMessage tone="success">
+              Your details are complete. Company registration is not open yet, so nothing has been sent.
+            </FormMessage>
+          ) : null}
+          <button className="button button--primary button--large auth-form__submit" type="submit">
+            Register company
+          </button>
+        </div>
       </form>
-      <p className="auth__links">
-        <Link to={PATHS.login}>Already registered? Sign in</Link>
-      </p>
-    </AuthPanel>
+    </AuthCard>
   );
 }

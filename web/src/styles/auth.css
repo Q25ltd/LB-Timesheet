@@ -179,27 +179,268 @@
   justify-self: start;
 }
 
-/* Company registration: the company's details and the administrator's, as
-   two labelled groups of one form. */
-.auth-fieldset {
-  margin: 0;
-  padding: var(--space-5);
+/* ---------- Company sign-in and registration (AuthCard) ----------
+   One card, centred in the space under the header, over a band of the brand
+   blue ruled like the paper timesheet it replaces. The band gives a wide
+   screen a composition instead of a small box adrift in grey; on a phone it
+   shrinks to a strip and the card takes the width. */
+
+.auth-stage {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-height: calc(100dvh - var(--header-height));
+  padding: clamp(2rem, 1rem + 4vw, 4.5rem) var(--gutter);
+  background: var(--background);
+}
+
+.auth-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -1;
+  height: min(46%, 22rem);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(255 255 255 / 6%) 31px 32px),
+    var(--brand-deep);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 31rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
+  box-shadow: 0 1px 2px rgb(10 52 104 / 8%), 0 18px 40px -20px rgb(10 52 104 / 30%);
+}
+
+.auth-card--wide {
+  max-width: 50rem;
+}
+
+.auth-card__head {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-6) 0;
+}
+
+.auth-card__eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-1);
+  color: var(--brand-dark);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-card__eyebrow-rule {
+  width: 1px;
+  height: 0.875rem;
+  background: var(--border);
+}
+
+.auth-card__eyebrow-kind {
+  color: var(--text-muted);
+}
+
+.auth-card__title {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.75rem, 1.45rem + 1.1vw, 2.25rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.auth-card__intro {
+  max-width: 38rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1.0625rem;
+  text-wrap: pretty;
+}
+
+/* A plain line in the head, not a banner: true, visible, and quiet. */
+.auth-card__note {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  max-width: 38rem;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--brand-light);
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.auth-card__note-icon {
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.15rem;
+  color: var(--brand-dark);
+}
+
+.auth-card__body {
+  padding: var(--space-6);
+}
+
+.auth-card__foot {
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--background);
+  text-align: center;
+}
+
+.auth-card__switch {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.auth-card__switch a {
+  display: inline-block;
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+
+.auth-card .auth-form__submit {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.auth-form__password {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.auth-form__forgot {
+  justify-self: end;
+  /* A taller target than the line of text it sits on. */
+  margin-block: calc(-1 * var(--space-2));
+  padding-block: var(--space-2);
+  color: var(--brand-dark);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.auth-form__actions {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+/* Registration: two groups of ONE form, divided by a rule — not two boxes.
+   On a wide card each group's legend and description sit beside its fields.
+   The legend is floated so it stops being the fieldset's border caption and
+   becomes an ordinary box the grid can place. */
+.auth-section {
+  display: grid;
+  gap: var(--space-2) var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 var(--space-6);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.auth-section + .auth-section {
+  padding-top: var(--space-2);
+}
+
+.auth-section__legend {
+  float: left;
+  padding: 0;
+  color: var(--text);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.auth-section__hint {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.auth-section__fields {
   display: grid;
   gap: var(--space-4);
   min-width: 0;
 }
 
-.auth-fieldset__legend {
-  padding: 0 var(--space-2);
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--brand-dark);
+.auth-section__pair {
+  display: grid;
+  gap: var(--space-4);
 }
 
-.auth-fieldset__hint {
-  margin: 0;
-  color: var(--text-muted);
+@media (min-width: 520px) {
+  .auth-section__pair {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 760px) {
+  .auth-section {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .auth-section__legend {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .auth-section__hint {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .auth-section__fields {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  /* The button lines up under the fields, not under the descriptions. */
+  .auth-card--wide .auth-form__actions {
+    margin-left: calc(13rem + var(--space-6));
+  }
+}
+
+@media (max-width: 479px) {
+  .auth-stage {
+    padding-block: var(--space-5) var(--space-7);
+  }
+
+  .auth-stage::before {
+    height: 9rem;
+  }
+
+  /* The two parts of the eyebrow stack rather than wrap round a stray rule. */
+  .auth-card__eyebrow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .auth-card__eyebrow-rule {
+    display: none;
+  }
+
+  .auth-card__head {
+    padding: var(--space-5) var(--space-5) 0;
+  }
+
+  .auth-card__body {
+    padding: var(--space-5);
+  }
+
+  .auth-card__foot {
+    padding: var(--space-4) var(--space-5);
+  }
 }

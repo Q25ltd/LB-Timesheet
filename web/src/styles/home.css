@@ -37,6 +37,17 @@
   margin-top: var(--space-6);
 }
 
+.hero__signin {
+  margin-top: var(--space-4);
+  color: var(--text-muted);
+}
+
+.hero__signin a {
+  display: inline-block;
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+
 /* The phone sits on a quiet panel of the app's accent blue — the app's own
    surface behind the app's own screen. Inset from the column on every side,
    so it can never widen the page. */

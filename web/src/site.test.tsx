@@ -71,18 +71,34 @@ describe("links", () => {
 });
 
 describe("account entry points", () => {
-  // Every way into account registration or sign-in that the site offers.
+  // Every way into company registration or sign-in that the site offers:
+  // in the header, in the hero, and in the closing call to action.
   const ENTRY_POINTS = [
-    { name: "Get started", path: PATHS.register },
-    { name: "Log in", path: PATHS.login },
-    { name: "Company login", path: PATHS.login },
+    { name: "Register company", path: PATHS.register, count: 3 },
+    { name: "Sign in", path: PATHS.login, count: 3 },
   ] as const;
 
-  test.each(ENTRY_POINTS)("$name leads to $path", ({ name, path }) => {
+  test.each(ENTRY_POINTS)("$name leads to $path, wherever the homepage offers it", ({ name, path, count }) => {
     renderRoute(PATHS.home);
     const links = screen.getAllByRole("link", { name });
-    expect(links.length).toBeGreaterThan(0);
+    expect(links).toHaveLength(count);
     for (const link of links) expect(link.getAttribute("href")).toBe(path);
+  });
+
+  test("the hero's main action is registering a company; signing in sits beside it", () => {
+    renderRoute(PATHS.home);
+    const hero = screen.getByRole("region", { name: "Driver timesheets without the paperwork." });
+    const actions = within(hero).getAllByRole("link");
+    expect(actions[0]?.textContent).toBe("Register company");
+    expect(actions[0]?.getAttribute("href")).toBe(PATHS.register);
+    expect(within(hero).getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe(PATHS.login);
+  });
+
+  test("the vague 'Get started' and the old 'Log in' / 'Company login' labels are gone", () => {
+    renderRoute(PATHS.home);
+    for (const obsolete of ["Get started", "Log in", "Company login"]) {
+      expect(screen.queryAllByRole("link", { name: obsolete }), obsolete).toHaveLength(0);
+    }
   });
 
   test("/register registers a COMPANY — company details and administrator details on one form", () => {
@@ -93,12 +109,17 @@ describe("account entry points", () => {
     }
     expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
     expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("new-password");
+    const main = document.querySelector("main");
+    if (main === null) throw new Error("no <main>");
+    expect(within(main).getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe(PATHS.login);
     expect(robotsMeta()).toBe("noindex");
   });
 
-  test("/login is the sign-in form", () => {
+  test("/login is COMPANY sign-in — and it sends a new company to registration", () => {
     renderRoute(PATHS.login);
-    expect(pageHeading()).toBe("Sign in");
+    expect(pageHeading()).toBe("Company sign-in");
+    expect(document.querySelector("main")?.textContent).toMatch(/company account/i);
+    expect(screen.getByRole("link", { name: "Register your company" }).getAttribute("href")).toBe(PATHS.register);
     expect(screen.getByLabelText("Email").getAttribute("autocomplete")).toBe("username");
     expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
     expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("current-password");

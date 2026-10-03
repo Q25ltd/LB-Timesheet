@@ -26,8 +26,8 @@ describe("site menu", () => {
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
     const panel = menuPanel();
     expect(within(panel).getByRole("navigation", { name: "Main" })).toBeDefined();
-    expect(within(panel).getByRole("link", { name: "Log in" })).toBeDefined();
-    expect(within(panel).getByRole("link", { name: "Get started" })).toBeDefined();
+    expect(within(panel).getByRole("link", { name: "Sign in" })).toBeDefined();
+    expect(within(panel).getByRole("link", { name: "Register company" })).toBeDefined();
   });
 
   test("opens, and says Close while open", () => {
@@ -50,8 +50,8 @@ describe("site menu", () => {
   test("following a link in it closes it", async () => {
     renderRoute(PATHS.home);
     fireEvent.click(toggle());
-    fireEvent.click(within(menuPanel()).getByRole("link", { name: "Log in" }));
-    await screen.findByRole("heading", { level: 1, name: "Sign in" });
+    fireEvent.click(within(menuPanel()).getByRole("link", { name: "Sign in" }));
+    await screen.findByRole("heading", { level: 1, name: "Company sign-in" });
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
   });
 

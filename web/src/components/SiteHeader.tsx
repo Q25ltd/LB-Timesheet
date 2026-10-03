@@ -69,10 +69,10 @@ export function SiteHeader() {
           </nav>
           <div className="site-header__actions">
             <Link className="site-header__login" to={PATHS.login}>
-              Log in
+              Sign in
             </Link>
             <Link className="button button--primary" to={PATHS.register}>
-              Get started
+              Register company
             </Link>
           </div>
         </div>

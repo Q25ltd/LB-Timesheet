@@ -115,7 +115,7 @@ describe("session restore and expiry", () => {
 
   test("an account page with no session sends the visitor to sign in, showing no account content", async () => {
     renderRoute(PATHS.account);
-    await screen.findByRole("heading", { level: 1, name: "Sign in" });
+    await screen.findByRole("heading", { level: 1, name: "Company sign-in" });
     expect(screen.queryByText("Your companies")).toBeNull();
   });
 
@@ -138,7 +138,7 @@ describe("session restore and expiry", () => {
     renderRoute(PATHS.account);
     // The second refresh (after /auth/me's 401) is the unscripted canonical 401.
     api.on("POST /auth/web/refresh", { status: 401, body: { error: "Not authenticated", code: "UNAUTHENTICATED" } });
-    await screen.findByRole("heading", { level: 1, name: "Sign in" });
+    await screen.findByRole("heading", { level: 1, name: "Company sign-in" });
     expect(api.calls.length).toBeLessThan(6);
   });
 

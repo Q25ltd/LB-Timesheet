@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
 import { Field, FormMessage } from "../../components/Field";
 import { PATHS } from "../../paths";
-import { AuthPanel } from "./AuthPanel";
+import { AuthCard } from "./AuthCard";
 import { failureText } from "./failureText";
 
 /**
@@ -43,22 +43,25 @@ export function LoginPage() {
   }
 
   return (
-    <AuthPanel title="Sign in">
+    <AuthCard
+      title="Company sign-in"
+      intro="Sign in to manage your company's account. Drivers use the phone app instead."
+      footer={<p className="auth-card__switch">New to LogisticBay Timesheets? <Link to={PATHS.register}>Register your company</Link></p>}
+    >
       <form className="auth-form" onSubmit={event => void submit(event)} noValidate>
         {error === null && note !== null ? <FormMessage tone="info">{note}</FormMessage> : null}
         {error === null ? null : <FormMessage tone="error">{error}</FormMessage>}
         <Field label="Email" type="email" name="email" autoComplete="username" required maxLength={320}
           value={email} onChange={event => setEmail(event.target.value)} />
-        <Field label="Password" type="password" name="password" autoComplete="current-password" required
-          value={password} onChange={event => setPassword(event.target.value)} />
-        <button className="button button--primary auth-form__submit" type="submit" disabled={busy}>
+        <div className="auth-form__password">
+          <Field label="Password" type="password" name="password" autoComplete="current-password" required
+            value={password} onChange={event => setPassword(event.target.value)} />
+          <Link className="auth-form__forgot" to={PATHS.forgotPassword}>Forgotten your password?</Link>
+        </div>
+        <button className="button button--primary button--large auth-form__submit" type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
-      <p className="auth__links">
-        <Link to={PATHS.forgotPassword}>Forgotten your password?</Link>
-        <Link to={PATHS.register}>Register your company</Link>
-      </p>
-    </AuthPanel>
+    </AuthCard>
   );
 }
