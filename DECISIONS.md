@@ -2049,8 +2049,18 @@ computes may assume one country.
   - the fluid: "AdBlue / DEF" wherever the app or website names it; stored
     id `adblue` unchanged.
   - the website's app pictures use the same words as the app.
-  - walkaround checklist ITEM wording ("Number plate", "AdBlue level") is
-    check content and is unchanged.
+  - *Extended 2026-10-03 (owner decision)* to the checklist and the field
+    example: walkaround rows "Number plate(s)" → "Registration plate(s)"
+    (still the physical plate on the body section) and "AdBlue level" →
+    "AdBlue / DEF level"; the registration field's example is the neutral
+    instruction "Registration number", not a sample plate (any sample plate
+    reads as one country's format). Row keys, defaults, order, sections and
+    checklist versions are unchanged — "rewording a label is safe".
+  - history keeps its words: a completed check stores the label of every
+    row it certified and is shown from itself, so a check completed before
+    a rewording keeps the old words. A CORRECTION of such a check records
+    that check's own words — what the driver sees while correcting — never
+    a later rewording (owner decision, 2026-10-03).
 - **Walkaround checks — general:** the existing lists stay, presented as a
   general daily walkaround that suits most countries. No per-country lists.
   They are not, and are never described as, approved by any authority.

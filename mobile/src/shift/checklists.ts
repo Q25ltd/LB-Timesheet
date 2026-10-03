@@ -188,7 +188,7 @@ function hgvSections(parkingBrake: ChecklistItem, body: ChecklistItem, loadSecur
         body,
         item("guards",            "Side & rear under-run guards", 12),
         optional("spray-suppression", "Spray suppression",        18),
-        item("number-plate",      "Number plate",                 24),
+        item("number-plate",      "Registration plate",           24),
         item("reflectors",        "Reflectors",                   25),
         item("markings",          "Markings & warning plates",    26),
       ],
@@ -207,7 +207,7 @@ function hgvSections(parkingBrake: ChecklistItem, body: ChecklistItem, loadSecur
       id: "fluids", title: "FLUIDS / EMISSIONS", items: [
         item("fuel-leaks",    "Fuel leaks & filler cap", 11),
         item("oil-leaks",     "Oil leaks",               11),
-        item("adblue",        "AdBlue level",            14),
+        item("adblue",        "AdBlue / DEF level",      14),
         item("exhaust-smoke", "Exhaust smoke",           15),
       ],
     },
@@ -287,7 +287,7 @@ const VAN: Checklist = {
       id: "body", title: "BODY / EXTERIOR", items: [
         item("bodywork",     "Bodywork",      11),
         item("doors",        "Doors",         11),
-        item("number-plate", "Number plates", 17),
+        item("number-plate", "Registration plates", 17),
       ],
     },
     {
@@ -300,7 +300,7 @@ const VAN: Checklist = {
       id: "fluids", title: "FLUIDS / EMISSIONS", items: [
         item("fluid-levels", "Fluid levels",            9),
         item("leaks",        "Leaks & fuel filler cap", 9),
-        optional("adblue",   "AdBlue level",            14),
+        optional("adblue",   "AdBlue / DEF level",      14),
         item("exhaust",      "Exhaust",                 15),
       ],
     },
@@ -369,7 +369,7 @@ function trailerSections(specialisedEquipment: ChecklistItem): ChecklistSection[
         item("landing-legs",          "Landing legs",                 12),
         item("guards",                "Side & rear under-run guards", 12),
         optional("spray-suppression", "Spray suppression",            18),
-        item("number-plate",          "Number plate",                 24),
+        item("number-plate",          "Registration plate",           24),
         item("reflectors",            "Reflectors (incl. side)",      25),
         item("markings",              "Markings & conspicuity",       26),
         optional("hazard-panels",     "Hazard warning panels",        26),

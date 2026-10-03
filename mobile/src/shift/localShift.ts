@@ -1567,7 +1567,15 @@ function reviseCheck(
     throw new Error("Refusing to correct a check against a different checklist");
   }
 
-  const items = materialise(checklist, input.answers, { completedAt: input.revisedAt, completedBy: input.revisedBy });
+  // A correction speaks in the words of the check it corrects — the words the
+  // driver sees on screen while correcting it (`sectionsOf` shows a completed
+  // check from itself) — not in a later rewording of the checklist. Keys are
+  // permanent, so each row's own label is found by its key (owner decision,
+  // 2026-10-03). This also keeps a rewording from making an unchanged save
+  // look like a correction.
+  const recorded = new Map(effectiveItems(existing).map(item => [item.key, item.label]));
+  const items = materialise(checklist, input.answers, { completedAt: input.revisedAt, completedBy: input.revisedBy })
+    .map(item => ({ ...item, label: recorded.get(item.key) ?? item.label }));
   if (JSON.stringify(items) === JSON.stringify(effectiveItems(existing))) return { check: existing, checks: null };
 
   const revision: CheckRevision = {

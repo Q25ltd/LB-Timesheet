@@ -107,7 +107,9 @@ export function VehicleFields({
           testID="number-plate"
           value={numberPlate}
           onChangeText={onNumberPlate}
-          placeholder="AB24 XYZ"
+          // An instruction, not a plate: any example plate looks like
+          // some one country's format, and would read as a rule.
+          placeholder="Registration number"
           placeholderTextColor={colors.placeholder}
           // Upper-cased when the vehicle is stored rather than while typing,
           // so the caret cannot jump in the middle of a word.
