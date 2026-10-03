@@ -66,8 +66,8 @@ export function RegisterPage() {
       intro="Set up your company on LogisticBay Timesheets, and the administrator who will manage it on this website."
       note={
         // A standing notice, not a live region: it is true from the first render.
-        <p className="auth-card__note">
-          <Icon name="clock" className="auth-card__note-icon" />
+        <p className="auth-head__note">
+          <Icon name="clock" className="auth-head__note-icon" />
           <span>Company registration is not open yet. You can fill in and check your details, but nothing is sent until it opens.</span>
         </p>
       }

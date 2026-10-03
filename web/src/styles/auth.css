@@ -180,27 +180,107 @@
 }
 
 /* ---------- Company sign-in and registration (AuthCard) ----------
-   One card, centred in the space under the header, over a band of the brand
-   blue ruled like the paper timesheet it replaces. The band gives a wide
-   screen a composition instead of a small box adrift in grey; on a phone it
-   shrinks to a strip and the card takes the width. */
+   The homepage hero's composition: the identity centred on the light page,
+   then the form on a card rising out of the ruled brand-blue stage. */
 
 .auth-stage {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
   min-height: calc(100dvh - var(--header-height));
-  padding: clamp(2rem, 1rem + 4vw, 4.5rem) var(--gutter);
   background: var(--background);
 }
 
-.auth-stage::before {
+.auth-head {
+  display: grid;
+  justify-items: center;
+  padding-block: clamp(2.5rem, 1.5rem + 4vw, 4.5rem) var(--space-6);
+  text-align: center;
+}
+
+/* The homepage hero's product line: product | audience. */
+.auth-head__eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-5);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.auth-head__product {
+  color: var(--brand-dark);
+}
+
+.auth-head__product::after {
   content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: -1;
-  height: min(46%, 22rem);
+  display: inline-block;
+  width: 1px;
+  height: 0.875rem;
+  margin-left: var(--space-3);
+  vertical-align: -0.1em;
+  background: var(--border);
+}
+
+.auth-head__kind {
+  color: var(--text-muted);
+}
+
+/* The homepage headline's type, a step smaller. */
+.auth-head__title {
+  margin: 0;
+  color: var(--brand-dark);
+  font-size: clamp(2.5rem, 1.5rem + 3.6vw, 4.25rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.auth-head__intro {
+  max-width: 34rem;
+  margin: var(--space-5) 0 0;
+  color: var(--text-muted);
+  font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+  text-wrap: pretty;
+}
+
+/* A quiet line under the intro, not a banner: true, visible, and calm. */
+.auth-head__note {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  max-width: 34rem;
+  margin: var(--space-5) 0 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9375rem;
+  text-align: left;
+}
+
+.auth-head__note-icon {
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.15rem;
+  color: var(--brand-dark);
+}
+
+/* The stage. The card is pulled up by `--rise`, so its top stands on the
+   light page and the rest rises out of the blue, as the homepage phone does;
+   the band then runs on to the footer however short the form is. */
+.auth-band {
+  --rise: 7rem;
+  flex: 1;
+  display: flow-root; /* so the card's negative margin cannot collapse into this one */
+  margin-top: var(--rise);
+  padding-bottom: clamp(3rem, 2rem + 4vw, 5rem);
   background:
     repeating-linear-gradient(to bottom, transparent 0 31px, rgb(255 255 255 / 6%) 31px 32px),
     var(--brand-deep);
@@ -208,83 +288,16 @@
 
 .auth-card {
   width: 100%;
-  max-width: 31rem;
+  max-width: 30rem;
+  margin: calc(-1 * var(--rise)) auto 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: 0 1px 2px rgb(10 52 104 / 8%), 0 18px 40px -20px rgb(10 52 104 / 30%);
+  box-shadow: 0 2px 4px rgb(0 10 30 / 10%), 0 28px 56px -24px rgb(0 10 30 / 55%);
 }
 
 .auth-card--wide {
   max-width: 50rem;
-}
-
-.auth-card__head {
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-6) 0;
-}
-
-.auth-card__eyebrow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  margin: 0 0 var(--space-1);
-  color: var(--brand-dark);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.auth-card__eyebrow-rule {
-  width: 1px;
-  height: 0.875rem;
-  background: var(--border);
-}
-
-.auth-card__eyebrow-kind {
-  color: var(--text-muted);
-}
-
-.auth-card__title {
-  margin: 0;
-  color: var(--text);
-  font-size: clamp(1.75rem, 1.45rem + 1.1vw, 2.25rem);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  overflow-wrap: anywhere;
-}
-
-.auth-card__intro {
-  max-width: 38rem;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 1.0625rem;
-  text-wrap: pretty;
-}
-
-/* A plain line in the head, not a banner: true, visible, and quiet. */
-.auth-card__note {
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-start;
-  max-width: 38rem;
-  margin: var(--space-1) 0 0;
-  padding-left: var(--space-3);
-  border-left: 3px solid var(--brand-light);
-  color: var(--text);
-  font-size: 0.9375rem;
-}
-
-.auth-card__note-icon {
-  flex-shrink: 0;
-  width: 1.125rem;
-  height: 1.125rem;
-  margin-top: 0.15rem;
-  color: var(--brand-dark);
 }
 
 .auth-card__body {
@@ -413,27 +426,22 @@
 }
 
 @media (max-width: 479px) {
-  .auth-stage {
-    padding-block: var(--space-5) var(--space-7);
-  }
-
-  .auth-stage::before {
-    height: 9rem;
-  }
-
-  /* The two parts of the eyebrow stack rather than wrap round a stray rule. */
-  .auth-card__eyebrow {
+  /* The two parts of the product line stack rather than wrap round a rule. */
+  .auth-head__eyebrow {
     flex-direction: column;
-    align-items: flex-start;
     gap: var(--space-1);
   }
 
-  .auth-card__eyebrow-rule {
+  .auth-head__product::after {
     display: none;
   }
 
-  .auth-card__head {
-    padding: var(--space-5) var(--space-5) 0;
+  .auth-head__note {
+    border-radius: var(--radius-sm);
+  }
+
+  .auth-band {
+    --rise: 4rem;
   }
 
   .auth-card__body {

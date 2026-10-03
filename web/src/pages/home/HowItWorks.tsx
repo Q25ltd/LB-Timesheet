@@ -38,23 +38,28 @@ function SnippetEvent({ icon, label, value, tone }: { icon: IconName; label: str
 export function HowItWorks() {
   return (
     <section id={SECTION.howItWorks} className="section section--tinted how" aria-labelledby="how-title" tabIndex={-1}>
-      <div className="container">
-        <p className="eyebrow">How it works</p>
-        <h2 id="how-title" className="section-heading">
-          One record of the day, from booking on to finishing.
-        </h2>
+      <div className="container how__layout">
+        <div className="how__intro">
+          <p className="eyebrow">How it works</p>
+          <h2 id="how-title" className="how__heading">
+            One record of the day, from booking on to finishing.
+          </h2>
+          <p className="how__lede">Three moments in the driver&apos;s day, each recorded on the phone as it happens.</p>
+        </div>
 
         <ol className="how__steps">
           <li className="how__step">
-            <span className="how__marker">
-              <span className="how__number">1</span>
-              <span className="how__time">06:00</span>
-            </span>
-            <h3 className="how__title">Start your shift</h3>
-            <p className="how__body">
-              Enter the start time. If you have a vehicle, add its class, number plate and start mileage — or start
-              without one and add it when it arrives.
-            </p>
+            <div className="how__text">
+              <span className="how__marker">
+                <span className="how__number">1</span>
+                <span className="how__time">06:00</span>
+              </span>
+              <h3 className="how__title">Start your shift</h3>
+              <p className="how__body">
+                Enter the start time. If you have a vehicle, add its class, number plate and start mileage — or start
+                without one and add it when it arrives.
+              </p>
+            </div>
             <Snippet>
               <span className="snippet__title">Start Shift</span>
               <SnippetRow label="Start time" value="06:00" />
@@ -65,15 +70,17 @@ export function HowItWorks() {
           </li>
 
           <li className="how__step">
-            <span className="how__marker">
-              <span className="how__number">2</span>
-              <span className="how__time">Through the day</span>
-            </span>
-            <h3 className="how__title">Record the day</h3>
-            <p className="how__body">
-              Walkaround checks for each vehicle and trailer, changes of unit or trailer, fuel and AdBlue, and any
-              defect with a written description — each recorded when it happens.
-            </p>
+            <div className="how__text">
+              <span className="how__marker">
+                <span className="how__number">2</span>
+                <span className="how__time">Through the day</span>
+              </span>
+              <h3 className="how__title">Record the day</h3>
+              <p className="how__body">
+                Walkaround checks for each vehicle and trailer, changes of unit or trailer, fuel and AdBlue, and any
+                defect with a written description — each recorded when it happens.
+              </p>
+            </div>
             <Snippet>
               <SnippetEvent icon="checkCircle" label="Unit check completed" value="AB12 CDE" tone="ok" />
               <SnippetEvent icon="swap" label="Trailer changed" value="C123 → C827" />
@@ -84,15 +91,17 @@ export function HowItWorks() {
           </li>
 
           <li className="how__step">
-            <span className="how__marker">
-              <span className="how__number">3</span>
-              <span className="how__time">16:30</span>
-            </span>
-            <h3 className="how__title">Finish and review</h3>
-            <p className="how__body">
-              Enter the finish time and final mileage, then review the whole day on one screen, confirm the details
-              and save the completed timesheet.
-            </p>
+            <div className="how__text">
+              <span className="how__marker">
+                <span className="how__number">3</span>
+                <span className="how__time">16:30</span>
+              </span>
+              <h3 className="how__title">Finish and review</h3>
+              <p className="how__body">
+                Enter the finish time and final mileage, then review the whole day on one screen, confirm the details
+                and save the completed timesheet.
+              </p>
+            </div>
             <Snippet>
               <span className="snippet__title">Review</span>
               <SnippetRow label="Started" value="06:00" />

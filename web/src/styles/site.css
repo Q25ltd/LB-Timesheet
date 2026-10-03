@@ -81,6 +81,7 @@
 .site-nav__link,
 .site-header__login {
   display: inline-flex;
+  white-space: nowrap;
   align-items: center;
   min-height: 2.75rem;
   padding: 0 var(--space-3);
@@ -167,8 +168,10 @@
   transform: rotate(-45deg);
 }
 
-/* Wide: one row — brand, the three section links, then the two actions. */
-@media (min-width: 960px) {
+/* Wide: one row — brand, the three section links, then the two actions.
+   Below 1100px the row cannot hold them without wrapping a label, so the
+   menu takes over. */
+@media (min-width: 1100px) {
   .site-header__menu {
     display: flex;
     flex: 1;
@@ -191,7 +194,7 @@
 }
 
 /* Narrow: the same links behind the Menu button, as a full-width panel. */
-@media (max-width: 959px) {
+@media (max-width: 1099px) {
   .site-header__toggle {
     display: inline-flex;
   }

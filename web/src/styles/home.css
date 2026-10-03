@@ -1,30 +1,66 @@
-/* ---------- Hero ---------- */
+/* ---------- Hero ----------
+   Centred and product-led: the promise owns the middle of the screen, then
+   the day itself stands on the brand stage beneath it. */
 
 .hero {
   overflow: clip;
-  padding-block: clamp(2.5rem, 1.5rem + 5vw, 6rem);
-  border-bottom: 1px solid var(--border);
   background: var(--background);
 }
 
-.hero__inner {
+.hero__copy {
   display: grid;
-  gap: var(--space-7);
-  align-items: center;
+  justify-items: center;
+  padding-block: clamp(3rem, 2rem + 4vw, 5.5rem) clamp(2.5rem, 1.5rem + 3vw, 4rem);
+  text-align: center;
 }
 
-/* Greedy wrapping, not `balance`: balancing this headline strands "without"
-   on a line of its own at phone widths. */
+.hero__eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-5);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hero__product {
+  color: var(--brand-dark);
+}
+
+.hero__audience {
+  color: var(--text-muted);
+}
+
+.hero__product::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 0.875rem;
+  margin-left: var(--space-3);
+  vertical-align: -0.1em;
+  background: var(--border);
+}
+
+/* Two controlled lines: the subject, then the promise. */
 .hero__title {
-  text-wrap: wrap;
-  font-size: clamp(2.375rem, 1.35rem + 4.3vw, 4.25rem);
+  font-size: clamp(2.5rem, 1.2rem + 5.6vw, 5.5rem);
   font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.04;
+  letter-spacing: -0.04em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.hero__title-line {
+  display: block;
+  color: var(--text);
 }
 
 .hero__lead {
-  max-width: 34rem;
+  max-width: 38rem;
   margin-top: var(--space-5);
   color: var(--text-muted);
   font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
@@ -33,146 +69,270 @@
 .hero__actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-3);
   margin-top: var(--space-6);
 }
 
-.hero__signin {
-  margin-top: var(--space-4);
-  color: var(--text-muted);
-}
-
-.hero__signin a {
-  display: inline-block;
+.hero__more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin-top: var(--space-3);
   color: var(--brand-dark);
   font-weight: 700;
 }
 
-/* The phone sits on a quiet panel of the app's accent blue — the app's own
-   surface behind the app's own screen. Inset from the column on every side,
-   so it can never widen the page. */
-.hero__visual {
-  position: relative;
-  padding-block: var(--space-5);
-  --phone-max: 280px;
+/* The stage: a band of the brand blue, ruled like the paper it replaces.
+   The picture is pulled up by `--rise`, so the top of the phone stands on
+   the light page and the rest rises out of the stage. */
+.hero__stage {
+  --rise: 13rem;
+  display: flow-root; /* so the picture's negative margin cannot collapse into this one */
+  margin-top: var(--rise);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(255 255 255 / 6%) 31px 32px),
+    var(--brand-deep);
 }
 
-.hero__visual::before {
-  content: "";
-  position: absolute;
-  inset: 12% 4% 12% 4%;
-  border-radius: var(--radius-md);
-  background: var(--surface-accent);
+.hero__visual {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  justify-items: center;
+  margin-top: calc(-1 * var(--rise));
+  padding-bottom: clamp(2.5rem, 1rem + 4vw, 4.5rem);
+  --phone-max: 320px;
 }
 
 .hero__visual .phone {
   position: relative;
 }
 
-@media (max-width: 479px) {
+/* ---------- The paper timesheet (left of the phone) ---------- */
+
+.paper-sheet {
+  position: absolute;
+  top: 22%;
+  right: calc(50% + 120px);
+  z-index: -1;
+  display: flex;
+  flex-direction: column;
+  width: 19rem;
+  padding: 1.1rem 1.1rem 1.6rem 2rem;
+  border-radius: 3px;
+  background:
+    linear-gradient(to right, transparent 1.45rem, #e3b7ac 1.45rem, #e3b7ac calc(1.45rem + 1px), transparent calc(1.45rem + 1px)),
+    var(--paper);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 18px 36px -16px rgb(0 10 30 / 55%);
+  color: var(--paper-ink);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  transform: rotate(-4deg);
+}
+
+.paper-sheet__title {
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.paper-sheet__meta {
+  margin: 0.35rem 0 0.6rem;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.paper-sheet__row {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.55rem 0 0.3rem;
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.paper-sheet__row--tall {
+  grid-template-columns: 1fr;
+  gap: 0.2rem;
+  padding-bottom: 1.1rem;
+}
+
+.paper-sheet__label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* A pen, in the faces the device already has: nothing is downloaded. */
+.paper-sheet__hand {
+  color: #2c3f87;
+  font-family: "Bradley Hand", "Segoe Print", "Comic Neue", cursive;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* ---------- The end-of-day review (right of the phone) ----------
+   The app's own Review step, at the scale of a card from the app. */
+
+.hero-review {
+  position: absolute;
+  top: 46%;
+  left: calc(50% + 140px);
+  z-index: 1;
+  display: grid;
+  gap: 0.55rem;
+  width: 17rem;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 2px 4px rgb(0 10 30 / 12%), 0 24px 48px -18px rgb(0 10 30 / 55%);
+  font-size: 0.875rem;
+}
+
+.hero-review__title {
+  color: var(--brand-dark);
+  font-weight: 800;
+}
+
+.hero-review__row {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--background);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.hero-review__row b {
+  color: var(--text);
+}
+
+.hero-review__confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.hero-review__box {
+  display: grid;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--brand-dark);
+  color: var(--on-brand);
+}
+
+.hero-review__box .icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.hero-review__button {
+  padding: 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--brand-dark);
+  color: var(--on-brand);
+  font-weight: 800;
+  text-align: center;
+}
+
+/* Too narrow for all three side by side: the review steps aside, and the
+   paper tucks in behind the phone's shoulder. */
+@media (max-width: 899px) {
+  .hero-review {
+    display: none;
+  }
+
+  .paper-sheet {
+    right: calc(50% + 40px);
+    width: min(17rem, 52vw);
+  }
+}
+
+/* A phone: the top of the phone rises out of the stage — the part that says
+   what it is — rather than a whole phone two screens below the buttons. */
+@media (max-width: 599px) {
   .hero__actions .button {
     flex: 1 1 100%;
   }
 
-  .hero__visual {
-    --phone-max: 260px;
-  }
-}
-
-@media (min-width: 800px) {
-  .hero__inner {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  .hero__eyebrow {
+    flex-direction: column;
   }
 
-  /* Three even lines beside the phone; on a phone the width does this. */
-  .hero__title {
-    max-width: 14ch;
+  .hero__product::after {
+    display: none;
   }
 
   .hero__visual {
-    padding-block: var(--space-4);
+    height: clamp(21rem, 70vw + 6rem, 28rem);
+    overflow: clip;
+    justify-items: end;
+    padding-bottom: 0;
+    --phone-max: 230px;
+  }
+
+  .hero__visual .phone {
+    margin-right: 0;
+  }
+
+  .hero__stage {
+    --rise: 4rem;
+  }
+
+  .paper-sheet {
+    top: var(--space-6);
+    right: auto;
+    left: var(--gutter);
+    width: 58%;
+    padding: 0.9rem 0.8rem 1.2rem 1.7rem;
+    font-size: 0.75rem;
+  }
+
+  .paper-sheet__hand {
+    font-size: 0.875rem;
   }
 }
 
-@media (min-width: 1100px) {
-  .hero__visual {
-    --phone-max: 310px;
-  }
+/* ---------- How it works ----------
+   Asymmetric: the section's statement holds its place on the left while the
+   day runs down the right, each moment's words set against what the driver
+   sees at that moment. */
 
-  .hero__visual::before {
-    inset: 14% 0 14% 10%;
-  }
+.how__layout {
+  display: grid;
+  gap: var(--space-7);
 }
 
-/* ---------- Principles ---------- */
-
-.principles__statement {
-  max-width: 24ch;
-  font-size: clamp(1.625rem, 1.15rem + 2vw, 2.375rem);
+.how__heading {
+  max-width: 16ch;
+  font-size: clamp(2rem, 1.25rem + 3vw, 3.25rem);
   font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
 }
 
-.principles__list {
-  display: grid;
-  gap: var(--space-5);
-  margin-top: var(--space-7);
-}
-
-.principle + .principle {
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border);
-}
-
-.principle__icon {
-  display: grid;
-  width: 2.75rem;
-  height: 2.75rem;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  background: var(--surface-accent);
-  color: var(--brand-dark);
-}
-
-.principle__icon .icon {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.principle__title {
+.how__lede {
+  max-width: 24rem;
   margin-top: var(--space-4);
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-
-.principle__body {
-  margin-top: var(--space-2);
   color: var(--text-muted);
+  font-size: 1.125rem;
 }
-
-@media (min-width: 800px) {
-  .principles__list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-6);
-  }
-
-  .principle + .principle {
-    padding-top: 0;
-    padding-left: var(--space-6);
-    border-top: 0;
-    border-left: 1px solid var(--border);
-  }
-}
-
-/* ---------- How it works: the day's own timeline ---------- */
 
 .how__steps {
   position: relative;
   display: grid;
   gap: var(--space-7);
-  margin-top: var(--space-7);
 }
 
-/* The day's line: down the left edge when stacked, across the top when wide. */
+/* The day's line, down the left edge of the steps. */
 .how__steps::before {
   content: "";
   position: absolute;
@@ -185,8 +345,8 @@
 
 .how__step {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  gap: var(--space-5);
   padding-left: 4rem;
 }
 
@@ -223,7 +383,7 @@
 
 .how__title {
   margin-top: var(--space-2);
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   font-weight: 800;
 }
 
@@ -232,37 +392,28 @@
   color: var(--text-muted);
 }
 
-@media (min-width: 960px) {
-  .how__steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-6);
-  }
+.how .snippet {
+  margin-top: 0;
+}
 
-  .how__steps::before {
-    top: calc(1.375rem - 1px);
-    bottom: auto;
-    left: 1.375rem;
-    right: 0;
-    width: auto;
-    height: 2px;
-  }
-
+@media (min-width: 720px) {
   .how__step {
-    padding-left: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+    gap: var(--space-6);
+    align-items: start;
+  }
+}
+
+@media (min-width: 1100px) {
+  .how__layout {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr);
+    gap: var(--space-8);
   }
 
-  .how__number {
-    position: static;
-    margin: -4px var(--space-3) -4px -4px;
-  }
-
-  .how__time {
-    padding-right: var(--space-3);
-    background: var(--background);
-  }
-
-  .how__title {
-    margin-top: var(--space-4);
+  .how__intro {
+    position: sticky;
+    top: calc(var(--header-height) + var(--space-7));
+    align-self: start;
   }
 }
 
@@ -368,7 +519,36 @@
   text-align: center;
 }
 
-/* ---------- Paper comparison ---------- */
+/* ---------- Paper and Timesheets ----------
+   A centred statement, then the comparison across the full width. On a wide
+   screen the paper side is one continuous ruled sheet with its margin line,
+   and the Timesheets side one raised card in the app's colours, so the two
+   columns look like the two things being compared. */
+
+.compare__header {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.compare__heading {
+  font-size: clamp(2rem, 1.1rem + 3.6vw, 3.75rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+
+.compare__heading-line {
+  display: block;
+  color: var(--text-muted);
+}
+
+.compare__intro {
+  max-width: 34rem;
+  margin-top: var(--space-5);
+  color: var(--text-muted);
+  font-size: 1.125rem;
+}
 
 .compare__table {
   margin-top: var(--space-7);
@@ -379,41 +559,37 @@
 }
 
 .compare__row {
-  padding-block: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
   border-top: 1px solid var(--border);
 }
 
 .compare__topic {
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   font-weight: 800;
 }
 
 .compare__cell {
-  margin-top: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-sm);
+  padding-left: var(--space-4);
 }
 
-/* Paper: warm paper, with the ruled margin line of a notebook. */
 .compare__cell--paper {
-  background: var(--paper);
-  box-shadow: inset 3px 0 0 #dcbfb6;
+  border-left: 3px solid #e3b7ac;
   color: var(--paper-ink);
 }
 
 .compare__cell--app {
-  background: var(--surface-accent);
-  box-shadow: inset 3px 0 0 var(--brand-dark);
+  border-left: 3px solid var(--brand-dark);
   color: var(--text);
   font-weight: 600;
 }
 
 .compare__side {
   display: block;
-  margin-bottom: var(--space-1);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -426,53 +602,101 @@
 }
 
 @media (min-width: 800px) {
+  .compare__table {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(9rem, 0.55fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
   .compare__head,
   .compare__row {
+    position: relative;
+    z-index: 1;
     display: grid;
-    grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: var(--space-4);
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    gap: 0;
   }
 
   .compare__head {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     font-weight: 800;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
   .compare__head-paper,
   .compare__head-app {
-    padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    padding: var(--space-4) var(--space-5) var(--space-3);
   }
 
   .compare__head-paper {
-    background: var(--paper);
     color: var(--paper-ink);
   }
 
   .compare__head-app {
-    background: var(--surface-accent);
     color: var(--brand-dark);
   }
 
-  /* Wide, the rows form two continuous columns: paper and Timesheets. */
   .compare__row {
     padding-block: 0;
+    border-top: 0;
   }
 
   .compare__topic {
-    padding-block: var(--space-4);
+    padding: var(--space-4) var(--space-4) var(--space-4) 0;
+    border-top: 1px solid var(--border);
   }
 
   .compare__cell {
-    margin-top: 0;
-    padding: var(--space-4);
-    border-radius: 0;
+    padding: var(--space-4) var(--space-5);
+    border-left: 0;
   }
 
-  .compare__row:last-child .compare__cell {
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  /* Paper: the ruled lines of the sheet, under each answer. */
+  .compare__head-paper,
+  .compare__cell--paper {
+    background: var(--paper);
+    box-shadow: inset 3px 0 0 #e3b7ac;
+  }
+
+  .compare__cell--paper {
+    border-top: 1px solid var(--paper-line);
+  }
+
+  .compare__head-paper {
+    border-radius: var(--radius-sm) 0 0 0;
+  }
+
+  .compare__row:last-child .compare__cell--paper {
+    border-radius: 0 0 0 var(--radius-sm);
+  }
+
+  /* Timesheets: one raised card in the app's colours. */
+  .compare__head-app,
+  .compare__cell--app {
+    background: var(--surface);
+    border-inline: 1px solid var(--border);
+  }
+
+  .compare__head-app {
+    border-top: 3px solid var(--brand-dark);
+    border-radius: 0 var(--radius-sm) 0 0;
+    box-shadow: 0 -12px 28px -20px rgb(10 52 104 / 35%);
+  }
+
+  .compare__cell--app {
+    border-top: 1px solid var(--background);
+  }
+
+  .compare__row:last-child .compare__cell--app {
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 0 var(--radius-sm) 0;
+    box-shadow: 0 18px 28px -22px rgb(10 52 104 / 40%);
+  }
+
+  .compare__row:last-child .compare__topic {
+    border-bottom: 1px solid var(--border);
   }
 
   .compare__side {
@@ -485,44 +709,97 @@
   }
 }
 
-/* ---------- Driver experience ---------- */
+/* ---------- Statement ----------
+   One sentence, alone, centred: type is the whole design here. */
 
-.driver__inner {
-  display: grid;
-  gap: var(--space-7);
-  align-items: center;
+.statement {
+  padding-block: clamp(4rem, 2.5rem + 6vw, 8rem);
+  border-block: 1px solid var(--border);
+  text-align: center;
 }
 
+.statement__text {
+  max-width: 22ch;
+  margin-inline: auto;
+  font-size: clamp(2rem, 1rem + 4.2vw, 4.25rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+}
+
+/* `--brand-light` is an accent, never body text, on white (3.6:1) — but
+   at this size and weight it is large text, which needs only 3:1. */
+.statement__accent {
+  color: var(--brand-light);
+}
+
+/* ---------- Driver experience ----------
+   The phone is the centrepiece; what it is like to use sits either side. */
+
+.driver {
+  overflow: clip;
+}
+
+.driver__header {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.driver__heading {
+  font-size: clamp(2rem, 1.1rem + 3.6vw, 3.75rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+
+.driver__heading-line {
+  display: block;
+  color: var(--text);
+}
+
+.driver__intro {
+  max-width: 36rem;
+  margin-top: var(--space-5);
+  color: var(--text-muted);
+  font-size: 1.125rem;
+}
+
+.driver__showcase {
+  display: grid;
+  gap: var(--space-6);
+  margin-top: var(--space-7);
+}
+
+/* The phone stands on a short band of the brand stage, as in the hero. */
 .driver__visual {
-  order: 2;
+  position: relative;
+  isolation: isolate;
+  padding-block: var(--space-5);
   --phone-max: 270px;
+}
+
+.driver__visual::before {
+  content: "";
+  position: absolute;
+  inset: 22% calc(-1 * var(--gutter));
+  z-index: -1;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(255 255 255 / 6%) 31px 32px),
+    var(--brand-deep);
 }
 
 .driver__features {
   display: grid;
-  gap: var(--space-5) var(--space-6);
-  margin-top: var(--space-6);
 }
 
-/* `align-content: start`: an item stretched to its row's height must keep
-   its title and text together rather than share the extra space out. */
 .feature {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-content: start;
-  column-gap: 0.9rem;
-}
-
-.feature__icon {
-  grid-row: span 2;
-  width: 1.5rem;
-  height: 1.5rem;
-  margin-top: 0.1rem;
-  color: var(--brand-dark);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--border);
 }
 
 .feature__title {
-  font-size: 1.0625rem;
+  font-size: 1.125rem;
   font-weight: 700;
 }
 
@@ -532,32 +809,68 @@
   font-size: 1rem;
 }
 
-@media (min-width: 640px) {
-  .driver__features {
+@media (min-width: 640px) and (max-width: 1023px) {
+  .driver__showcase {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1024px) {
-  .driver__inner {
-    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
-    gap: var(--space-8);
+    column-gap: var(--space-6);
   }
 
   .driver__visual {
-    order: 0;
-    --phone-max: 310px;
+    grid-column: 1 / -1;
+  }
+}
+
+/* Wide: three points, the phone, three points — each side's text set
+   towards the phone, so the eye runs in to it and back out. */
+@media (min-width: 1024px) {
+  .driver__showcase {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 20rem) minmax(0, 1fr);
+    grid-template-areas: "left phone right";
+    align-items: center;
+    gap: var(--space-7);
+  }
+
+  .driver__visual {
+    grid-area: phone;
+    padding-block: var(--space-6);
+    --phone-max: 300px;
+  }
+
+  /* Wide: the stage is the phone's own panel, so the text either side
+     stays on the page. */
+  .driver__visual::before {
+    inset: 10% -3rem;
+    border-radius: var(--radius-md);
+  }
+
+  .driver__features--left {
+    grid-area: left;
+    text-align: right;
+  }
+
+  .driver__features--right {
+    grid-area: right;
+  }
+
+  .driver__features .feature {
+    border-top: 0;
+    padding-block: var(--space-5);
+  }
+
+  .driver__features .feature + .feature {
+    border-top: 1px solid var(--border);
   }
 }
 
 /* ---------- For companies (planned) ---------- */
 
+.companies {
+  background: var(--surface-accent);
+}
+
 .companies__panel {
   display: grid;
   gap: var(--space-6);
-  padding: clamp(1.25rem, 0.75rem + 2.5vw, 3rem);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
 }
 
 .companies__status {
@@ -566,8 +879,9 @@
   gap: var(--space-2);
   margin-bottom: var(--space-4);
   padding: 0.3rem 0.75rem;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--surface-accent);
+  background: var(--surface);
   color: var(--brand-dark);
   font-size: 0.8125rem;
   font-weight: 700;
@@ -576,26 +890,25 @@
 .companies__status-dot {
   width: 0.5rem;
   height: 0.5rem;
+  border: 2px solid var(--brand-dark);
   border-radius: 50%;
-  background: var(--brand-dark);
-}
-
-.companies .section-heading {
-  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
 }
 
 .companies__focus {
   max-width: 40rem;
   margin-top: var(--space-5);
   padding-left: var(--space-4);
-  border-left: 3px solid var(--border);
+  border-left: 3px solid var(--brand-light);
+  color: var(--text);
 }
 
+/* Planned, so drawn as an outline — not a filled card of things that exist. */
 .companies__planned {
   align-self: start;
   padding: var(--space-5);
-  border-radius: var(--radius-sm);
-  background: var(--background);
+  border: 1px dashed var(--brand-dark);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 55%);
 }
 
 .companies__planned-title {
@@ -605,14 +918,15 @@
 
 .companies__list {
   display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
 }
 
 .companies__list li {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   column-gap: 0.6rem;
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
 .companies__bullet {
@@ -624,28 +938,39 @@
 
 @media (min-width: 960px) {
   .companies__panel {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
     gap: var(--space-8);
+    align-items: center;
   }
 }
 
 /* ---------- Final call to action ---------- */
 
+/* The brand stage again — the page ends where sign-in begins. */
 .final-cta {
-  padding-block: clamp(4rem, 3rem + 4vw, 6.5rem);
-  background: var(--brand-deep);
+  padding-block: clamp(4rem, 3rem + 5vw, 7.5rem);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(255 255 255 / 6%) 31px 32px),
+    var(--brand-deep);
   color: var(--on-brand);
+  text-align: center;
+}
+
+.final-cta__inner {
+  display: grid;
+  justify-items: center;
 }
 
 .final-cta__title {
-  max-width: 20ch;
+  max-width: 18ch;
   color: var(--on-brand);
-  font-size: clamp(1.875rem, 1.25rem + 2.7vw, 3rem);
+  font-size: clamp(1.875rem, 1.2rem + 3vw, 3.25rem);
   font-weight: 800;
+  letter-spacing: -0.025em;
 }
 
 .final-cta__body {
-  max-width: 36rem;
+  max-width: 34rem;
   margin-top: var(--space-4);
   color: rgb(255 255 255 / 85%);
   font-size: 1.125rem;
@@ -654,11 +979,16 @@
 .final-cta__actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-3);
   margin-top: var(--space-6);
 }
 
 @media (max-width: 479px) {
+  .final-cta__actions {
+    align-self: stretch;
+  }
+
   .final-cta__actions .button {
     flex: 1 1 100%;
   }

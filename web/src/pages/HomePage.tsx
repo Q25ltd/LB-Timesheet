@@ -5,7 +5,7 @@ import { ForCompanies } from "./home/ForCompanies";
 import { Hero } from "./home/Hero";
 import { HowItWorks } from "./home/HowItWorks";
 import { PaperComparison } from "./home/PaperComparison";
-import { Principles } from "./home/Principles";
+import { Statement } from "./home/Statement";
 import "../styles/home.css";
 
 export function HomePage() {
@@ -13,9 +13,9 @@ export function HomePage() {
   return (
     <>
       <Hero />
-      <Principles />
-      <HowItWorks />
       <PaperComparison />
+      <HowItWorks />
+      <Statement />
       <DriverExperience />
       <ForCompanies />
       <FinalCta />

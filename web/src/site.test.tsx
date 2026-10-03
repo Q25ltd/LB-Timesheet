@@ -146,6 +146,16 @@ describe("structure and accessible names", () => {
     });
   });
 
+  test("every homepage section after the hero is titled by an h2", () => {
+    renderRoute(PATHS.home);
+    const sections = [...document.querySelectorAll("main > section")].slice(1);
+    expect(sections.length).toBeGreaterThan(0);
+    for (const section of sections) {
+      const title = document.getElementById(section.getAttribute("aria-labelledby") ?? "");
+      expect(title?.tagName, section.className).toBe("H2");
+    }
+  });
+
   test("the homepage headline is the product promise", () => {
     renderRoute(PATHS.home);
     expect(pageHeading()).toBe("Driver timesheets without the paperwork.");
@@ -171,6 +181,18 @@ describe("structure and accessible names", () => {
       expect(picture.querySelector("a, button, input, [tabindex]")).toBeNull();
       expect(within(picture).queryByText("Finish Shift", { ignore: '[aria-hidden="true"] *' })).toBeNull();
     }
+  });
+
+  test("the paper timesheet and the review card beside the hero phone are decoration, hidden from assistive technology", () => {
+    renderRoute(PATHS.home);
+    const hero = screen.getByRole("region", { name: "Driver timesheets without the paperwork." });
+    for (const text of ["Daily timesheet", "I confirm all details are correct"]) {
+      const piece = within(hero).getByText(text).closest('[aria-hidden="true"]');
+      expect(piece, text).not.toBeNull();
+      expect(piece?.querySelector("a, button, input, [tabindex]"), text).toBeNull();
+    }
+    // Only the phone is announced, as one described image.
+    expect(within(hero).getAllByRole("img")).toHaveLength(1);
   });
 
   test("a skip link leads to the main content", () => {

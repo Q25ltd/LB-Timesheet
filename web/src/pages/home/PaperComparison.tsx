@@ -36,13 +36,15 @@ export function PaperComparison() {
   return (
     <section className="section compare" aria-labelledby="compare-title">
       <div className="container">
-        <p className="eyebrow">Paper and Timesheets</p>
-        <h2 id="compare-title" className="section-heading">
-          From loose sheets to one record of the day.
-        </h2>
-        <p className="section-intro">
-          Paper has worked for years. It just spreads one working day across several forms, in several hands.
-        </p>
+        <div className="compare__header">
+          <p className="eyebrow">Paper and Timesheets</p>
+          <h2 id="compare-title" className="compare__heading">
+            No more loose sheets <span className="compare__heading-line">at the end of the day.</span>
+          </h2>
+          <p className="compare__intro">
+            Paper has worked for years. It just spreads one working day across several forms, in several hands.
+          </p>
+        </div>
 
         <div className="compare__table">
           <div className="compare__head" aria-hidden="true">
