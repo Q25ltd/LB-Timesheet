@@ -17,7 +17,7 @@ export function Hero() {
       <div className="container hero__copy">
         <p className="hero__eyebrow">
           <span className="hero__product">LogisticBay Timesheets</span>
-          <span className="hero__audience">For UK haulage and transport companies</span>
+          <span className="hero__audience">For haulage and transport companies</span>
         </p>
         <h1 id="hero-title" className="hero__title">
           Driver timesheets <span className="hero__title-line">without the paperwork.</span>

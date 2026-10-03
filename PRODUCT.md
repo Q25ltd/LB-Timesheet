@@ -9,7 +9,8 @@
 ## Goal
 
 Replace the paper daily timesheet and the paper daily vehicle/trailer check sheet
-used by UK HGV drivers with a simple mobile app.
+used by truck (HGV) drivers with a simple mobile app — for haulage and
+transport companies in any country (D52).
 
 **Paper form → phone → PDF → company email.**
 

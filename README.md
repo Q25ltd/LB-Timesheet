@@ -1,7 +1,7 @@
 # LogisticBay Timesheets
 
 Replaces the paper daily timesheet and daily vehicle/trailer check sheet used by
-UK HGV drivers with a phone app. On submit it generates a PDF and emails it to
+truck (HGV) drivers — in any country — with a phone app. On submit it generates a PDF and emails it to
 the company's office.
 
 **Paper form → phone → PDF → company email.**

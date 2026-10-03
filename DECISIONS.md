@@ -2018,3 +2018,29 @@ must enforce whatever is decided; a browser route guard is never
 authorization. Related: F-20 (`notes` has no decided privacy audience) and
 D24 (email ownership before invitation-by-email). **Must be decided before any
 company-facing capability is built.**
+
+### D52 — A worldwide product: no country is assumed (2026-10-03)
+
+Owner decision. LogisticBay Timesheets is for haulage and transport companies
+in **any country**, not only UK hauliers. Nothing the product says, stores or
+computes may assume one country.
+
+- **Wording:** no UK-only wording on the website or in new work. Done for the
+  website and the product documents in the commit recording this decision.
+- **Units — the COMPANY chooses:** each company sets its distance unit
+  (kilometres or miles) and fuel unit (litres or gallons) once; its drivers'
+  app and its records use them. Records made before the setting exists are
+  miles and litres. *Not built* — its own increment (schema, company
+  setting, driver app).
+- **Vehicle types — neutral names:** the app's "Class 1", "Class 2" and
+  "Van" (UK licence categories) become "Articulated (tractor unit)", "Rigid
+  truck" and "Van". The same three types and stored ids; only the labels.
+  *Not built* — its own increment (driver app, and the website's app
+  picture with it, which copies the app's wording).
+- **Walkaround checks — general:** the existing lists stay, presented as a
+  general daily walkaround that suits most countries. No per-country lists.
+  They are not, and are never described as, approved by any authority.
+- **Company time zone:** `Company.timezone` already holds any IANA zone
+  (D18); `Europe/London` is only the schema default. Choosing a company's
+  zone at registration belongs to company registration (increment 4).
+

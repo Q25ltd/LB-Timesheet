@@ -31,10 +31,11 @@ Hard rules:
 
 ## What this product is
 
-LogisticBay Timesheets replaces the two pieces of paper a UK HGV driver fills in
+LogisticBay Timesheets replaces the two pieces of paper a truck (HGV) driver fills in
 every day — the **daily timesheet** and the **daily walkaround check sheet** —
 with a phone app. On submit it generates a PDF and emails it to the company's
-office.
+office. It is for haulage and transport companies in any country, not one
+market (D52): no UK-only wording, units or rules in new work.
 
 **Paper form → phone → PDF → company email.** That is the whole product.
 

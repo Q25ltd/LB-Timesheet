@@ -69,6 +69,14 @@ describe("the homepage claims only what exists", () => {
     expect((document.body.textContent ?? "").match(pattern)?.[0] ?? null).toBeNull();
   });
 
+  // Worldwide (owner decision D52): the product is for haulage and transport
+  // companies anywhere, so the page addresses no single country.
+  test("the homepage addresses no single country", () => {
+    renderRoute(PATHS.home);
+    const text = document.body.textContent ?? "";
+    expect(text.match(/\b(UK|U\.K\.|United Kingdom|Britain|British|GB)\b/)?.[0] ?? null).toBeNull();
+  });
+
   test("the rules are live: each one catches the claim it exists for", () => {
     // Guards against a pattern that silently matches nothing.
     expect("Finished timesheets are emailed to your office as a PDF.").toMatch(PLANNED_CAPABILITY);
