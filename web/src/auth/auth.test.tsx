@@ -142,6 +142,46 @@ describe("session restore and expiry", () => {
     expect(api.calls.length).toBeLessThan(6);
   });
 
+  // A server FAULT is not a verdict on the session. The API leaves the cookie
+  // alone on a 5xx (api/src/tests/db/refreshOutage.test.ts); the page must not
+  // then declare the visitor signed out and send them to sign in.
+  test("a server fault while restoring shows 'could not reach', not the sign-in page", async () => {
+    api.on("POST /auth/web/refresh", { status: 500, body: { error: "Internal server error" } });
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "We could not reach LogisticBay Timesheets" });
+    expect(screen.queryByRole("heading", { level: 1, name: "Company sign-in" })).toBeNull();
+  });
+
+  test("a server fault reading the account after a good restore is 'could not reach' too", async () => {
+    api.on("POST /auth/web/refresh", { status: 200, body: { identityToken: IDENTITY } });
+    api.on("GET /auth/me", { status: 503, body: { error: "Unavailable" } });
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "We could not reach LogisticBay Timesheets" });
+  });
+
+  test("a server fault while RENEWING mid-session keeps the person signed in and reports the failure", async () => {
+    signedInApi({ emailVerified: false });
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "Your account" });
+    // The access token has expired, and the renewal hits a fault.
+    api.on("POST /auth/email-verification", { status: 401, body: { error: "Not authenticated", code: "UNAUTHENTICATED" } });
+    api.on("POST /auth/web/refresh", { status: 500, body: { error: "Internal server error" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send a new confirmation link" }));
+    await waitFor(() => expect(api.calls.filter(c => c.path === "/auth/web/refresh").length).toBeGreaterThan(1));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Your account" })).toBeTruthy();
+  });
+
+  test("a REFUSED renewal mid-session still signs out — a revoked session must not linger", async () => {
+    signedInApi({ emailVerified: false });
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "Your account" });
+    api.on("POST /auth/email-verification", { status: 401, body: { error: "Not authenticated", code: "UNAUTHENTICATED" } });
+    api.on("POST /auth/web/refresh", { status: 401, body: { error: "Not authenticated", code: "UNAUTHENTICATED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send a new confirmation link" }));
+    await screen.findByRole("heading", { level: 1, name: "Company sign-in" });
+  });
+
   test("with the Web Locks API present, refreshes are serialised across tabs under one lock", async () => {
     const request = vi.fn((_name: string, task: () => Promise<unknown>) => task());
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });

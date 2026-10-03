@@ -86,6 +86,16 @@ export interface AuthApi {
 
 const AuthContext = createContext<AuthApi | null>(null);
 
+/**
+ * A FAULT — no answer, or the server failing (5xx) — says nothing about the
+ * session, and the API leaves the refresh cookie alone when it happens. Only
+ * a refusal (401) means the session is gone. Treating a fault as a refusal
+ * would sign someone out over a passing outage.
+ */
+function isFault(result: ApiResult<unknown>): result is Exclude<ApiResult<unknown>, { kind: "ok" }> {
+  return result.kind === "offline" || (result.kind === "refused" && result.status >= 500);
+}
+
 /** One refresh at a time across every tab of this site, where the browser can coordinate tabs. */
 async function serialised<T>(task: () => Promise<T>): Promise<T> {
   if ("locks" in navigator && typeof navigator.locks.request === "function") {
@@ -98,20 +108,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "unknown" });
   const identityToken = useRef<string | null>(null);
   const restoring = useRef<Promise<void> | null>(null);
-  const refreshing = useRef<Promise<string | null> | null>(null);
+  const refreshing = useRef<Promise<ApiResult<string>> | null>(null);
 
   const signOutLocally = useCallback(() => {
     identityToken.current = null;
     setState({ status: "signed-out" });
   }, []);
 
-  /** A fresh identity token from the cookie, or null. One request in flight at a time. */
-  const refreshIdentity = useCallback((): Promise<string | null> => {
+  /** A fresh identity token from the cookie — or why not. One request in flight at a time. */
+  const refreshIdentity = useCallback((): Promise<ApiResult<string>> => {
     if (refreshing.current !== null) return refreshing.current;
     const pending = serialised(async () => {
       const result = await apiRequest("/auth/web/refresh", { cookie: true }, parseIdentityToken);
-      identityToken.current = result.kind === "ok" ? result.value : null;
-      return identityToken.current;
+      // A fault keeps whatever token was held: it may yet be good.
+      if (result.kind === "ok") identityToken.current = result.value;
+      else if (!isFault(result)) identityToken.current = null;
+      return result;
     }).finally(() => {
       refreshing.current = null;
     });
@@ -121,23 +133,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * Run an identity-token request. An expired token (401) gets ONE refresh and
-   * ONE retry; if the session itself is gone, the browser is signed out.
+   * ONE retry. A REFUSED refresh means the session is gone, and the browser is
+   * signed out; a FAULTY one is reported as the request's failure and signs
+   * nobody out.
    */
   const withIdentity = useCallback(async <T,>(call: (token: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
-    const token = identityToken.current ?? await refreshIdentity();
+    let token = identityToken.current;
     if (token === null) {
-      signOutLocally();
-      return { kind: "refused", status: 401, code: "UNAUTHENTICATED" };
+      const fetched = await refreshIdentity();
+      if (fetched.kind !== "ok") {
+        if (isFault(fetched)) return fetched;
+        signOutLocally();
+        return { kind: "refused", status: 401, code: "UNAUTHENTICATED" };
+      }
+      token = fetched.value;
     }
     const first = await call(token);
     if (first.kind !== "refused" || first.status !== 401) return first;
 
     const renewed = await refreshIdentity();
-    if (renewed === null) {
+    if (renewed.kind !== "ok") {
+      if (isFault(renewed)) return renewed;
       signOutLocally();
       return first;
     }
-    return call(renewed);
+    return call(renewed.value);
   }, [refreshIdentity, signOutLocally]);
 
   const loadAccount = useCallback(async (company: CompanySelection | null): Promise<Outcome> => {
@@ -154,10 +174,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (restoring.current !== null) return restoring.current;
     const pending = (async () => {
       setState({ status: "restoring" });
-      const result = await serialised(() => apiRequest("/auth/web/refresh", { cookie: true }, parseIdentityToken));
-      if (result.kind === "offline") {
+      const unavailable = () => {
         setState({ status: "unavailable" });
         restoring.current = null;   // a later attempt may succeed
+      };
+      const result = await serialised(() => apiRequest("/auth/web/refresh", { cookie: true }, parseIdentityToken));
+      // No answer, or a server fault: nothing is known about the session, so
+      // the visitor is neither signed in nor signed out — just not reached.
+      if (isFault(result)) {
+        unavailable();
         return;
       }
       if (result.kind !== "ok") {
@@ -166,7 +191,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       identityToken.current = result.value;
       const loaded = await loadAccount(null);
-      if (!loaded.ok) signOutLocally();
+      if (loaded.ok) return;
+      if (loaded.failure === "signed-out") signOutLocally();
+      else unavailable();
     })();
     restoring.current = pending;
     return pending;

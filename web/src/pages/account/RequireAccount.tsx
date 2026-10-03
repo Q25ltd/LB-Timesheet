@@ -24,7 +24,7 @@ export function RequireAccount({ children }: { children: ReactNode }) {
     case "unavailable":
       return (
         <AuthPanel title="We could not reach LogisticBay Timesheets">
-          <p className="auth__intro">Check your connection, then reload this page.</p>
+          <p className="auth__intro">You are still signed in. Check your connection, or wait a moment, then reload this page.</p>
         </AuthPanel>
       );
     case "unknown":

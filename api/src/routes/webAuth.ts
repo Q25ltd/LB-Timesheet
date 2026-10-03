@@ -126,16 +126,29 @@ export async function registerWebAuthRoutes(
         const parsed = NoBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);
 
-        // Cleared up front: on every refusal below the browser is told to drop
-        // a cookie that can no longer do anything. On success it is replaced.
-        void reply.header("set-cookie", clearedRefreshCookie(cookies));
+        // On a REFUSAL the browser is told to drop a cookie that can no longer
+        // do anything. On a FAULT — the database unreachable, say — nothing is
+        // said about the cookie at all: the server has judged nothing, the
+        // Session is still live, and clearing the cookie would sign the user
+        // out for good over an outage they could have waited out.
+        const refused = (): AppError => {
+          void reply.header("set-cookie", clearedRefreshCookie(cookies));
+          return notAuthenticated();
+        };
 
         const secret = readRefreshCookie(request.headers.cookie, cookies);
-        if (secret === null) throw notAuthenticated();
+        if (secret === null) throw refused();
 
-        const { result, sessionExpiresAt } = await refresh({ refreshToken: secret }, "browser", sessions, app.jwt);
-        // Success REPLACES the clearing cookie set above — one Set-Cookie.
-        reply.removeHeader("set-cookie");
+        let issued: Awaited<ReturnType<typeof refresh>>;
+        try {
+          issued = await refresh({ refreshToken: secret }, "browser", sessions, app.jwt);
+        } catch (error) {
+          // The service has exactly one refusal (D17); everything else is a fault.
+          if (error instanceof AppError && error.statusCode === 401) throw refused();
+          throw error;
+        }
+
+        const { result, sessionExpiresAt } = issued;
         void reply.header("set-cookie", refreshCookie(cookies, result.refreshToken, sessionExpiresAt, new Date()));
         return reply.status(200).send({ identityToken: result.identityToken });
       },
