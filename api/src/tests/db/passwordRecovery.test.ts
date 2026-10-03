@@ -428,3 +428,74 @@ test("PC4. a change that fails part-way leaves the password unchanged", async ()
   assert.equal(await storedHash(devices.userId), hashBefore, "the hash write was rolled back with the failed revocation");
   assert.ok(await canLogIn(devices.email, OLD_PASSWORD));
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Change invalidates outstanding reset links (owner decision, 2026-10-03)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// A password change is a security boundary: a reset link issued BEFORE it must
+// not be able to change the password AFTER it, however much of its 30 minutes
+// remains. Only a SUCCESSFUL change does this, only for the changing account,
+// and the change's session behaviour (PC1) is unaltered.
+
+test("PC5. a successful change makes the account's outstanding reset link unusable — it changes nothing", async () => {
+  const devices = await signedInEverywhere();
+  await forgot(devices.email);
+  const token = resetTokenSentTo(devices.email);
+
+  const changed = await change(devices.here.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD });
+  assert.equal(changed.statusCode, 204);
+
+  const replay = await reset(token, "chosen-by-the-link-holder");
+  assert.equal(replay.statusCode, 400, `the earlier link is refused — got ${replay.raw}`);
+  assert.equal(field(replay.body, "code"), "TOKEN_INVALID", "refused like any used or expired link");
+  assert.ok(await canLogIn(devices.email, NEW_PASSWORD), "the changed password stands");
+  assert.ok(!await canLogIn(devices.email, "chosen-by-the-link-holder"), "the link set nothing");
+
+  // The change's own session behaviour is unchanged (PC1).
+  assert.ok(await cookieRefreshWorks(devices.here.cookieSecret), "the session that changed it stays signed in");
+  assert.ok(!await cookieRefreshWorks(devices.other.cookieSecret), "every other session is revoked, as before");
+
+  // Recovery itself still works: a link asked for AFTER the change is good.
+  await forgot(devices.email);
+  assert.equal((await reset(resetTokenSentTo(devices.email, 1), "after-the-change-pass")).statusCode, 204);
+});
+
+test("PC6. another account's outstanding reset link is unaffected by this account's change", async () => {
+  const changer = await signedInEverywhere();
+  const bystander = await signedInEverywhere();
+  await forgot(changer.email);
+  await forgot(bystander.email);
+  const bystanderToken = resetTokenSentTo(bystander.email);
+
+  assert.equal((await change(changer.here.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD })).statusCode, 204);
+
+  assert.equal((await reset(bystanderToken)).statusCode, 204, "the other account's link still works");
+  assert.ok(await canLogIn(bystander.email, NEW_PASSWORD));
+});
+
+test("PC7. a REFUSED change (wrong current password) leaves the outstanding reset link usable", async () => {
+  const devices = await signedInEverywhere();
+  await forgot(devices.email);
+  const token = resetTokenSentTo(devices.email);
+
+  const refused = await change(devices.here.identityToken, { currentPassword: "not-my-password-at-all", newPassword: NEW_PASSWORD });
+  assert.equal(refused.statusCode, 403);
+
+  assert.equal((await reset(token)).statusCode, 204, "nothing changed, so nothing was invalidated");
+});
+
+test("PC8. a change that fails part-way leaves the outstanding reset link usable — invalidation is part of the change, or of nothing", async () => {
+  const devices = await signedInEverywhere();
+  await forgot(devices.email);
+  const token = resetTokenSentTo(devices.email);
+  const { passwordRepository } = await import("../../repositories/passwordRepository.js");
+
+  // The session revocation fails (NUL byte) after the hash write.
+  await assert.rejects(passwordRepository(prisma).changePassword({
+    userId: devices.userId, keepSessionId: "bad\u0000id", passwordHash: "$2b$12$replacement-hash-that-must-not-land", now: new Date(),
+  }));
+
+  assert.ok(await canLogIn(devices.email, OLD_PASSWORD), "the password did not change");
+  assert.equal((await reset(token)).statusCode, 204, "so the link was not invalidated either");
+});

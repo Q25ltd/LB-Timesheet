@@ -9,8 +9,9 @@
  * Both writes are single transactions, because what they change together must
  * be true together:
  *
- *   reset   consume the token  +  replace the hash  +  revoke EVERY session
- *   change                        replace the hash  +  revoke every OTHER session
+ *   reset   consume the token     +  replace the hash  +  revoke EVERY session
+ *   change  consume any unused    +  replace the hash  +  revoke every OTHER session
+ *           reset token
  *
  * A reset that replaced the hash but left a session alive would leave a
  * device the person was recovering FROM still signed in; one that revoked
@@ -28,7 +29,9 @@ interface ResetTokenRow {
 interface PasswordTransaction {
   accountToken: {
     updateMany(args: {
-      where: { tokenHash: string; userId: string; purpose: AccountTokenPurpose; consumedAt: null; expiresAt: { gt: Date } };
+      where:
+        | { tokenHash: string; userId: string; purpose: AccountTokenPurpose; consumedAt: null; expiresAt: { gt: Date } }
+        | { userId: string; purpose: AccountTokenPurpose; consumedAt: null };
       data: { consumedAt: Date };
     }): Promise<{ count: number }>;
   };
@@ -104,12 +107,22 @@ export function passwordRepository(db: PasswordDatabase) {
     },
 
     /**
-     * Replace the hash and revoke every session EXCEPT the one making the
-     * change (B7) — in one transaction.
+     * Replace the hash, spend this account's unused reset link, and revoke
+     * every session EXCEPT the one making the change (B7) — in one
+     * transaction, so a change that fails leaves the link usable.
+     *
+     * A change is a security boundary (owner decision, 2026-10-03): a reset
+     * link issued before it must not change the password after it. The link
+     * is spent the way a redeemed one is — `consumedAt` — so `redeemReset`
+     * refuses it exactly as it refuses a used link. Scoped to THIS account.
      */
     async changePassword(input: { userId: string; keepSessionId: string; passwordHash: string; now: Date }): Promise<void> {
       await db.$transaction(async tx => {
         await tx.user.update({ where: { id: input.userId }, data: { passwordHash: input.passwordHash } });
+        await tx.accountToken.updateMany({
+          where: { userId: input.userId, purpose: "password_reset", consumedAt: null },
+          data:  { consumedAt: input.now },
+        });
         await tx.session.updateMany({
           where: { userId: input.userId, revokedAt: null, id: { not: input.keepSessionId } },
           data:  { revokedAt: input.now },

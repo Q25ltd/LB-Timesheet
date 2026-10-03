@@ -1844,6 +1844,14 @@ phone and browser. No previously authenticated device stays signed in.
 wrong one is D17's generic 403), the new one meets D23, and ONE transaction
 replaces the hash and revokes every **other** session, keeping the caller's.
 
+*Amended 2026-10-03 (owner decision):* a successful change also spends the
+account's outstanding password-reset token, in that same transaction — a
+reset link issued before a change must not change the password after it,
+however much of its 30 minutes remains. The token is marked consumed, the
+D47 mechanism, so a later reset refuses it like a used link. Only the
+changing account's token; a refused or failed change spends nothing; the
+session behaviour above is unchanged.
+
 **No one changes another account's password.** No input in any of these
 names an account other than the token's or the caller's; a company — admin
 or not — has no path to a user's global credential. bcryptjs at cost 12 is
