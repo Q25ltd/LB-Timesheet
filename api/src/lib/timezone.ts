@@ -15,6 +15,7 @@
  * Pure. No database, no request, no clock of its own — everything is derived
  * from the arguments, so the same instant and zone always give the same date.
  */
+import { z } from "zod";
 
 /**
  * The zone strings ECMA-402 accepts that are NOT identifiers: `+01:00`,
@@ -55,6 +56,59 @@ export function isIanaTimeZone(value: string): boolean {
     throw error;
   }
 }
+
+/**
+ * The shape of a zone a company may CHOOSE: an IANA place — Area/Location,
+ * optionally Area/Region/Location — each part starting with a capital, as
+ * IANA spells them (`America/Argentina/Buenos_Aires`, `America/Port-au-Prince`).
+ * The migration's CHECK on `PendingCompanyRegistration.timezone` states the
+ * same shape, so the database refuses what can never be one.
+ */
+const PLACE_SHAPE = /^[A-Z][A-Za-z]*(?:\/[A-Z][A-Za-z0-9_+-]*)+$/;
+const COMPANY_TIME_ZONE_MAX = 64;
+
+/**
+ * True when `value` may be stored as the timezone a company CHOSE (D53) —
+ * stricter than `isIanaTimeZone`, which decides only whether a stored zone can
+ * be READ and stays as it is, so every existing company keeps working.
+ *
+ * A company is somewhere (owner decision, 2026-10-03), so the value must be:
+ *   - a PLACE: Area/Location, never UTC, GMT or an `Etc/` zone — those are
+ *     fixed offsets with a name, and an offset cannot follow a place's DST;
+ *   - never an abbreviation: `BST` resolves, to Asia/Dhaka;
+ *   - resolvable by THIS runtime's IANA database (`isIanaTimeZone`) — the
+ *     platform is the authority, not a list kept here;
+ *   - spelled as the runtime spells it wherever the runtime lists that exact
+ *     zone: `Europe/LONDON` resolves, but is not the name of anything.
+ *
+ * A zone's current and former official names are both accepted, as chosen:
+ * browsers say `Europe/Kyiv` and `Asia/Kolkata` where this runtime's list says
+ * `Europe/Kiev` and `Asia/Calcutta`. Nothing is rewritten — the value stored
+ * is the value chosen (owner decision, 2026-10-03).
+ *
+ * Limitation, stated rather than papered over: for a FORMER name that the
+ * runtime does not list (`Europe/Kyiv` here), the exact casing cannot be
+ * checked without a hand-kept list, so `Europe/KYIV` would pass. It still
+ * resolves to the right zone; the registration picker never produces it.
+ */
+export function isCompanyTimeZone(value: string): boolean {
+  if (value.length > COMPANY_TIME_ZONE_MAX || !PLACE_SHAPE.test(value)) return false;
+  if (value.startsWith("Etc/")) return false;
+  if (!isIanaTimeZone(value)) return false;
+  const lower = value.toLowerCase();
+  const listed = Intl.supportedValuesOf("timeZone").find(zone => zone.toLowerCase() === lower);
+  return listed === undefined || listed === value;
+}
+
+/**
+ * The one field a company-registration DTO uses for the company's timezone
+ * (D53): bounded, NOT trimmed — a zone is chosen from a list, never typed, so
+ * surrounding whitespace means the value did not come from one.
+ */
+export const CompanyTimeZoneField = z
+  .string()
+  .max(COMPANY_TIME_ZONE_MAX)
+  .refine(isCompanyTimeZone, { message: "Choose a time zone from the list" });
 
 /** A calendar date carries no time of day, so midnight UTC is its storage form. */
 function utcMidnight(year: number, month: number, day: number): Date {

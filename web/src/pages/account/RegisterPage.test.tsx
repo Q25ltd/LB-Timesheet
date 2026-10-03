@@ -1,5 +1,5 @@
 import { fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PATHS } from "../../paths";
 import { installFakeApi, type FakeApi } from "../../test/fakeApi";
 import { renderRoute } from "../../test/renderRoute";
@@ -16,8 +16,22 @@ import { renderRoute } from "../../test/renderRoute";
 
 let api: FakeApi;
 
+/**
+ * The timezone THIS DEVICE reports, which the page may only SUGGEST (D53).
+ * Pinned in every test, so no result depends on the machine running them.
+ */
+function deviceTimeZone(zone: string | undefined) {
+  const real = new Intl.DateTimeFormat().resolvedOptions();
+  vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({ ...real, timeZone: zone as string });
+}
+
 beforeEach(() => {
   api = installFakeApi();
+  deviceTimeZone("Asia/Tokyo");
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function main(): HTMLElement {
@@ -32,6 +46,12 @@ function group(name: string): HTMLElement {
 
 function fill(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+function timeZone(): HTMLSelectElement {
+  const element = within(group("Company details")).getByLabelText("Time zone");
+  if (!(element instanceof HTMLSelectElement)) throw new Error("the time zone is not a list to choose from");
+  return element;
 }
 
 function fillAdministrator() {
@@ -160,4 +180,73 @@ describe("before company registration opens", () => {
     submit();
     expect(registrationRequests()).toEqual([]);
   });
+});
+
+describe("the company's time zone (D53)", () => {
+  test("is chosen in COMPANY details, from a list — a normal person never types an IANA name", () => {
+    renderRoute(PATHS.register);
+    const select = timeZone();
+    expect(select.getAttribute("autocomplete")).toBe("off");
+    expect(within(group("Administrator details")).queryByLabelText("Time zone")).toBeNull();
+    // Grouped by region, each a place named in words, with the IANA id underneath.
+    const tokyo = [...select.options].find(option => option.value === "Asia/Tokyo");
+    expect(tokyo?.textContent).toMatch(/^Tokyo — /);
+    expect(tokyo?.parentElement?.tagName).toBe("OPTGROUP");
+    expect(tokyo?.parentElement?.getAttribute("label")).toBe("Asia");
+  });
+
+  test("offers places only — no UTC, no Etc/ zones, no offsets", () => {
+    renderRoute(PATHS.register);
+    const values = [...timeZone().options].map(option => option.value).filter(value => value !== "");
+    expect(values.length).toBeGreaterThan(300);
+    for (const value of values) {
+      expect(value, value).toMatch(/^[A-Z][A-Za-z]*(\/[A-Z][A-Za-z0-9_+-]*)+$/);
+      expect(value.startsWith("Etc/"), value).toBe(false);
+    }
+  });
+
+  test("even where a browser lists UTC, Etc/ zones or offsets, only the places are offered", () => {
+    vi.spyOn(Intl, "supportedValuesOf").mockReturnValue(["UTC", "GMT", "Etc/GMT+5", "Etc/UTC", "+01:00", "Europe/Vilnius", "America/Chicago"]);
+    deviceTimeZone("UTC");
+    renderRoute(PATHS.register);
+    expect([...timeZone().options].map(option => option.value)).toEqual(["", "America/Chicago", "Europe/Vilnius"]);
+    // UTC is not a place, so it is not suggested either.
+    expect(timeZone().value).toBe("");
+  });
+
+  test("this device's zone is SUGGESTED, and says so — and the company can change it", () => {
+    renderRoute(PATHS.register);
+    expect(timeZone().value).toBe("Asia/Tokyo");
+    expect(within(group("Company details")).getByText(/suggested from this device/i)).toBeTruthy();
+
+    fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
+    expect(timeZone().value).toBe("America/Chicago");
+  });
+
+  test("a non-UK company completes the form with its own zone — and still nothing is sent", () => {
+    renderRoute(PATHS.register);
+    fill("Company name", "Chicago Freight LLC");
+    fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
+    fillAdministrator();
+    submit();
+    expect(screen.getByRole("status").textContent).toMatch(/nothing has been sent/i);
+    expect(registrationRequests()).toEqual([]);
+  });
+
+  test.each([["UTC"], ["Etc/GMT+5"], [undefined], ["Not/AZone"]])(
+    "a device zone that is not a place (%s) suggests NOTHING — never Europe/London — and the company must choose",
+    zone => {
+      deviceTimeZone(zone);
+      renderRoute(PATHS.register);
+      expect(timeZone().value).toBe("");
+      expect(within(group("Company details")).queryByText(/suggested from this device/i)).toBeNull();
+
+      fill("Company name", "Somewhere Haulage");
+      fillAdministrator();
+      submit();
+      expect(within(group("Company details")).getByText("Choose your company's time zone")).toBeTruthy();
+      expect(timeZone().getAttribute("aria-invalid")).toBe("true");
+      expect(screen.queryByRole("status")).toBeNull();
+    },
+  );
 });

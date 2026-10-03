@@ -1,4 +1,4 @@
-import { useId, type InputHTMLAttributes } from "react";
+import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 
 /**
  * A labelled input with its hint and error wired up for assistive technology:
@@ -25,6 +25,36 @@ export function Field({
         aria-invalid={error == null ? undefined : true}
         aria-describedby={describedBy === "" ? undefined : describedBy}
       />
+      {error == null ? null : <p className="field__error" id={errorId}>{error}</p>}
+    </div>
+  );
+}
+
+/** A labelled list to choose from, wired up for assistive technology exactly as `Field` is. */
+export function SelectField({
+  label,
+  hint,
+  error,
+  children,
+  ...select
+}: { label: string; hint?: string; error?: string | null; children: ReactNode } & SelectHTMLAttributes<HTMLSelectElement>) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy = [hint === undefined ? null : hintId, error == null ? null : errorId].filter(v => v !== null).join(" ");
+  return (
+    <div className="field">
+      <label className="field__label" htmlFor={id}>{label}</label>
+      {hint === undefined ? null : <p className="field__hint" id={hintId}>{hint}</p>}
+      <select
+        {...select}
+        id={id}
+        className="field__input field__select"
+        aria-invalid={error == null ? undefined : true}
+        aria-describedby={describedBy === "" ? undefined : describedBy}
+      >
+        {children}
+      </select>
       {error == null ? null : <p className="field__error" id={errorId}>{error}</p>}
     </div>
   );

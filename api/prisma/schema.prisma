@@ -194,7 +194,9 @@ model User {
 ///     about one account's unfinished registration, NOT about how many
 ///     administrators a Company may have;
 ///   - the name is 1–200 characters with no leading or trailing whitespace.
-///     Names are not unique.
+///     Names are not unique;
+///   - the company's timezone is present and has the shape of an IANA place
+///     (migration 20261003120000) — no default, no offsets, no Etc/ zones.
 /// No expiry and no clean-up job: an unconfirmed registration stays (O1).
 /// The administrator's details are the account's own; nothing is copied here.
 model PendingCompanyRegistration {
@@ -202,6 +204,12 @@ model PendingCompanyRegistration {
   userId      String
   accountKind AccountKind
   companyName String
+  /// The timezone the COMPANY chose at registration (D53): an IANA place,
+  /// exactly as chosen (`Asia/Tokyo`, `Europe/Kyiv`) — never an offset, UTC
+  /// or an Etc/ zone, and never defaulted. Copied into `Company.timezone`
+  /// when the registration is confirmed (a later increment). It belongs to
+  /// the company being registered, not to the administrator's account.
+  timezone    String
   createdAt   DateTime    @default(now())
 
   user User @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)

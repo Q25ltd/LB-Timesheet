@@ -2068,3 +2068,40 @@ computes may assume one country.
   (D18); `Europe/London` is only the schema default. Choosing a company's
   zone at registration belongs to company registration (increment 4).
 
+### D53 — A company chooses its operational timezone: an IANA place (2026-10-03)
+
+Owner decision. LogisticBay is worldwide (D52), and a company's operational
+timezone is an explicit property OF THE COMPANY — what D18 files every shift
+date under. It is never inferred, permanently or silently, from the browser,
+the administrator, an IP address, the server, the hosting region, an email
+domain, a language or a country assumption.
+
+- **Chosen at registration.** The company picks its timezone on "Register
+  your company", in Company details. Until its email is confirmed there is no
+  Company, so `PendingCompanyRegistration.timezone` holds it; confirmation
+  copies it into `Company.timezone` (company-registration increment — not
+  built). It belongs to the registration, never to the administrator.
+- **Canonical value: an IANA identifier, and a PLACE.** Area/Location only —
+  never a fixed offset (`+01:00`, `UTC+1`), never `UTC`, `GMT` or an `Etc/`
+  zone (a company is somewhere), never an abbreviation (`BST` is Asia/Dhaka).
+  The runtime's own tz database is the authority; no list is kept by us.
+- **Stored exactly as chosen.** A zone's current and former official names
+  (`Europe/Kyiv` / `Europe/Kiev`, `Asia/Kolkata` / `Asia/Calcutta`) are both
+  accepted and never rewritten — browsers and this server's Node name some
+  zones differently.
+- **The browser's zone is a SUGGESTION only**, labelled as one, and the
+  company can change it. When the device reports no usable place, nothing is
+  preselected and the company chooses. `Europe/London` is not the worldwide
+  default for a new registration.
+- **One validation rule, centralised:** `isCompanyTimeZone` /
+  `CompanyTimeZoneField` in `api/src/lib/timezone.ts` for every future write
+  of a chosen zone; the database CHECK refuses what can never be one. The web
+  form offers only places (its own copy of the rule — the workspaces share no
+  code). `isIanaTimeZone`, which READS a stored zone, is unchanged.
+- **No history rewritten.** Existing companies keep their stored timezone;
+  `Company.timezone`'s schema default (`Europe/London`) is unchanged and
+  still used by the old `POST /companies` set-up path until increment 4
+  replaces it. Pending registrations get a required timezone with NO
+  default; the migration refuses to run while any exist rather than invent
+  one (none exist; nothing writes them yet).
+

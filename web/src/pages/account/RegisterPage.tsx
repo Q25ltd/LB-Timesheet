@@ -1,16 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
 import { PASSWORD_RULE, passwordProblem } from "../../auth/passwordRule";
-import { Field, FormMessage } from "../../components/Field";
+import { Field, FormMessage, SelectField } from "../../components/Field";
 import { Icon } from "../../components/Icon";
 import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
+import { isOfferedTimeZone, suggestedTimeZone, timeZoneGroups } from "./companyTimeZone";
 
 /** The approved company-name rule (D51): trimmed, never empty, at most 200 characters. Not unique. */
 const COMPANY_NAME_MAX = 200;
 
-type FieldName = "companyName" | "firstName" | "lastName" | "email" | "password" | "repeat";
+type FieldName = "companyName" | "timeZone" | "firstName" | "lastName" | "email" | "password" | "repeat";
 
 /**
  * Registering a COMPANY on LogisticBay Timesheets (D51): the company's
@@ -26,9 +27,14 @@ type FieldName = "companyName" | "firstName" | "lastName" | "email" | "password"
 export function RegisterPage() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState<Record<FieldName, string>>({
-    companyName: "", firstName: "", lastName: "", email: "", password: "", repeat: "",
-  });
+  // The company's time zone (D53): this device's zone is only a SUGGESTION,
+  // read once, and the company may change it; with no usable one the company
+  // chooses — nothing is guessed, and Europe/London is not a default.
+  const zones = useMemo(timeZoneGroups, []);
+  const [suggested] = useState(() => suggestedTimeZone(zones));
+  const [form, setForm] = useState<Record<FieldName, string>>(() => ({
+    companyName: "", timeZone: suggested ?? "", firstName: "", lastName: "", email: "", password: "", repeat: "",
+  }));
   const [problems, setProblems] = useState<Partial<Record<FieldName, string>>>({});
   const [checked, setChecked] = useState(false);
 
@@ -48,6 +54,7 @@ export function RegisterPage() {
     const companyName = form.companyName.trim();
     if (companyName === "") found.companyName = "Enter your company's name";
     else if (companyName.length > COMPANY_NAME_MAX) found.companyName = `Company name must be ${String(COMPANY_NAME_MAX)} characters or fewer`;
+    if (!isOfferedTimeZone(form.timeZone, zones)) found.timeZone = "Choose your company's time zone";
     if (form.firstName.trim() === "") found.firstName = "Enter the administrator's first name";
     if (form.lastName.trim() === "") found.lastName = "Enter the administrator's last name";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) found.email = "Enter a valid email address";
@@ -76,10 +83,22 @@ export function RegisterPage() {
       <form className="auth-form" onSubmit={submit} noValidate>
         <fieldset className="auth-section">
           <legend className="auth-section__legend">Company details</legend>
-          <p className="auth-section__hint">Your company&apos;s registered or trading name.</p>
+          <p className="auth-section__hint">Your company&apos;s name, and the time zone it works in.</p>
           <div className="auth-section__fields">
             <Field label="Company name" name="companyName" autoComplete="organization" required maxLength={COMPANY_NAME_MAX}
               value={form.companyName} error={problems.companyName ?? null} onChange={event => update("companyName", event.target.value)} />
+            <SelectField label="Time zone" name="timeZone" autoComplete="off" required
+              hint={suggested !== null && form.timeZone === suggested
+                ? "Suggested from this device. Change it if your company works in another time zone."
+                : "Where your company works. It decides which day each shift is filed under."}
+              value={form.timeZone} error={problems.timeZone ?? null} onChange={event => update("timeZone", event.target.value)}>
+              <option value="" disabled>Choose a time zone</option>
+              {zones.map(group => (
+                <optgroup key={group.region} label={group.region}>
+                  {group.zones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}
+                </optgroup>
+              ))}
+            </SelectField>
           </div>
         </fieldset>
 

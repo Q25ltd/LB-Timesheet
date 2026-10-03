@@ -16,6 +16,11 @@
  *   - the company name is 1–200 characters with no leading or trailing
  *     whitespace. Names are NOT unique: two companies may share one.
  *
+ *   - the company's TIMEZONE is required and has the shape of an IANA place —
+ *     Area/Location — never an offset, UTC or an Etc/ zone (D53). Whether the
+ *     runtime resolves it is the application's check (`isCompanyTimeZone`);
+ *     the database refuses what can never be one.
+ *
  * No expiry and no clean-up: an unconfirmed registration stays (O1 open).
  *
  * WRITTEN RED — raw SQL throughout, so it does not depend on generated code.
@@ -47,6 +52,7 @@ const PASSWORD = "correct-horse-battery-staple";
 const CHECK_VIOLATION = "23514";
 const UNIQUE_VIOLATION = "23505";
 const FK_VIOLATION = "23503";
+const NOT_NULL_VIOLATION = "23502";
 
 let seq = 0;
 function freshEmail(): string {
@@ -68,12 +74,16 @@ async function account(kind: "driver" | "company", email = freshEmail()): Promis
   return id;
 }
 
-/** Insert a pending registration; null on success, the error otherwise. */
-async function pending(userId: string, kind: "driver" | "company", companyName: string): Promise<unknown> {
+/**
+ * Insert a pending registration; null on success, the error otherwise. The
+ * company's timezone defaults to a NON-UK zone: nothing about a pending
+ * registration is British (D52, D53).
+ */
+async function pending(userId: string, kind: "driver" | "company", companyName: string, timezone = "America/Chicago"): Promise<unknown> {
   try {
     await prisma.$executeRaw`
-      INSERT INTO "PendingCompanyRegistration" ("id", "userId", "accountKind", "companyName")
-      VALUES (${randomUUID()}, ${userId}, ${kind}::"AccountKind", ${companyName})`;
+      INSERT INTO "PendingCompanyRegistration" ("id", "userId", "accountKind", "companyName", "timezone")
+      VALUES (${randomUUID()}, ${userId}, ${kind}::"AccountKind", ${companyName}, ${timezone})`;
     return null;
   } catch (error) {
     return error;
@@ -213,4 +223,57 @@ test("P12. exactly ONE uniqueness rule enforces one-per-account — the (userId,
   const owner = await account("company");
   assert.equal(await pending(owner, "company", "Only Once Ltd"), null);
   assert.equal(sqlStateOf(await pending(owner, "company", "Twice Ltd")), UNIQUE_VIOLATION);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// The company's timezone (D53) — chosen at registration, held until the
+// Company exists, and copied into it then (increment 4)
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function storedTimezone(userId: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<{ timezone: string }[]>`
+    SELECT "timezone" FROM "PendingCompanyRegistration" WHERE "userId" = ${userId}`;
+  return rows[0]?.timezone ?? null;
+}
+
+test("P13. a pending registration holds the company's chosen timezone — a non-UK place, exactly as chosen", async () => {
+  const tokyo = await account("company");
+  const kyiv = await account("company");
+  assert.equal(await pending(tokyo, "company", "Tokyo Haulage KK", "Asia/Tokyo"), null);
+  assert.equal(await pending(kyiv, "company", "Kyiv Freight", "Europe/Kyiv"), null);
+  assert.equal(await storedTimezone(tokyo), "Asia/Tokyo");
+  assert.equal(await storedTimezone(kyiv), "Europe/Kyiv", "kept as chosen, never rewritten to another name for the zone");
+});
+
+test("P14. the timezone is REQUIRED — there is no default, and certainly not Europe/London", async () => {
+  const owner = await account("company");
+  let error: unknown = null;
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "PendingCompanyRegistration" ("id", "userId", "accountKind", "companyName")
+      VALUES (${randomUUID()}, ${owner}, 'company'::"AccountKind", 'No Zone Ltd')`;
+  } catch (caught) {
+    error = caught;
+  }
+  assert.equal(sqlStateOf(error), NOT_NULL_VIOLATION, "a missing timezone is refused, not defaulted");
+  assert.deepEqual(await storedNames(owner), []);
+});
+
+test("P15. what can never be a company's zone is refused by the database — offsets, UTC, Etc/, abbreviations, junk", async () => {
+  const owner = await account("company");
+  for (const zone of ["", "+01:00", "-05:00", "UTC+1", "UTC", "GMT", "Etc/GMT+5", "Etc/UTC", "BST",
+    "europe/london", "Europe/London ", "Europe//London", "Europe/", `Europe/${"x".repeat(80)}`]) {
+    assert.equal(sqlStateOf(await pending(owner, "company", "Bad Zone Ltd", zone)), CHECK_VIOLATION, `refused: ${JSON.stringify(zone)}`);
+  }
+  assert.deepEqual(await storedNames(owner), []);
+});
+
+test("P16. the timezone belongs to the REGISTRATION, not the administrator — no Company, no membership, and the account is unchanged", async () => {
+  const owner = await account("company");
+  const accountBefore = await prisma.$queryRaw<{ row: string }[]>`SELECT row_to_json(u)::text AS row FROM "User" u WHERE id = ${owner}`;
+  assert.equal(await pending(owner, "company", `${TAG}-zone-co`, "Australia/Sydney"), null);
+  const accountAfter = await prisma.$queryRaw<{ row: string }[]>`SELECT row_to_json(u)::text AS row FROM "User" u WHERE id = ${owner}`;
+  assert.deepEqual(accountAfter, accountBefore, "the account carries no timezone of its own");
+  assert.equal(await prisma.company.count({ where: { name: `${TAG}-zone-co` } }), 0);
+  assert.equal(await prisma.companyMembership.count({ where: { userId: owner } }), 0);
 });

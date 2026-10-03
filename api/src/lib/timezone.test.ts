@@ -12,7 +12,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isIanaTimeZone, localCalendarDate } from "./timezone.js";
+import { CompanyTimeZoneField, isCompanyTimeZone, isIanaTimeZone, localCalendarDate } from "./timezone.js";
 
 /** The calendar date under test, read back in the form the assertions state. */
 function isoDate(date: Date): string {
@@ -131,4 +131,74 @@ test("deriving a date refuses an invalid zone or an invalid instant rather than 
   assert.throws(() => localCalendarDate(new Date("2026-07-01T23:30:00.000Z"), "Europe/Nowhere"), Error);
   assert.throws(() => localCalendarDate(new Date("2026-07-01T23:30:00.000Z"), "+01:00"), Error);
   assert.throws(() => localCalendarDate(new Date("not a date"), "Europe/London"), Error);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// The zone a company CHOOSES (D53) — stricter than what the reader accepts
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// `isIanaTimeZone` decides whether a STORED zone can be read; it stays as it
+// is, so every company's existing value keeps working. A NEW choice — at
+// company registration — must be a PLACE (owner decision, 2026-10-03): an
+// Area/Location identifier, spelled as IANA spells it, that this runtime
+// resolves. Never an offset, never UTC or an Etc/ fixed-offset zone, never an
+// abbreviation (BST is Asia/Dhaka). Stored exactly as chosen: Europe/Kyiv
+// stays Europe/Kyiv even where the runtime calls it Europe/Kiev.
+
+test("a company may choose any place, anywhere — not only the UK", () => {
+  for (const zone of ["Europe/Vilnius", "America/New_York", "America/Chicago", "Asia/Tokyo", "Australia/Sydney",
+    "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "Africa/Lagos", "Europe/London"]) {
+    assert.equal(isCompanyTimeZone(zone), true, zone);
+  }
+});
+
+test("a zone's current AND former official names are both accepted, as chosen", () => {
+  // Browsers say Europe/Kyiv and Asia/Kolkata; this runtime's list says Kiev
+  // and Calcutta. Both are IANA names for the same zone.
+  for (const zone of ["Europe/Kyiv", "Europe/Kiev", "Asia/Kolkata", "Asia/Calcutta"]) {
+    assert.equal(isCompanyTimeZone(zone), true, zone);
+    assert.equal(CompanyTimeZoneField.parse(zone), zone, `${zone} is kept exactly as chosen, not rewritten`);
+  }
+});
+
+test("a fixed offset is never a company's zone — in any spelling", () => {
+  for (const offset of ["+01:00", "-05:00", "+0100", "\u221205:00", "UTC+1", "GMT-5", "Etc/GMT+5", "Etc/GMT-1"]) {
+    assert.equal(isCompanyTimeZone(offset), false, offset);
+  }
+});
+
+test("UTC, GMT and the Etc/ zones are refused: a company is somewhere", () => {
+  for (const zone of ["UTC", "GMT", "Etc/UTC", "Etc/GMT", "Universal", "Zulu"]) {
+    assert.equal(isCompanyTimeZone(zone), false, zone);
+  }
+});
+
+test("abbreviations are refused — BST would silently mean Asia/Dhaka", () => {
+  for (const zone of ["BST", "EST", "CET", "PST8PDT"]) {
+    assert.equal(isCompanyTimeZone(zone), false, zone);
+  }
+});
+
+test("arbitrary or malformed strings are refused", () => {
+  for (const zone of ["", " ", "Mars/Olympus", "London", "europe/london", "Europe/LONDON", "Europe/London ", " Europe/London",
+    "Europe//London", "Europe/", "/London", "Europe/London/", "Europe\\London", `Europe/${"x".repeat(80)}`]) {
+    assert.equal(isCompanyTimeZone(zone), false, JSON.stringify(zone));
+  }
+});
+
+test("the reusable field: bounded, exact, and refuses what the predicate refuses", () => {
+  assert.equal(CompanyTimeZoneField.safeParse("Asia/Tokyo").success, true);
+  for (const bad of ["", "UTC", "+01:00", "Europe/London ", "x".repeat(65), 42, null]) {
+    assert.equal(CompanyTimeZoneField.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+// The reason a company stores a ZONE and not an offset, for a non-UK company:
+// New York is UTC-5 in January and UTC-4 in July. The same 04:30 UTC is the
+// previous evening in winter and just after midnight in summer — a stored
+// "-05:00" would file the July shift under the wrong day.
+test("a chosen zone keeps its daylight-saving rules — the same UTC time files differently by season", () => {
+  assert.equal(isCompanyTimeZone("America/New_York"), true);
+  assert.equal(isoDate(localCalendarDate(new Date("2026-01-15T04:30:00.000Z"), "America/New_York")), "2026-01-14");
+  assert.equal(isoDate(localCalendarDate(new Date("2026-07-15T04:30:00.000Z"), "America/New_York")), "2026-07-15");
 });
