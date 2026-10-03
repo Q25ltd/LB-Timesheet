@@ -217,6 +217,9 @@ describe("registration and the emailed links", () => {
   test("the company registration form holds the administrator's password to the rule, and sends nothing — before or after", async () => {
     renderRoute(PATHS.register);
     fill("Company name", "Kuizinas Haulage Ltd");
+    // Chosen, as a company does — never left to whatever zone the machine
+    // running the test is in (D53).
+    fill("Time zone", "Europe/Vilnius");
     fill("First name", "Nerijus");
     fill("Last name", "Kuizinas");
     fill("Email", "owner@example.com");
