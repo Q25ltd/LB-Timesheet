@@ -93,6 +93,16 @@ describe("the homepage claims only what exists", () => {
     expect(described.match(/Class [12]|AdBlue(?! \/ DEF)/)?.[0] ?? null).toBeNull();
   });
 
+  // Company accounts exist (D51): the page describes the product, never a
+  // deployment status that turns false the day it changes.
+  test("the homepage never says company accounts are unavailable", () => {
+    renderRoute(PATHS.home);
+    const text = document.body.textContent ?? "";
+    for (const stale of [/company accounts? (are|is) (not|the next)/i, /not open yet/i, /when they are/i, /coming soon|opening soon/i]) {
+      expect(text.match(stale)?.[0] ?? null, String(stale)).toBeNull();
+    }
+  });
+
   test("the rules are live: each one catches the claim it exists for", () => {
     // Guards against a pattern that silently matches nothing.
     expect("Finished timesheets are emailed to your office as a PDF.").toMatch(PLANNED_CAPABILITY);

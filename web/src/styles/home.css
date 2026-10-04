@@ -969,13 +969,6 @@
   letter-spacing: -0.025em;
 }
 
-.final-cta__body {
-  max-width: 34rem;
-  margin-top: var(--space-4);
-  color: rgb(255 255 255 / 85%);
-  font-size: 1.125rem;
-}
-
 .final-cta__actions {
   display: flex;
   flex-wrap: wrap;
