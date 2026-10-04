@@ -1,0 +1,462 @@
+/*
+ * The company workspace: application UI, not a marketing page. The public
+ * site's tokens, type and focus treatment, but denser — one header bar with
+ * the navigation in it, content using the desktop's width in two columns,
+ * and one bordered surface (the steps), not a page of cards.
+ */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--background);
+}
+
+/* ---------- Header: brand · navigation · account ---------- */
+
+.workspace-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.workspace-header__bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "brand nav account";
+  align-items: stretch;
+  column-gap: var(--space-6);
+  max-width: 1320px;
+  min-height: 4rem;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.workspace-header__brand {
+  grid-area: brand;
+  display: inline-flex;
+  align-items: center;
+}
+
+.workspace-header__brand .brand-lockup__logo {
+  height: 1.875rem;
+}
+
+.workspace-nav {
+  grid-area: nav;
+  display: flex;
+}
+
+.workspace-nav__list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-nav__item {
+  display: flex;
+}
+
+.workspace-nav__link,
+.workspace-nav__unavailable {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.125rem;
+  padding-inline: var(--space-4);
+  font-size: 0.9375rem;
+}
+
+.workspace-nav__link {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.workspace-nav__link:hover {
+  color: var(--brand-dark);
+}
+
+/* The current area: weight, ink AND a rule — never colour alone. */
+.workspace-nav__link[aria-current="page"] {
+  color: var(--brand-dark);
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--brand-dark);
+}
+
+.workspace-nav__link:focus-visible {
+  outline-offset: -3px;
+}
+
+/* An area not built yet: named, muted, said in words, and not a control. */
+.workspace-nav__unavailable {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.workspace-nav__note {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.workspace-account {
+  grid-area: account;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 0.9375rem;
+}
+
+.workspace-account__name {
+  color: var(--text-muted);
+}
+
+.workspace-account__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand-dark);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-account__link:hover {
+  text-decoration: underline;
+}
+
+.workspace-main {
+  flex: 1;
+}
+
+/* Narrower: the name goes; the navigation takes a row of its own. */
+@media (max-width: 1023px) {
+  .workspace-account__name {
+    display: none;
+  }
+}
+
+@media (max-width: 759px) {
+  .workspace-header {
+    position: static;
+  }
+
+  .workspace-header__bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand account"
+      "nav nav";
+    column-gap: var(--space-3);
+    min-height: 0;
+    padding-top: var(--space-2);
+  }
+
+  .workspace-header__brand .brand-lockup {
+    gap: 0.5rem;
+  }
+
+  .workspace-header__brand .brand-lockup__logo {
+    height: 1.5rem;
+  }
+
+  .workspace-header__brand .brand-lockup__rule {
+    height: 1.125rem;
+  }
+
+  .workspace-header__brand .brand-lockup__product {
+    font-size: 0.9375rem;
+  }
+
+  .workspace-account {
+    gap: var(--space-3);
+    font-size: 0.875rem;
+  }
+
+  .workspace-nav {
+    margin-top: var(--space-2);
+    margin-inline: calc(var(--gutter) * -1);
+    border-top: 1px solid var(--border);
+  }
+
+  .workspace-nav__list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .workspace-nav__link,
+  .workspace-nav__unavailable {
+    align-items: center;
+    width: 100%;
+    min-height: 3.25rem;
+    padding: var(--space-2) var(--space-1);
+    font-size: 0.875rem;
+    text-align: center;
+  }
+
+  .workspace-nav__note {
+    font-size: 0.625rem;
+    white-space: normal;
+  }
+}
+
+/* ---------- Home ---------- */
+
+.company-home {
+  padding-bottom: var(--space-8);
+}
+
+/* The workspace's title band: full width, white, the name and what the
+   workspace is for side by side on a desktop. */
+.company-identity {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.company-identity__inner,
+.company-home__body {
+  max-width: 1320px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.company-identity__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 26rem);
+  align-items: end;
+  gap: var(--space-4) var(--space-7);
+  padding-block: var(--space-6);
+}
+
+.company-identity__eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--brand-dark);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.company-identity__name {
+  margin: 0;
+  color: var(--brand-deep);
+  font-size: clamp(2rem, 1.4rem + 2.2vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.company-identity__purpose {
+  margin: 0;
+  padding-left: var(--space-5);
+  border-left: 3px solid var(--brand-light);
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.company-home__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-7);
+  padding-top: var(--space-6);
+}
+
+.company-section-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* Getting started: the one bordered surface on the page. */
+.getting-started {
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.getting-started__intro {
+  max-width: 60ch;
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+}
+
+.steps {
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: var(--space-4);
+  padding-bottom: var(--space-5);
+  counter-increment: step;
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+/* The rail joining one step to the next. */
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 2.5rem;
+  bottom: 0.25rem;
+  left: calc(1.125rem - 1px);
+  border-left: 2px dashed var(--border);
+}
+
+.step[data-state="done"]::after {
+  border-left-style: solid;
+  border-left-color: var(--success);
+}
+
+.step__marker {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 2px dashed var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+/* The number is drawn, not written: the page's text holds no figures. */
+.step[data-state="unavailable"] .step__marker::before {
+  content: counter(step);
+}
+
+.step[data-state="done"] .step__marker {
+  border: 0;
+  background: var(--success);
+  color: var(--on-brand);
+}
+
+.step__check {
+  width: 1.25rem;
+  height: 1.25rem;
+  stroke-width: 2.6;
+}
+
+.step[data-next="true"] .step__marker {
+  border-style: solid;
+  border-color: var(--brand-dark);
+  background: var(--surface-accent);
+  color: var(--brand-dark);
+}
+
+.step__body {
+  padding-top: 0.375rem;
+}
+
+.step__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.step[data-state="unavailable"]:not([data-next]) .step__title {
+  color: var(--text-muted);
+}
+
+.step__status {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.step[data-state="done"] .step__status {
+  color: var(--success);
+}
+
+.step[data-next="true"] .step__status {
+  color: var(--brand-dark);
+}
+
+.step__detail {
+  max-width: 60ch;
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+}
+
+/* Your workspace: a ruled list beside the steps, not more cards. */
+.workspace-guide__list {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-guide__item {
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.workspace-guide__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.workspace-guide__summary {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.workspace-guide__state {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-guide__item[data-available="true"] .workspace-guide__state {
+  color: var(--brand-dark);
+}
+
+@media (max-width: 899px) {
+  .company-identity__inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .company-home__body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+}
+
+@media (max-width: 479px) {
+  .company-identity__inner {
+    padding-block: var(--space-5);
+  }
+
+  .getting-started {
+    padding: var(--space-5) var(--space-4);
+  }
+}

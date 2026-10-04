@@ -44,8 +44,9 @@ export function VerifyEmailPage() {
     void auth.reloadAccount();
   }, [auth, shown, signedIn]);
 
+  // A completed company registration continues to the company's Home.
   const next = signedIn
-    ? <Link className="button button--primary button--large verify__next" to={PATHS.account}>Continue</Link>
+    ? <Link className="button button--primary button--large verify__next" to={shown?.companyRegistered === true ? PATHS.company : PATHS.account}>Continue</Link>
     : <Link className="button button--primary button--large verify__next" to={PATHS.login}>Sign in</Link>;
   const home = <p className="auth-card__switch"><Link to={PATHS.home}>LogisticBay Timesheets home</Link></p>;
 

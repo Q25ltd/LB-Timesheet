@@ -24,8 +24,10 @@ import {
  *
  * A page reload therefore forgets every token, and `restore()` gets a fresh
  * identity token through the cookie. Tenant authority (a selected company) is
- * not restored: like the phone, the person chooses again — the server
- * re-validates the membership every time (AUTH.md).
+ * not restored here: it is asked for again — by the company workspace for an
+ * account with exactly one company (`CompanyShell`, as sign-in does, D13), or
+ * by the person choosing on the account page — and the server re-validates
+ * the membership every time (AUTH.md).
  *
  * Nothing here decides who may do what. A route guard built on this state is
  * presentation; the API refuses whatever this state might wrongly allow.

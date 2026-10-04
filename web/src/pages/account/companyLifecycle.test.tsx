@@ -178,7 +178,7 @@ describe("the emailed link", () => {
     await screen.findByRole("heading", { level: 1, name: "Your company is registered" });
     api.on("GET /auth/me", { status: 200, body: account({ emailVerified: true, memberships: [MEMBERSHIP] }) });
     const next = await screen.findByRole("link", { name: "Continue" });
-    expect(next.getAttribute("href")).toBe(PATHS.account);
+    expect(next.getAttribute("href")).toBe(PATHS.company);
   });
 
   test("a link that only confirms an email says only that", async () => {

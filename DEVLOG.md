@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-10-04 — Company workspace: the shell and Home
+
+**Built.** The company web application's first screen. `/company` is now the
+company workspace: its own frame (`CompanyShell`) with one navigation —
+Home, Drivers, Timesheets, Settings, only Home a link, the other three named
+and said to be not available — and Account / Sign out. Home shows the
+company's real name (the server-confirmed membership, no new API), what the
+workspace is for, the four-step path to a first timesheet with only "Company
+created" done, and what each area is for. No counts, charts or invented
+records. Continue after a company registration's link, and sign-in with one
+company, both land on Home. The old `/company` placeholder (`CompanyPage`) is
+gone.
+
+**One behaviour to know.** Tokens live in memory, so a reload forgets the
+selected company. The workspace now asks `switch-company` for it again when
+the account has exactly one company — the rule sign-in already applies (D13);
+the server re-validates the membership. Several companies, none, or a
+pending registration go to the account page; nothing is guessed. The
+`AuthProvider` comment that said tenant authority is never restored was
+updated to say where it is asked for again.
+
+**Proven.** 19 web tests written RED, seven mutations killed; Playwright
+registers a company, continues to its Home, checks the navigation, the
+onboarding states and that the page holds no figures, reloads, signs out and
+back in to Home, and proves a same-email DRIVER account is refused at
+company sign-in.
+
+**Found on the way.** The homepage's phone mock-up already owns the `.app`
+class; the workspace frame first reused it and inherited the mock-up's
+padding. The frame's classes are `workspace-*` instead. The e2e company's own
+name ("E2E …") contains a digit, so the no-figures check excludes the
+company's name.
+
+---
+
 ## 2026-10-04 — Local company verification: the outbox link on the page
 
 **Why.** Locally no email is delivered — the API writes each message to

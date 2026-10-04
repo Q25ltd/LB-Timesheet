@@ -94,7 +94,7 @@ describe("credentials: where they live and how they travel", () => {
     api.on("POST /auth/switch-company", { status: 200, body: { tenantToken: TENANT, membership: MEMBERSHIP } });
     renderRoute(PATHS.account);
     fireEvent.click(await screen.findByRole("button", { name: `Open ${MEMBERSHIP.companyName}` }));
-    await screen.findByText("The company workspace is the next stage of development and is not available yet.");
+    await screen.findByRole("navigation", { name: "Company" });
     expect(api.calls.find(c => c.path === "/auth/switch-company")?.body).toEqual({ membershipId: MEMBERSHIP.membershipId });
   });
 });

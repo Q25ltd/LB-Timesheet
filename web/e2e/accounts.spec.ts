@@ -13,7 +13,7 @@ import { resetLinkSentTo } from "./mailbox";
  * Check your email → "Open verification link" in its Development email
  * section — the exact link the development outbox's message contains (the
  * API writes every message to `api/.mail-outbox/`; no provider is involved)
- * → Your company is registered → sign in. This suite reads the outbox
+ * → Your company is registered → the company's Home. This suite reads the outbox
  * directly only for password-reset links, which have no such helper.
  *
  * Registrations per run stay within the API's 5-per-hour-per-IP limit (D50):
@@ -49,13 +49,20 @@ async function developmentLink(page: Page): Promise<string> {
   return String(await open.getAttribute("href"));
 }
 
-/** Register, then complete it with the emailed link — the company exists. */
+/** The company workspace's Home, for `companyName`: its name, and Home the current area. */
+async function expectCompanyHome(page: Page, companyName: string): Promise<void> {
+  await expect(page).toHaveURL(`${WEB}/company`);
+  await expect(page.getByRole("heading", { level: 1, name: companyName, exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Company" }).getByRole("link", { name: "Home", exact: true })).toHaveAttribute("aria-current", "page");
+}
+
+/** Register, then complete it with the emailed link — the company exists, and its Home is shown. */
 async function registeredCompany(page: Page, email: string, companyName: string): Promise<void> {
   await registerThroughThePage(page, email, companyName);
   await page.getByRole("link", { name: "Open verification link", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your company is registered", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Continue", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Your account", exact: true })).toBeVisible();
+  await expectCompanyHome(page, companyName);
 }
 
 async function signIn(page: Page, email: string, password: string): Promise<void> {
@@ -102,16 +109,36 @@ test("a company registers, confirms its email, reaches its company, signs out an
   await expect(page.getByRole("heading", { level: 1, name: "Your company is registered", exact: true })).toBeVisible();
   expect(page.url()).toBe(`${WEB}/verify-email`);
   await page.getByRole("link", { name: "Continue", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Your account", exact: true })).toBeVisible();
+
+  // The company's Home: its real name, Home current, the four areas — only
+  // Home a link — and the onboarding with only "Company created" done.
+  await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
+  const nav = page.getByRole("navigation", { name: "Company" });
+  await expect(nav.getByRole("listitem")).toHaveCount(4);
+  await expect(nav.locator("[data-nav-label]")).toHaveText(["Home", "Drivers", "Timesheets", "Settings"]);
+  await expect(nav.getByRole("link")).toHaveCount(1);
+  const steps = page.getByRole("region", { name: "Getting started" }).getByRole("listitem");
+  await expect(steps).toHaveCount(4);
+  await expect(steps.first()).toHaveAttribute("data-state", "done");
+  for (const index of [1, 2, 3]) await expect(steps.nth(index)).toHaveAttribute("data-state", "unavailable");
+  await expect(steps.getByRole("link")).toHaveCount(0);
+  await expect(steps.getByRole("button")).toHaveCount(0);
+  // Nothing fabricated: apart from the company's own name ("E2E…"), the
+  // page's main content holds no figures at all.
+  expect((await page.locator("main").innerText()).replaceAll("E2E Vilnius Haulage UAB", "")).not.toMatch(/\d/);
   await expect(page.getByText("Set up a company", { exact: true })).toHaveCount(0);
+
+  // A reload forgets the in-memory tokens; the cookie restores the session
+  // and the account's one company is opened again — still Home.
+  await page.reload();
+  await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
 
   // The link is single-use.
   await page.goto(link);
   await expect(page.getByRole("heading", { level: 1, name: "This link has expired or was already used", exact: true })).toBeVisible();
 
-  await page.goto("/account");
-  await page.getByRole("button", { name: "Open E2E Vilnius Haulage UAB" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "E2E Vilnius Haulage UAB", exact: true })).toBeVisible();
+  await page.goto("/company");
+  await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
 
   const lastSecret = (await refreshCookie(context))?.value;
   expect(lastSecret).toBeTruthy();
@@ -123,9 +150,21 @@ test("a company registers, confirms its email, reaches its company, signs out an
   const replay = await request.post(`${API}/auth/web/refresh`, { headers: { origin: WEB, cookie: `lbts_refresh=${String(lastSecret)}` } });
   expect(replay.status()).toBe(401);
 
-  // Signing in again goes straight to the one company (D13).
+  // Signing in again goes straight to the one company's Home (D13).
   await signIn(page, email, PASSWORD);
-  await expect(page.getByRole("heading", { level: 1, name: "E2E Vilnius Haulage UAB", exact: true })).toBeVisible();
+  await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByText("You have signed out.", { exact: true })).toBeVisible();
+
+  // A DRIVER account with the SAME email (the phone's registration) never
+  // reaches the company: its password is refused at company sign-in.
+  const driver = await request.post(`${API}/auth/register`, { data: { firstName: "Dee", lastName: "River", email, password: "the-drivers-own-password" } });
+  expect(driver.status()).toBe(201);
+  await signIn(page, email, "the-drivers-own-password");
+  await expect(page.getByText("Email or password is incorrect.", { exact: true })).toBeVisible();
+  await page.goto("/company");
+  await expect(page.getByRole("heading", { level: 1, name: "Company sign-in", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Company" })).toHaveCount(0);
 });
 
 test("a pending registration signs in to Check your email, and a new link replaces the old one", async ({ page, browser }) => {
@@ -186,6 +225,8 @@ test("a password reset in another browser signs this one out; the old password s
 test("changing the password keeps THIS browser signed in and signs the other one out", async ({ page, browser }) => {
   const email = emailFor("change");
   await registeredCompany(page, email, "E2E Change Freight");
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Your account", exact: true })).toBeVisible();
 
   const elsewhere = await browser.newContext();
   const other = await elsewhere.newPage();
