@@ -19,8 +19,6 @@ import { mailerFor, type Mailer } from "./lib/mailer.js";
 import { backgroundWork } from "./lib/backgroundWork.js";
 import { accountTokenRepository, type AccountTokenDatabase } from "./repositories/accountTokenRepository.js";
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
-import { companyRepository, type CompanyDatabase } from "./repositories/companyRepository.js";
-import { registerCompanyRoutes } from "./routes/companies.js";
 import { passwordRepository, type PasswordDatabase } from "./repositories/passwordRepository.js";
 import { registerPasswordRoutes } from "./routes/password.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
@@ -42,7 +40,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & CompanyDatabase & PasswordDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -212,10 +210,6 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // Email-ownership verification (B4): identity-posture resend, public
   // confirm. The token, not a header, authenticates the confirm.
   registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail, limits);
-
-  // A verified identity creates a company and its own admin membership (B3).
-  // Tenant authority still comes only from /auth/switch-company.
-  registerCompanyRoutes(app, identityRepository(prisma), companyRepository(prisma));
 
   // Password recovery and change (B7). Reset revokes every session; change
   // revokes every session but the caller's.

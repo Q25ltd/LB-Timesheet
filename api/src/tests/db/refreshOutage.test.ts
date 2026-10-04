@@ -95,7 +95,7 @@ function refreshCookieValue(res: Injected): string | null {
 
 async function signedInBrowser(): Promise<string> {
   const res = await post("/auth/web/register", {
-    payload: { firstName: "Out", lastName: "Age", email: freshEmail(), password: PASSWORD },
+    payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Out", lastName: "Age", email: freshEmail(), password: PASSWORD },
   });
   assert.equal(res.statusCode, 201);
   const secret = refreshCookieValue(res);

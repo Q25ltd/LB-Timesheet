@@ -17,6 +17,7 @@ import type { SessionClientKind } from "../generated/enums.js";
 import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
 import { hashPassword, PasswordPolicy } from "../lib/password.js";
+import { CompanyTimeZoneField } from "../lib/timezone.js";
 import {
   hashRefreshToken,
   mintIdentityToken,
@@ -31,6 +32,7 @@ import {
   type AccountMembership,
   type AccountUser,
   type IdentityRepository,
+  type PendingCompanyRegistrationView,
 } from "../repositories/identityRepository.js";
 
 /**
@@ -53,6 +55,26 @@ export const RegisterBody = z.object({
 }).strict();
 
 export type RegisterInput = z.infer<typeof RegisterBody>;
+
+/**
+ * Registering a COMPANY on the website (D51, D53): the company — its name and
+ * the timezone it CHOSE — and its initial administrator. Strict, like every
+ * DTO here: a `companyId`, `userId`, `role` or a repeat-password field is
+ * refused, not ignored (the repeat box is the browser's own check).
+ *
+ * Company name: CLAUDE.md's 200, trimmed, never blank, NOT unique (D51).
+ * Timezone: `CompanyTimeZoneField` — an IANA place, stored exactly as chosen.
+ */
+export const CompanyRegisterBody = z.object({
+  companyName: z.string().trim().min(1).max(200),
+  timeZone:    CompanyTimeZoneField,
+  firstName:   z.string().trim().min(1).max(200),
+  lastName:    z.string().trim().min(1).max(200),
+  email:       z.string().trim().min(1).max(320).email(),
+  password:    PasswordPolicy,
+}).strict();
+
+export type CompanyRegisterInput = z.infer<typeof CompanyRegisterBody>;
 
 /** The frozen success body (AUTH.md, "Registration"). */
 export interface RegistrationResult {
@@ -142,12 +164,69 @@ export async function register(
   };
 }
 
+/**
+ * Register a COMPANY (D51): the company account, its pending registration
+ * (the company's name and chosen timezone, D53) and this browser's Session,
+ * in ONE transaction — no Company and no membership until the administrator's
+ * email is confirmed. The browser is signed in to the restricted "check your
+ * email" state (D51); the route sends the verification message.
+ *
+ * The email is unique per account KIND (D51): a driver account with the same
+ * address is never read, and a second company registration of an address is
+ * D24's deliberate 409, decided by the database's unique key under a race.
+ */
+export async function registerCompany(
+  input: CompanyRegisterInput,
+  accounts: IdentityRepository,
+  jwt: JWT,
+): Promise<IssuedUnderSession<RegistrationResult>> {
+  const email = normaliseEmail(input.email);
+  if (await accounts.findByEmail("company", email) !== null) throw emailInUse();
+
+  const passwordHash = await hashPassword(input.password);
+  const refreshToken = mintRefreshToken();
+  const sessionExpiresAt = new Date(Date.now() + SESSION_LIFETIME_MS.browser);
+
+  let created;
+  try {
+    created = await accounts.createCompanyRegistration({
+      email,
+      firstName:        input.firstName,
+      lastName:         input.lastName,
+      passwordHash,
+      companyName:      input.companyName,
+      timezone:         input.timeZone,
+      sessionExpiresAt,
+      refreshTokenHash: hashRefreshToken(refreshToken),
+    });
+  } catch (error) {
+    if (prismaErrorCode(error) === UNIQUE_VIOLATION_CODE) throw emailInUse();
+    throw error;
+  }
+
+  return {
+    result: {
+      user:          created.user,
+      identityToken: mintIdentityToken(jwt, { userId: created.user.id, sessionId: created.sessionId }),
+      refreshToken,
+      memberships:   [],
+    },
+    sessionExpiresAt,
+  };
+}
+
 /** The account state an identity-authenticated request may read (D21). */
 export interface AccountView {
   user: AccountUser;
   /** Whether the account has proved ownership of its email (B4). */
   emailVerified: boolean;
   memberships: AccountMembership[];
+  /**
+   * The account's OWN unfinished company registration (D51), or null — the
+   * company it is registering and the timezone that company chose. Always
+   * null for a driver account, and once the registration is completed.
+   */
+  pendingCompanyRegistration: PendingCompanyRegistrationView | null;
 }
 
 /**
@@ -158,9 +237,10 @@ export interface AccountView {
  * here would reintroduce the "0 memberships → denied" rule D21 superseded.
  */
 export async function accountView(userId: string, accounts: IdentityRepository): Promise<AccountView> {
-  const [state, memberships] = await Promise.all([
+  const [state, memberships, pendingCompanyRegistration] = await Promise.all([
     accounts.findAccountState(userId),
     accounts.listActiveMemberships(userId),
+    accounts.findPendingCompanyRegistration(userId),
   ]);
 
   // The session authenticated, but the account behind it is gone. Not a
@@ -168,5 +248,5 @@ export async function accountView(userId: string, accounts: IdentityRepository):
   // fails exactly as every other authentication failure does.
   if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 
-  return { user: state.user, emailVerified: state.emailVerified, memberships };
+  return { user: state.user, emailVerified: state.emailVerified, memberships, pendingCompanyRegistration };
 }

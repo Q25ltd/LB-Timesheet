@@ -465,3 +465,48 @@
     padding: var(--space-4) var(--space-5);
   }
 }
+
+/* ---------- Check your email, and the emailed link's outcome ---------- */
+
+.check-email {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.check-email__line,
+.verify__line {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* Development only: where the "email" actually went. */
+.check-email__dev {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--paper-line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--paper-ink);
+  font-size: 0.875rem;
+}
+
+.check-email__resend,
+.verify__next {
+  width: 100%;
+}
+
+/* A text-weight action inside a sentence (Sign out in the card's foot). */
+.auth-card__inline-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand-dark);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}

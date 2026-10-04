@@ -4,23 +4,29 @@ import { useAuth } from "../../auth/AuthProvider";
 import { PASSWORD_RULE, passwordProblem } from "../../auth/passwordRule";
 import { Field, FormMessage } from "../../components/Field";
 import { PATHS } from "../../paths";
+import { AuthCard } from "./AuthCard";
 import { AuthPanel } from "./AuthPanel";
 import { failureText } from "./failureText";
 
 type Message = { tone: "error" | "success"; text: string } | null;
 
 /**
- * The signed-in ACCOUNT (identity context, D21): who you are, whether your
- * email is confirmed, the companies you belong to, setting up a company
- * (D48), your password, and signing out. It shows only this account's own
- * memberships — the API returns nothing else.
+ * The signed-in COMPANY ACCOUNT (identity context, D21), in the state its
+ * registration is in (D51):
+ *
+ *   PENDING   "Check your email" — the company being registered, the address
+ *             to confirm, a new link; nothing else is open until it is done
+ *   COMPANY   who you are, the company to open, your password, sign out
+ *   NEITHER   an account with no company and no registration, said plainly
+ *
+ * Nothing here creates a company: a company is created only by confirming a
+ * company registration (the old "Set up a company" is gone). It shows only
+ * this account's own data — the API returns nothing else.
  */
 export function AccountPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const [verifyMessage, setVerifyMessage] = useState<Message>(null);
-  const [companyName, setCompanyName] = useState("");
-  const [companyMessage, setCompanyMessage] = useState<Message>(null);
   const [selectMessage, setSelectMessage] = useState<Message>(null);
   const [passwords, setPasswords] = useState({ current: "", next: "" });
   const [passwordMessage, setPasswordMessage] = useState<Message>(null);
@@ -34,25 +40,8 @@ export function AccountPage() {
     const outcome = await auth.resendVerification();
     setBusy(null);
     setVerifyMessage(outcome.ok
-      ? { tone: "success", text: `We have sent a new confirmation link to ${account.user.email}.` }
+      ? { tone: "success", text: `We have sent a new link to ${account.user.email}.` }
       : { tone: "error", text: failureText(outcome.failure) });
-  }
-
-  async function createCompany(event: FormEvent) {
-    event.preventDefault();
-    if (companyName.trim() === "") {
-      setCompanyMessage({ tone: "error", text: "Enter your company's name." });
-      return;
-    }
-    setBusy("company");
-    const outcome = await auth.createCompany(companyName.trim());
-    setBusy(null);
-    if (!outcome.ok) {
-      setCompanyMessage({ tone: "error", text: failureText(outcome.failure) });
-      return;
-    }
-    setCompanyName("");
-    setCompanyMessage({ tone: "success", text: `${outcome.membership.companyName} has been set up.` });
   }
 
   async function open(membershipId: string) {
@@ -90,6 +79,37 @@ export function AccountPage() {
     await auth.logout();
   }
 
+  const pending = account.pendingCompanyRegistration;
+  if (pending !== null) {
+    return (
+      <AuthCard
+        title="Check your email"
+        intro={`To finish registering ${pending.companyName}, confirm the administrator's email address: ${account.user.email}.`}
+        footer={
+          <p className="auth-card__switch">
+            Signed in as {account.user.email}.{" "}
+            <button className="auth-card__inline-button" type="button" disabled={busy === "signout"} onClick={() => void signOut()}>Sign out</button>
+          </p>
+        }
+      >
+        <div className="check-email">
+          <p className="check-email__line">
+            Open the link we sent to that address. It works once, and for 24 hours. Your company is set up the moment you open it.
+          </p>
+          {import.meta.env.DEV ? (
+            <p className="check-email__dev">
+              Development: messages are not emailed — they are saved as files in <code>api/.mail-outbox</code>.
+            </p>
+          ) : null}
+          {verifyMessage === null ? null : <FormMessage tone={verifyMessage.tone}>{verifyMessage.text}</FormMessage>}
+          <button className="button button--secondary button--large check-email__resend" type="button" disabled={busy === "verify"} onClick={() => void resend()}>
+            {busy === "verify" ? "Sending…" : "Send a new link"}
+          </button>
+        </div>
+      </AuthCard>
+    );
+  }
+
   return (
     <AuthPanel title="Your account">
       <div className="account-block">
@@ -100,7 +120,7 @@ export function AccountPage() {
         ) : (
           <>
             <p className="badge badge--warning">Email address not confirmed</p>
-            <p className="account-block__line">Open the link we emailed you to confirm it. You need a confirmed address to set up a company.</p>
+            <p className="account-block__line">Open the link we emailed you to confirm it.</p>
             {verifyMessage === null ? null : <FormMessage tone={verifyMessage.tone}>{verifyMessage.text}</FormMessage>}
             <button className="button button--secondary" type="button" disabled={busy === "verify"} onClick={() => void resend()}>
               {busy === "verify" ? "Sending…" : "Send a new confirmation link"}
@@ -113,7 +133,7 @@ export function AccountPage() {
         <h2 className="account-block__title">Your companies</h2>
         {selectMessage === null ? null : <FormMessage tone={selectMessage.tone}>{selectMessage.text}</FormMessage>}
         {account.memberships.length === 0 ? (
-          <p className="account-block__line">You are not part of any company yet.</p>
+          <p className="account-block__line">This account has no company. A company account is created by registering a company and confirming its email.</p>
         ) : (
           <ul className="company-list">
             {account.memberships.map(membership => (
@@ -126,22 +146,6 @@ export function AccountPage() {
               </li>
             ))}
           </ul>
-        )}
-      </div>
-
-      <div className="account-block">
-        <h2 className="account-block__title">Set up a company</h2>
-        {account.emailVerified ? (
-          <form className="auth-form" onSubmit={event => void createCompany(event)} noValidate>
-            {companyMessage === null ? null : <FormMessage tone={companyMessage.tone}>{companyMessage.text}</FormMessage>}
-            <Field label="Company name" name="companyName" autoComplete="organization" required maxLength={200}
-              value={companyName} onChange={event => setCompanyName(event.target.value)} />
-            <button className="button button--primary auth-form__submit" type="submit" disabled={busy === "company"}>
-              {busy === "company" ? "Setting up…" : "Set up company"}
-            </button>
-          </form>
-        ) : (
-          <p className="account-block__line">Confirm your email address first.</p>
         )}
       </div>
 

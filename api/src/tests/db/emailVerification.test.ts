@@ -111,7 +111,7 @@ function tokenSentTo(to: string, nth = 0): string {
 
 async function webRegistered(): Promise<{ email: string; userId: string; identityToken: string; token: string }> {
   const email = freshEmail();
-  const res = await inject({ url: "/auth/web/register", payload: { firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `web registration must succeed — got ${res.raw}`);
   // The website registers a COMPANY account (D51).
   const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });
@@ -172,7 +172,7 @@ test("V2. confirming the token verifies the email, consumes the token, and /auth
   const account = await webRegistered();
 
   const res = await confirm(account.token);
-  assert.equal(res.statusCode, 204, `a fresh token must verify — got ${res.raw}`);
+  assert.equal(res.statusCode, 200, `a fresh token must verify — got ${res.raw}`);
 
   assert.ok(await verifiedAt(account.userId) !== null);
   const token = await prisma.$queryRaw<{ consumed: boolean }[]>`SELECT "consumedAt" IS NOT NULL AS consumed FROM "AccountToken" WHERE "userId" = ${account.userId}`;
@@ -183,7 +183,7 @@ test("V2. confirming the token verifies the email, consumes the token, and /auth
 
 test("V3. used, expired, tampered and unknown tokens are refused IDENTICALLY, and change nothing", async () => {
   const used = await webRegistered();
-  assert.equal((await confirm(used.token)).statusCode, 204);
+  assert.equal((await confirm(used.token)).statusCode, 200);
   const firstVerifiedAt = await verifiedAt(used.userId);
 
   const reused = await confirm(used.token);
@@ -219,7 +219,7 @@ test("V4. a newer issue SUPERSEDES the older token; one row per user and purpose
 
   assert.equal((await confirm(account.token)).statusCode, 400, "the superseded token no longer works");
   assert.equal(await verifiedAt(account.userId), null);
-  assert.equal((await confirm(newer)).statusCode, 204, "the newest one does");
+  assert.equal((await confirm(newer)).statusCode, 200, "the newest one does");
 
   const rows = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM "AccountToken" WHERE "userId" = ${account.userId}`;
   assert.equal(Number(rows[0]?.n), 1);
@@ -231,7 +231,7 @@ test("V5. resend is IDENTITY-posture: an anonymous caller is refused; a verified
   assert.deepEqual(anonymous.body, CANONICAL_401);
 
   const account = await webRegistered();
-  assert.equal((await confirm(account.token)).statusCode, 204);
+  assert.equal((await confirm(account.token)).statusCode, 200);
   outbox.length = 0;
   const again = await inject({ url: "/auth/email-verification", token: account.identityToken, origin: false });
   assert.equal(again.statusCode, 204);
@@ -259,13 +259,13 @@ test("V6. a phone-registered DRIVER account is NOT mailed at registration (mobil
 
   const resend = await inject({ url: "/auth/email-verification", token: stringField(registered.body, "identityToken"), origin: false });
   assert.equal(resend.statusCode, 204);
-  assert.equal((await confirm(tokenSentTo(email))).statusCode, 204);
+  assert.equal((await confirm(tokenSentTo(email))).statusCode, 200);
 });
 
 test("V7. two simultaneous confirmations of one token: exactly ONE succeeds", async () => {
   const account = await webRegistered();
   const results = await Promise.all([confirm(account.token), confirm(account.token), confirm(account.token)]);
-  assert.deepEqual(results.map(r => r.statusCode).sort(), [204, 400, 400]);
+  assert.deepEqual(results.map(r => r.statusCode).sort(), [200, 400, 400]);
 });
 
 test("V8. the DATABASE refuses a second token row, a verification token living past 24 hours, and consumption after expiry", async () => {

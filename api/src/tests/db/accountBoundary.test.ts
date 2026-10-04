@@ -67,8 +67,11 @@ function sqlStateOf(error: unknown): string | null {
 
 interface Injected { statusCode: number; body: unknown; raw: string; setCookie: string | null }
 
+/** Every message the app sends, so a verification link can be opened as the administrator would. */
+const mailbox: { to: string; text: string }[] = [];
+
 async function inject(options: { url: string; method?: "GET" | "POST"; payload?: object; token?: string; web?: boolean }): Promise<Injected> {
-  const app = await buildApp(prisma, { mailer: { send: () => Promise.resolve() } });
+  const app = await buildApp(prisma, { mailer: { send: message => { mailbox.push(message); return Promise.resolve(); } } });
   try {
     const headers: Record<string, string> = {};
     if (options.web === true) headers["origin"] = ORIGIN;
@@ -111,7 +114,7 @@ async function registerDriver(email: string): Promise<{ userId: string; identity
 }
 
 async function registerCompanyAccount(email: string): Promise<{ userId: string; identityToken: string; cookie: string }> {
-  const res = await inject({ url: "/auth/web/register", web: true, payload: { firstName: "Co", lastName: "Admin", email, password: COMPANY_PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Co", lastName: "Admin", email, password: COMPANY_PASSWORD } });
   assert.equal(res.statusCode, 201, `company account registration — got ${res.raw}`);
   return { userId: stringField(field(res.body, "user"), "id"), identityToken: stringField(res.body, "identityToken"), cookie: res.setCookie ?? "" };
 }
@@ -196,7 +199,7 @@ test("AB3. the phone registers DRIVER accounts and the website COMPANY accounts 
   assert.equal(await kindOfUser(driver.userId), "driver");
   assert.equal(await kindOfUser(company.userId), "company");
 
-  const secondCompany = await inject({ url: "/auth/web/register", web: true, payload: { firstName: "X", lastName: "Y", email: email.toUpperCase(), password: COMPANY_PASSWORD } });
+  const secondCompany = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "X", lastName: "Y", email: email.toUpperCase(), password: COMPANY_PASSWORD } });
   assert.equal(secondCompany.statusCode, 409, "one company account per email");
 });
 
@@ -247,11 +250,14 @@ test("AB5. the sessions each surface creates are of its own kind", async () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 test("AB6. a company account cannot start a shift, even with valid tenant authority", async () => {
-  const company = await registerCompanyAccount(freshEmail());
-  await prisma.user.update({ where: { id: company.userId }, data: { emailVerifiedAt: new Date() } });
-  const created = await inject({ url: "/companies", token: company.identityToken, payload: { name: `${TAG}-co` } });
-  assert.equal(created.statusCode, 201, `setup — got ${created.raw}`);
-  const switched = await inject({ url: "/auth/switch-company", token: company.identityToken, payload: { membershipId: stringField(field(created.body, "membership"), "membershipId") } });
+  const email = freshEmail();
+  const company = await registerCompanyAccount(email);
+  // Completed as the administrator completes it: the emailed link (D51).
+  const link = [...mailbox].reverse().find(m => m.to === email)?.text ?? "";
+  const token = /#token=([A-Za-z0-9_-]+)/.exec(link)?.[1] ?? "";
+  assert.equal((await inject({ url: "/auth/email-verification/confirm", payload: { token } })).statusCode, 200, "setup: the company is registered");
+  const membership = await prisma.companyMembership.findFirstOrThrow({ where: { userId: company.userId } });
+  const switched = await inject({ url: "/auth/switch-company", token: company.identityToken, payload: { membershipId: membership.id } });
   const tenantToken = stringField(switched.body, "tenantToken");
 
   const start = await inject({ url: "/shifts/start", token: tenantToken, payload: { clientEventId: randomUUID(), startedAt: new Date().toISOString() } });
@@ -260,13 +266,13 @@ test("AB6. a company account cannot start a shift, even with valid tenant author
   assert.equal(await prisma.shift.count({ where: { userId: company.userId } }), 0);
 });
 
-test("AB7. a driver account cannot create a company", async () => {
+test("AB7. a driver account has no path to a company: the old set-up route is gone, and the website registers only company accounts", async () => {
   const driver = await registerDriver(freshEmail());
   await prisma.user.update({ where: { id: driver.userId }, data: { emailVerifiedAt: new Date() } });
   const res = await inject({ url: "/companies", token: driver.identityToken, payload: { name: `${TAG}-driver-co` } });
-  assert.equal(res.statusCode, 403);
-  assert.deepEqual(res.body, CANONICAL_403);
+  assert.equal(res.statusCode, 404, "POST /companies no longer exists (D51)");
   assert.equal(await prisma.company.count({ where: { name: `${TAG}-driver-co` } }), 0);
+  assert.equal(await prisma.companyMembership.count({ where: { userId: driver.userId } }), 0);
 });
 
 test("AB8. web password reset reaches the COMPANY account, never the driver account sharing its email", async () => {

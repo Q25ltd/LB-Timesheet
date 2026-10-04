@@ -1803,9 +1803,9 @@ D24's `409 EMAIL_IN_USE`.
 Owner decision (B3). Account registration and company creation stay
 **separate** concepts:
 
-*Superseded 2026-10-01 by D51 — company-first registration (not yet built;
-STATUS.md owns build state). Already true: only a COMPANY account may create a
-company; a driver account is refused with the generic 403.*
+*Superseded 2026-10-01 by D51 — company-first registration. Built
+2026-10-04, and `POST /companies` — this record's route — was REMOVED then: a
+company is now created only by confirming a company registration.*
 
 1. a person creates and authenticates their OWN identity (phone or web);
 2. proves ownership of their email (D47);
@@ -1919,6 +1919,13 @@ parts are built.
   accounts never start shifts; driver accounts never administer a company.
 - An unconfirmed company registration stays pending; no automatic deletion
   (O1 stays open).
+- *Implementation notes, 2026-10-04 (no new decision — each follows from the
+  above):* registration is `POST /auth/web/register` with the company's name
+  and chosen timezone (D53) and signs the browser in to the restricted state;
+  a company account whose registration is pending may sign in, and sees only
+  "Check your email" with a resend (B4: verification does not gate login);
+  the confirmation answers `{ companyRegistered }` and signs nobody in; a
+  second registration of a company email keeps D24's `409 EMAIL_IN_USE`.
 - Company names are not unique; ≤200 characters, trimmed, never empty.
 
 ## ❓ Open — ask the user, do not guess
@@ -2099,9 +2106,10 @@ domain, a language or a country assumption.
   form offers only places (its own copy of the rule — the workspaces share no
   code). `isIanaTimeZone`, which READS a stored zone, is unchanged.
 - **No history rewritten.** Existing companies keep their stored timezone;
-  `Company.timezone`'s schema default (`Europe/London`) is unchanged and
-  still used by the old `POST /companies` set-up path until increment 4
-  replaces it. Pending registrations get a required timezone with NO
+  `Company.timezone`'s schema default (`Europe/London`) is unchanged, and
+  since 2026-10-04 nothing relies on it: the old `POST /companies` set-up
+  path is removed, and a registered company is created with the timezone it
+  chose. Pending registrations get a required timezone with NO
   default; the migration refuses to run while any exist rather than invent
   one (none exist; nothing writes them yet).
 

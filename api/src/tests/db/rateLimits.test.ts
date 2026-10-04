@@ -141,9 +141,9 @@ test("RL3. registration: 5 per hour per IP, one bucket for the phone and the bro
   const ip = "10.0.3.1";
   const body = (): object => ({ firstName: "Reg", lastName: "Limit", email: freshEmail(), password: PASSWORD });
   for (let i = 0; i < 3; i += 1) assert.equal((await call(app, { url: "/auth/register", ip, payload: body() })).statusCode, 201);
-  for (let i = 0; i < 2; i += 1) assert.equal((await call(app, { url: "/auth/web/register", ip, web: true, payload: body() })).statusCode, 201);
+  for (let i = 0; i < 2; i += 1) assert.equal((await call(app, { url: "/auth/web/register", ip, web: true, payload: { ...body(), companyName: "Rate Ltd", timeZone: "Europe/Vilnius" } })).statusCode, 201);
 
-  const sixth = await call(app, { url: "/auth/web/register", ip, web: true, payload: body() });
+  const sixth = await call(app, { url: "/auth/web/register", ip, web: true, payload: { ...body(), companyName: "Rate Ltd", timeZone: "Europe/Vilnius" } });
   assert.equal(sixth.statusCode, 429);
   assert.deepEqual(sixth.body, RATE_LIMITED);
   assert.equal((await call(app, { url: "/auth/register", ip: "10.0.3.2", payload: body() })).statusCode, 201, "another IP is unaffected");
@@ -154,7 +154,7 @@ test("RL4. forgot password: 5 per hour per IP; at most 3 emails per hour per add
   // The website's recovery serves COMPANY accounts (D51), so the known
   // address is a company account registered on the website.
   const knownEmail = freshEmail();
-  const reg = await call(app, { url: "/auth/web/register", ip: "10.0.4.0", web: true, payload: { firstName: "Re", lastName: "Set", email: knownEmail, password: PASSWORD } });
+  const reg = await call(app, { url: "/auth/web/register", ip: "10.0.4.0", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Re", lastName: "Set", email: knownEmail, password: PASSWORD } });
   assert.equal(reg.statusCode, 201);
   const known = { email: knownEmail };
   const unknown = freshEmail();
@@ -181,7 +181,7 @@ test("RL4. forgot password: 5 per hour per IP; at most 3 emails per hour per add
 
 test("RL5. verification resend: at most 3 emails per hour per address — registration's email counts", async () => {
   const email = freshEmail();
-  const reg = await call(app, { url: "/auth/web/register", ip: "10.0.5.0", web: true, payload: { firstName: "Re", lastName: "Send", email, password: PASSWORD } });
+  const reg = await call(app, { url: "/auth/web/register", ip: "10.0.5.0", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Re", lastName: "Send", email, password: PASSWORD } });
   assert.equal(reg.statusCode, 201);
   const token = stringField(reg.body, "identityToken");
 

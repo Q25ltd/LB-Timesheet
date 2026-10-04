@@ -1,7 +1,8 @@
 /**
  * The BROWSER transport for the account lifecycle (D45, D46).
  *
- *   POST /auth/web/register   public   — creates a BROWSER session
+ *   POST /auth/web/register   public   — registers a COMPANY (D51): its account,
+ *                                         pending registration and a BROWSER session
  *   POST /auth/web/login      public   — creates a BROWSER session
  *   POST /auth/web/refresh    public   — the COOKIE is the credential
  *   POST /auth/web/logout     public   — the COOKIE names the session
@@ -48,7 +49,7 @@ import { issueEmailVerification, type AccountMail } from "../services/emailVerif
 import type { RefreshRepository } from "../repositories/refreshRepository.js";
 import { LoginBody, login } from "../services/login.js";
 import { logoutByCredential, refresh } from "../services/refresh.js";
-import { RegisterBody, register } from "../services/registration.js";
+import { CompanyRegisterBody, registerCompany } from "../services/registration.js";
 
 /**
  * The path prefix every cookie-transport route lives under. `app.ts` grants
@@ -87,10 +88,13 @@ export async function registerWebAuthRoutes(
       `${WEB_AUTH_PREFIX}register`,
       { config: { authPosture: "public" }, onRequest: limits.registration },
       async (request: FastifyRequest, reply: FastifyReply) => {
-        const parsed = RegisterBody.safeParse(request.body);
+        const parsed = CompanyRegisterBody.safeParse(request.body);
         if (!parsed.success) throw invalidRequest(parsed.error);
 
-        const { result, sessionExpiresAt } = await register(parsed.data, "browser", accounts, app.jwt);
+        // Registers a COMPANY (D51): the company account, its pending
+        // registration (name + chosen timezone, D53) and this browser's
+        // session — no Company or membership until the email is confirmed.
+        const { result, sessionExpiresAt } = await registerCompany(parsed.data, accounts, app.jwt);
 
         // A company-to-be starts by proving its address (B3, B4): the first
         // verification email is sent with the account. Delivery runs after

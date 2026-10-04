@@ -210,6 +210,8 @@ interface AuthReads {
   company: { findUnique(): Promise<{ timezone: string } | null> };
   // Every WRITE rejects: no case in this file may reach persistence, so a
   // call landing here is itself the failure rather than a setup gap.
+  // Company registration's (D51). No case here registers a company.
+  pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
   accountToken: { upsert(): Promise<never>; findUnique(): Promise<null> };
   $transaction(): Promise<never>;
 }
@@ -244,6 +246,10 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    pendingCompanyRegistration: {
+      findUnique: () => Promise.resolve(null),
+      create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),
@@ -460,6 +466,9 @@ const MeSnapshot = z.object({
   // B4: whether the account has proved its address — a boolean, never a date.
   emailVerified: z.boolean(),
   memberships: z.array(z.unknown()),
+  // D51: the account's own unfinished company registration, or null. A
+  // driver account never has one, so for every account in this file: null.
+  pendingCompanyRegistration: z.null(),
 }).strict();
 
 test("R10. GET /auth/me with no token is refused with the canonical envelope", async () => {
@@ -482,6 +491,7 @@ test("R11. a valid identity token and live session authenticate an account that 
   });
   assert.deepEqual(me.memberships, [], "zero memberships is a legitimate authenticated state, expressed as an empty list");
   assert.equal(me.emailVerified, false, "an account with no emailVerifiedAt reports unverified");
+  assert.equal(me.pendingCompanyRegistration, null, "a driver account registers no company");
 });
 
 test("R12. the identity response never carries tenant identity", async () => {

@@ -23,7 +23,7 @@ import type { BackgroundLog } from "../lib/backgroundWork.js";
 import type { Mailer } from "../lib/mailer.js";
 import type { SendThrottle } from "../lib/sendThrottle.js";
 import type { AccountTokenPurpose } from "../generated/enums.js";
-import type { AccountTokenRepository } from "../repositories/accountTokenRepository.js";
+import type { AccountTokenRepository, EmailVerificationRedemption } from "../repositories/accountTokenRepository.js";
 import type { AccountState, IdentityRepository } from "../repositories/identityRepository.js";
 
 /**
@@ -123,8 +123,13 @@ export async function requestEmailVerification(
   }
 }
 
-/** `POST /auth/email-verification/confirm` — public; the token is the credential. */
-export async function confirmEmail(input: ConfirmEmailInput, tokens: AccountTokenRepository): Promise<void> {
+/**
+ * `POST /auth/email-verification/confirm` — public; the token is the
+ * credential. For a company registration, confirming completes it (D51): the
+ * answer says so, and says nothing else — no company name, no account.
+ */
+export async function confirmEmail(input: ConfirmEmailInput, tokens: AccountTokenRepository): Promise<EmailVerificationRedemption> {
   const redeemed = await tokens.redeemEmailVerification(hashAccountToken(input.token), new Date());
-  if (!redeemed) throw new AppError(400, "This link is invalid or has expired", "TOKEN_INVALID");
+  if (redeemed === null) throw new AppError(400, "This link is invalid or has expired", "TOKEN_INVALID");
+  return redeemed;
 }

@@ -21,7 +21,7 @@
  *
  * Delegates are named individually, so widening this is a visible act.
  */
-import type { AccountTokenPurpose } from "../generated/enums.js";
+import type { AccountKind, AccountTokenPurpose, MembershipRole } from "../generated/enums.js";
 
 interface AccountTokenRow {
   userId: string;
@@ -46,6 +46,23 @@ interface AccountTokenTransaction {
       data: { emailVerifiedAt: Date };
     }): Promise<{ count: number }>;
   };
+  pendingCompanyRegistration: {
+    findUnique(args: { where: { userId_accountKind: { userId: string; accountKind: AccountKind } } }): Promise<{ id: string; companyName: string; timezone: string } | null>;
+    deleteMany(args: { where: { id: string } }): Promise<{ count: number }>;
+  };
+  company: {
+    create(args: { data: { name: string; timezone: string } }): Promise<{ id: string }>;
+  };
+  companyMembership: {
+    create(args: {
+      data: { companyId: string; userId: string; accountKind: AccountKind; role: MembershipRole; active: boolean };
+    }): Promise<{ id: string }>;
+  };
+}
+
+/** What a redeemed verification link did: confirmed the email, and — for a company registration — created the company. */
+export interface EmailVerificationRedemption {
+  companyRegistered: boolean;
 }
 
 export interface AccountTokenDatabase {
@@ -84,29 +101,57 @@ export function accountTokenRepository(db: AccountTokenDatabase) {
     },
 
     /**
-     * Redeem an email-verification token and stamp the account verified, in
-     * ONE transaction: the token is consumed if and only if the account is
-     * marked. `emailVerifiedAt` is set only where it is still null, so the
-     * FIRST verification time is the one kept.
+     * Redeem an email-verification token, in ONE transaction:
      *
-     * False for an unknown digest, a digest of another purpose, a used one and
+     *   1. consume the token — this digest, unconsumed, unexpired; the
+     *      affected-row count is the single-use proof, so of any number of
+     *      simultaneous redemptions exactly one proceeds;
+     *   2. stamp the account verified (only where still null, so the FIRST
+     *      verification time is kept);
+     *   3. if the account holds a PENDING COMPANY REGISTRATION (D51): create
+     *      the Company — the pending name and the timezone the company chose
+     *      (D53), never the schema default — create the INITIAL `admin`
+     *      membership, and DELETE the pending row.
+     *
+     * All of it or none of it: a failure at any step rolls back the token,
+     * the verification, the Company and the membership, and leaves the
+     * pending row and a still-usable link. One initial administrator is NOT a
+     * rule that a company has one administrator (O11) — nothing here forbids
+     * another membership later.
+     *
+     * Null for an unknown digest, a digest of another purpose, a used one and
      * an expired one — the caller answers all of them identically.
      */
-    async redeemEmailVerification(tokenHash: string, now: Date): Promise<boolean> {
+    async redeemEmailVerification(tokenHash: string, now: Date): Promise<EmailVerificationRedemption | null> {
       const row = await db.accountToken.findUnique({ where: { tokenHash } });
-      if (row === null || row.purpose !== "email_verification") return false;
+      if (row === null || row.purpose !== "email_verification") return null;
 
       return db.$transaction(async tx => {
         const { count } = await tx.accountToken.updateMany({
           where: { tokenHash, purpose: "email_verification", consumedAt: null, expiresAt: { gt: now } },
           data:  { consumedAt: now },
         });
-        if (count !== 1) return false;
+        if (count !== 1) return null;
         await tx.user.updateMany({
           where: { id: row.userId, emailVerifiedAt: null },
           data:  { emailVerifiedAt: now },
         });
-        return true;
+
+        // Only a COMPANY account can hold one (composite FK + CHECK), so a
+        // driver account's link only ever confirms its email.
+        const pending = await tx.pendingCompanyRegistration.findUnique({
+          where: { userId_accountKind: { userId: row.userId, accountKind: "company" } },
+        });
+        if (pending === null) return { companyRegistered: false };
+
+        const company = await tx.company.create({ data: { name: pending.companyName, timezone: pending.timezone } });
+        await tx.companyMembership.create({
+          data: { companyId: company.id, userId: row.userId, accountKind: "company", role: "admin", active: true },
+        });
+        // Exactly this row, or the whole completion is undone.
+        const removed = await tx.pendingCompanyRegistration.deleteMany({ where: { id: pending.id } });
+        if (removed.count !== 1) throw new Error("the pending company registration changed during its completion");
+        return { companyRegistered: true };
       });
     },
   };

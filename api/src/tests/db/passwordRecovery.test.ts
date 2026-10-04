@@ -132,7 +132,7 @@ function cookieSecretOf(res: Injected): string {
  */
 async function signedInEverywhere(): Promise<Devices> {
   const email = freshEmail();
-  const reg = await inject({ url: "/auth/web/register", origin: true, payload: { firstName: "Pat", lastName: "Word", email, password: OLD_PASSWORD } });
+  const reg = await inject({ url: "/auth/web/register", origin: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Pat", lastName: "Word", email, password: OLD_PASSWORD } });
   assert.equal(reg.statusCode, 201);
   const second = await inject({ url: "/auth/web/login", origin: true, payload: { email, password: OLD_PASSWORD } });
   assert.equal(second.statusCode, 200);

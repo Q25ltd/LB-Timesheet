@@ -13,7 +13,7 @@ interface AccountUser {
 }
 
 /** A company the account is an ACTIVE member of. Never authority by itself. */
-export interface Membership {
+interface Membership {
   membershipId: string;
   companyId: string;
   companyName: string;
@@ -28,10 +28,18 @@ export interface SignedIn {
   tenantToken?: string;
 }
 
+/** The account's own unfinished company registration (D51). */
+interface PendingCompanyRegistration {
+  companyName: string;
+  timezone: string;
+}
+
 export interface Account {
   user: AccountUser;
   emailVerified: boolean;
   memberships: Membership[];
+  /** Null once the company exists — and for any account that never registered one. */
+  pendingCompanyRegistration: PendingCompanyRegistration | null;
 }
 
 export interface CompanySelection {
@@ -101,7 +109,23 @@ export function parseAccount(value: unknown): Account | null {
   const parsedMemberships = memberships(value["memberships"]);
   const emailVerified = value["emailVerified"];
   if (parsedUser === null || parsedMemberships === null || typeof emailVerified !== "boolean") return null;
-  return { user: parsedUser, emailVerified, memberships: parsedMemberships };
+  const pending = value["pendingCompanyRegistration"];
+  let pendingCompanyRegistration: PendingCompanyRegistration | null = null;
+  if (pending !== null) {
+    if (!isRecord(pending)) return null;
+    const companyName = text(pending, "companyName");
+    const timezone = text(pending, "timezone");
+    if (companyName === null || timezone === null) return null;
+    pendingCompanyRegistration = { companyName, timezone };
+  }
+  return { user: parsedUser, emailVerified, memberships: parsedMemberships, pendingCompanyRegistration };
+}
+
+/** What confirming an emailed link did (D51): whether it completed a company registration. */
+export function parseConfirmation(value: unknown): { companyRegistered: boolean } | null {
+  if (!isRecord(value)) return null;
+  const companyRegistered = value["companyRegistered"];
+  return typeof companyRegistered === "boolean" ? { companyRegistered } : null;
 }
 
 export function parseCompanySelection(value: unknown): CompanySelection | null {
@@ -109,10 +133,6 @@ export function parseCompanySelection(value: unknown): CompanySelection | null {
   const tenantToken = text(value, "tenantToken");
   const parsed = membership(value["membership"]);
   return tenantToken === null || parsed === null ? null : { tenantToken, membership: parsed };
-}
-
-export function parseCreatedCompany(value: unknown): Membership | null {
-  return isRecord(value) ? membership(value["membership"]) : null;
 }
 
 /** The `code` of the API's one error envelope, or null. */

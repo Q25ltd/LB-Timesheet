@@ -77,6 +77,24 @@ export interface NewAccount {
 }
 
 /** The account and the device session it was created with, in one act. */
+/** A company registration, as the web registration writes it (D51, D53). */
+export interface NewCompanyRegistration {
+  email: string;
+  firstName: string;
+  lastName: string;
+  passwordHash: string;
+  companyName: string;
+  timezone: string;
+  sessionExpiresAt: Date;
+  refreshTokenHash: string;
+}
+
+/** An account's own unfinished company registration, as `/auth/me` shows it. */
+export interface PendingCompanyRegistrationView {
+  companyName: string;
+  timezone: string;
+}
+
 export interface CreatedAccount {
   user: AccountUser;
   sessionId: string;
@@ -127,6 +145,9 @@ interface IdentityTransaction {
   session: {
     create(args: { data: { userId: string; accountKind: AccountKind; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
   };
+  pendingCompanyRegistration: {
+    create(args: { data: { userId: string; accountKind: AccountKind; companyName: string; timezone: string } }): Promise<{ id: string }>;
+  };
 }
 
 /**
@@ -144,6 +165,9 @@ export interface IdentityDatabase extends IdentityTransaction {
     findFirst(args: { where: { accountKind: AccountKind; email: string } }): Promise<CredentialRow | null>;
   };
   session: IdentityTransaction["session"];
+  pendingCompanyRegistration: IdentityTransaction["pendingCompanyRegistration"] & {
+    findUnique(args: { where: { userId_accountKind: { userId: string; accountKind: AccountKind } } }): Promise<PendingCompanyRegistrationView | null>;
+  };
   companyMembership: {
     findMany(args: {
       where: { userId: string; active: boolean };
@@ -227,6 +251,49 @@ export function identityRepository(db: IdentityDatabase) {
 
         return { user: accountUser(user), sessionId: session.id };
       });
+    },
+
+    /**
+     * Register a COMPANY (D51): the company account, its pending registration
+     * — the company's name and chosen timezone (D53) — and the browser
+     * Session, ALL or NONE. No Company and no membership: those exist only
+     * once the email is confirmed. A duplicate company email surfaces as the
+     * database's P2002, so concurrent registrations resolve to one account.
+     */
+    async createCompanyRegistration(registration: NewCompanyRegistration): Promise<CreatedAccount> {
+      return db.$transaction(async tx => {
+        const user = await tx.user.create({
+          data: {
+            accountKind:  "company",
+            email:        registration.email,
+            firstName:    registration.firstName,
+            lastName:     registration.lastName,
+            passwordHash: registration.passwordHash,
+          },
+        });
+        await tx.pendingCompanyRegistration.create({
+          data: { userId: user.id, accountKind: "company", companyName: registration.companyName, timezone: registration.timezone },
+        });
+        const session = await tx.session.create({
+          data: {
+            userId:           user.id,
+            accountKind:      "company",
+            clientKind:       "browser",
+            expiresAt:        registration.sessionExpiresAt,
+            refreshTokenHash: registration.refreshTokenHash,
+          },
+        });
+        return { user: accountUser(user), sessionId: session.id };
+      });
+    },
+
+    /**
+     * The account's OWN unfinished company registration, or null. Read by
+     * the account itself only (`/auth/me`); a driver account never has one.
+     */
+    async findPendingCompanyRegistration(userId: string): Promise<PendingCompanyRegistrationView | null> {
+      const row = await db.pendingCompanyRegistration.findUnique({ where: { userId_accountKind: { userId, accountKind: "company" } } });
+      return row === null ? null : { companyName: row.companyName, timezone: row.timezone };
     },
 
     /**

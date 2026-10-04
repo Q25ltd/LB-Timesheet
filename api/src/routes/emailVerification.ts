@@ -3,7 +3,9 @@
  *
  *   POST /auth/email-verification          identity — (re)send to MY address
  *   POST /auth/email-verification/confirm  public   — the emailed token is
- *                                                     the credential
+ *                                                     the credential; for a
+ *                                                     company registration it
+ *                                                     completes it (D51)
  *
  * Neither touches the refresh cookie, so neither needs the Origin guard: the
  * first is bearer-authenticated, and the second can do nothing without a
@@ -54,8 +56,7 @@ export function registerEmailVerificationRoutes(
       const parsed = ConfirmEmailBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);
 
-      await confirmEmail(parsed.data, tokens);
-      return reply.status(204).send();
+      return reply.status(200).send(await confirmEmail(parsed.data, tokens));
     },
   );
 }

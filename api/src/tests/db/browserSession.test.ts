@@ -146,7 +146,7 @@ function stringField(body: unknown, key: string): string {
 }
 
 async function webRegister(email = freshEmail()): Promise<{ email: string; res: Injected; secret: string; sessionId: string }> {
-  const res = await inject({ url: "/auth/web/register", payload: { firstName: "Web", lastName: "User", email, password: PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Web", lastName: "User", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `web registration must succeed — got ${res.raw}`);
   const secret = refreshCookieOf(res).value;
   const session = await prisma.session.findUnique({ where: { refreshTokenHash: digest(secret) } });
@@ -414,7 +414,7 @@ test("B12. every cookie endpoint refuses an absent, opaque, unlisted, sibling or
     assert.deepEqual(login.body, CANONICAL_403);
     assert.equal(login.setCookies.length, 0, `no cookie for ${label}`);
 
-    const register = await inject({ url: "/auth/web/register", origin, payload: { firstName: "X", lastName: "Y", email: freshEmail(), password: PASSWORD } });
+    const register = await inject({ url: "/auth/web/register", origin, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "X", lastName: "Y", email: freshEmail(), password: PASSWORD } });
     assert.equal(register.statusCode, 403, `register from ${label}`);
 
     const refresh = await refreshWith(secret, origin);

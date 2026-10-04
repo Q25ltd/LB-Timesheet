@@ -112,6 +112,10 @@ function fixtures(options: { active?: boolean } = {}) {
       create:    () => Promise.reject(new Error("shift.create must not be reached by a refused request")),
       findFirst: () => Promise.resolve(null),
     },
+    pendingCompanyRegistration: {
+      findUnique: () => Promise.resolve(null),
+      create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

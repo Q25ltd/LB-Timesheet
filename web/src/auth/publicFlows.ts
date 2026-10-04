@@ -1,5 +1,5 @@
-import { apiRequest } from "./http";
-import { parseNoContent } from "./responses";
+import { apiRequest, type ApiResult } from "./http";
+import { parseConfirmation, parseNoContent } from "./responses";
 
 /**
  * The account flows that need no session: the emailed token, or nothing at
@@ -7,7 +7,7 @@ import { parseNoContent } from "./responses";
  */
 export type PublicOutcome = "done" | "invalid-link" | "rejected" | "rate-limited" | "offline" | "unexpected";
 
-function outcome(result: Awaited<ReturnType<typeof apiRequest<true>>>): PublicOutcome {
+function outcome(result: ApiResult<unknown>): PublicOutcome {
   if (result.kind === "ok") return "done";
   if (result.kind === "offline") return "offline";
   if (result.code === "TOKEN_INVALID") return "invalid-link";
@@ -16,8 +16,11 @@ function outcome(result: Awaited<ReturnType<typeof apiRequest<true>>>): PublicOu
   return "unexpected";
 }
 
-export async function confirmEmail(token: string): Promise<PublicOutcome> {
-  return outcome(await apiRequest("/auth/email-verification/confirm", { body: { token } }, parseNoContent));
+/** Confirm an emailed link. For a company registration, confirming it completes it (D51). */
+export async function confirmEmail(token: string): Promise<{ outcome: PublicOutcome; companyRegistered: boolean }> {
+  const result = await apiRequest("/auth/email-verification/confirm", { body: { token } }, parseConfirmation);
+  if (result.kind === "ok") return { outcome: "done", companyRegistered: result.value.companyRegistered };
+  return { outcome: outcome(result), companyRegistered: false };
 }
 
 /** Always answered the same way by the API, whether or not the address has an account. */

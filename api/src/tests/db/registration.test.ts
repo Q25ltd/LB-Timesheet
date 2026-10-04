@@ -504,7 +504,7 @@ test("D13. the identity token authenticates the account against the REAL persist
   assert.deepEqual(
     me.body,
     // A phone-registered account has proved nothing about its address (D47).
-    { user: { id: body.user.id, firstName: "Real", lastName: "Session", email }, emailVerified: false, memberships: [] },
+    { user: { id: body.user.id, firstName: "Real", lastName: "Session", email }, emailVerified: false, memberships: [], pendingCompanyRegistration: null },
     "and describe the zero-membership account exactly",
   );
 

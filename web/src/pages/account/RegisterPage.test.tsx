@@ -1,7 +1,7 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PATHS } from "../../paths";
-import { installFakeApi, type FakeApi } from "../../test/fakeApi";
+import { account, installFakeApi, type FakeApi } from "../../test/fakeApi";
 import { renderRoute } from "../../test/renderRoute";
 
 /**
@@ -156,26 +156,65 @@ describe("company name rules", () => {
   });
 });
 
-describe("before company registration opens", () => {
-  test("the page says plainly that registration is not open yet", () => {
+describe("registering (D51)", () => {
+  function fillValid() {
+    fill("Company name", "  Kuizinas Haulage Ltd  ");
+    fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
+    fillAdministrator();
+  }
+
+  test("the temporary 'not open yet' behaviour is gone", () => {
     renderRoute(PATHS.register);
-    expect(screen.getByText(/company registration is not open yet/i)).toBeTruthy();
+    expect(main().textContent).not.toMatch(/not open yet|nothing has been sent|nothing is sent/i);
   });
 
-  test("a complete, valid form sends NOTHING — no request at all, and never the old registration endpoint", () => {
+  test("a valid form REGISTERS the company: one request to the browser route, with the company, its time zone and the administrator — never the repeat box", async () => {
+    api.on("POST /auth/web/register", { status: 201, body: { user: { id: "u-1", firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com" }, identityToken: "header.identity.sig", memberships: [] } });
+    api.on("GET /auth/me", { status: 200, body: account({ emailVerified: false, pendingCompanyRegistration: { companyName: "Kuizinas Haulage Ltd", timezone: "America/Chicago" } }) });
     renderRoute(PATHS.register);
-    fill("Company name", "Kuizinas Haulage Ltd");
-    fillAdministrator();
+    fillValid();
     submit();
 
-    expect(screen.getByRole("status").textContent).toMatch(/nothing has been sent/i);
-    expect(registrationRequests()).toEqual([]);
-    expect(api.calls.some(c => c.path === "/auth/web/register" || c.path === "/auth/register" || c.path === "/companies")).toBe(false);
-    // And it did not pretend to sign anyone in.
+    await screen.findByRole("heading", { level: 1, name: "Check your email" });
+    const sent = api.calls.filter(c => c.path === "/auth/web/register");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.credentials).toBe("include");
+    expect(sent[0]?.body).toEqual({
+      companyName: "Kuizinas Haulage Ltd", timeZone: "America/Chicago",
+      firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com", password: "correct-horse-battery-staple",
+    });
+    expect(api.calls.some(c => c.path === "/auth/register" || c.path === "/companies")).toBe(false);
+  });
+
+  test("an email already registered as a COMPANY keeps the form, and says so on the email field", async () => {
+    api.on("POST /auth/web/register", { status: 409, body: { error: "Email already registered", code: "EMAIL_IN_USE" } });
+    renderRoute(PATHS.register);
+    fillValid();
+    submit();
+    expect(await screen.findByText("A company account already uses this email. Sign in instead, or reset its password.")).toBeTruthy();
+    expect(screen.getByLabelText("Email").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Register your company");
   });
 
-  test("an invalid form sends nothing either", () => {
+  test("a server failure is reported honestly, and the form is kept", async () => {
+    api.on("POST /auth/web/register", { status: 503, body: { error: "Unavailable" } });
+    renderRoute(PATHS.register);
+    fillValid();
+    submit();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not be completed/i);
+    const companyName = screen.getByLabelText("Company name");
+    expect(companyName instanceof HTMLInputElement ? companyName.value : null).toBe("  Kuizinas Haulage Ltd  ");
+  });
+
+  test("no answer at all is reported as no answer", async () => {
+    api.on("POST /auth/web/register", () => "offline");
+    renderRoute(PATHS.register);
+    fillValid();
+    submit();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not reach/i);
+  });
+
+  test("an invalid form sends nothing", () => {
     renderRoute(PATHS.register);
     submit();
     expect(registrationRequests()).toEqual([]);
@@ -223,14 +262,15 @@ describe("the company's time zone (D53)", () => {
     expect(timeZone().value).toBe("America/Chicago");
   });
 
-  test("a non-UK company completes the form with its own zone — and still nothing is sent", () => {
+  test("a non-UK company's own zone is what is sent", async () => {
+    api.on("POST /auth/web/register", { status: 409, body: { error: "Email already registered", code: "EMAIL_IN_USE" } });
     renderRoute(PATHS.register);
     fill("Company name", "Chicago Freight LLC");
     fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
     fillAdministrator();
     submit();
-    expect(screen.getByRole("status").textContent).toMatch(/nothing has been sent/i);
-    expect(registrationRequests()).toEqual([]);
+    await waitFor(() => expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(true));
+    expect(api.calls.find(c => c.path === "/auth/web/register")?.body).toMatchObject({ timeZone: "America/Chicago" });
   });
 
   test.each([["UTC"], ["Etc/GMT+5"], [undefined], ["Not/AZone"]])(
@@ -246,7 +286,7 @@ describe("the company's time zone (D53)", () => {
       submit();
       expect(within(group("Company details")).getByText("Choose your company's time zone")).toBeTruthy();
       expect(timeZone().getAttribute("aria-invalid")).toBe("true");
-      expect(screen.queryByRole("status")).toBeNull();
+      expect(registrationRequests()).toEqual([]);
     },
   );
 });

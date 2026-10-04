@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
 import { PASSWORD_RULE, passwordProblem } from "../../auth/passwordRule";
 import { Field, FormMessage, SelectField } from "../../components/Field";
-import { Icon } from "../../components/Icon";
 import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
+import { failureText } from "./failureText";
 import { isOfferedTimeZone, suggestedTimeZone, timeZoneGroups } from "./companyTimeZone";
 
 /** The approved company-name rule (D51): trimmed, never empty, at most 200 characters. Not unique. */
@@ -17,12 +17,11 @@ type FieldName = "companyName" | "timeZone" | "firstName" | "lastName" | "email"
  * Registering a COMPANY on LogisticBay Timesheets (D51): the company's
  * details, and the details of the administrator who will manage it here.
  *
- * NOT OPEN YET. The company-registration API — which stores the pending
- * registration and creates the Company when the administrator confirms their
- * email — is the next increment. Until it exists this form validates what it
- * will send and SENDS NOTHING: it must not fall back on the old person-first
- * endpoint, which would drop the company name and report a registration that
- * did not happen. The page says so before and after the button is pressed.
+ * Pressing Register company sends ONE request (`POST /auth/web/register`):
+ * the server creates the company account and its pending registration and
+ * signs this browser in to the restricted "check your email" state (/account).
+ * No company exists until the emailed link is opened. Failures keep the form
+ * and say what happened; nothing is reported as registered that was not.
  */
 export function RegisterPage() {
   const auth = useAuth();
@@ -36,7 +35,8 @@ export function RegisterPage() {
     companyName: "", timeZone: suggested ?? "", firstName: "", lastName: "", email: "", password: "", repeat: "",
   }));
   const [problems, setProblems] = useState<Partial<Record<FieldName, string>>>({});
-  const [checked, setChecked] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => { void auth.restore(); }, [auth]);
   useEffect(() => {
@@ -45,11 +45,11 @@ export function RegisterPage() {
 
   function update(key: FieldName, value: string) {
     setForm(current => ({ ...current, [key]: value }));
-    setChecked(false);
   }
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
     const found: Partial<Record<FieldName, string>> = {};
     const companyName = form.companyName.trim();
     if (companyName === "") found.companyName = "Enter your company's name";
@@ -62,8 +62,26 @@ export function RegisterPage() {
     if (passwordIssue !== null) found.password = passwordIssue;
     if (form.repeat !== form.password) found.repeat = "The passwords do not match";
     setProblems(found);
-    // Valid or not, nothing is sent: company registration is not open yet.
-    setChecked(Object.keys(found).length === 0);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+
+    setBusy(true);
+    const outcome = await auth.registerCompany({
+      companyName,
+      timeZone:  form.timeZone,
+      firstName: form.firstName.trim(),
+      lastName:  form.lastName.trim(),
+      email:     form.email.trim(),
+      password:  form.password,
+    });
+    setBusy(false);
+    // Success signs this browser in; the effect above moves on to /account.
+    if (outcome.ok) return;
+    if (outcome.failure === "email-in-use") {
+      setProblems({ email: "A company account already uses this email. Sign in instead, or reset its password." });
+      return;
+    }
+    setFailure(failureText(outcome.failure));
   }
 
   return (
@@ -71,16 +89,10 @@ export function RegisterPage() {
       wide
       title="Register your company"
       intro="Set up your company on LogisticBay Timesheets, and the administrator who will manage it on this website."
-      note={
-        // A standing notice, not a live region: it is true from the first render.
-        <p className="auth-head__note">
-          <Icon name="clock" className="auth-head__note-icon" />
-          <span>Company registration is not open yet. You can fill in and check your details, but nothing is sent until it opens.</span>
-        </p>
-      }
       footer={<p className="auth-card__switch">Already registered? <Link to={PATHS.login}>Sign in</Link></p>}
     >
-      <form className="auth-form" onSubmit={submit} noValidate>
+      <form className="auth-form" onSubmit={event => void submit(event)} noValidate>
+        {failure === null ? null : <FormMessage tone="error">{failure}</FormMessage>}
         <fieldset className="auth-section">
           <legend className="auth-section__legend">Company details</legend>
           <p className="auth-section__hint">Your company&apos;s name, and the time zone it works in.</p>
@@ -122,13 +134,8 @@ export function RegisterPage() {
         </fieldset>
 
         <div className="auth-form__actions">
-          {checked ? (
-            <FormMessage tone="success">
-              Your details are complete. Company registration is not open yet, so nothing has been sent.
-            </FormMessage>
-          ) : null}
-          <button className="button button--primary button--large auth-form__submit" type="submit">
-            Register company
+          <button className="button button--primary button--large auth-form__submit" type="submit" disabled={busy}>
+            {busy ? "Registering…" : "Register company"}
           </button>
         </div>
       </form>

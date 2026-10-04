@@ -114,6 +114,8 @@ interface StubDatabase {
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<{ timezone: string } | null> };
+  // Company registration's (D51). No case here registers a company.
+  pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
   accountToken: { upsert(): Promise<never>; findUnique(): Promise<null> };
   $transaction(): Promise<never>;
 }
@@ -150,6 +152,10 @@ function noRows(): StubDatabase {
       findFirst: () => Promise.resolve(null),
     },
     company:      { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    pendingCompanyRegistration: {
+      findUnique: () => Promise.resolve(null),
+      create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

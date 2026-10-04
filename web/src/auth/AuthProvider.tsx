@@ -3,13 +3,11 @@ import { apiRequest, type ApiResult } from "./http";
 import {
   parseAccount,
   parseCompanySelection,
-  parseCreatedCompany,
   parseIdentityToken,
   parseNoContent,
   parseSignedIn,
   type Account,
   type CompanySelection,
-  type Membership,
   type SignedIn,
 } from "./responses";
 
@@ -79,9 +77,24 @@ export interface AuthApi {
   logout(): Promise<{ serverConfirmed: boolean }>;
   reloadAccount(): Promise<Outcome>;
   resendVerification(): Promise<Outcome>;
-  createCompany(name: string): Promise<{ ok: true; membership: Membership } | { ok: false; failure: Failure }>;
+  /**
+   * Register a COMPANY (D51): its name and chosen time zone (D53) and its
+   * initial administrator. The browser is signed in to the restricted
+   * "check your email" state; no company exists until the email is confirmed.
+   */
+  registerCompany(input: CompanyRegistration): Promise<Outcome>;
   selectCompany(membershipId: string): Promise<Outcome>;
   changePassword(currentPassword: string, newPassword: string): Promise<Outcome>;
+}
+
+/** Exactly what the company registration sends — the repeat box is the browser's own check. */
+interface CompanyRegistration {
+  companyName: string;
+  timeZone: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
 }
 
 const AuthContext = createContext<AuthApi | null>(null);
@@ -235,12 +248,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.kind === "ok" ? { ok: true } : { ok: false, failure: failureOf(result) };
   }, [withIdentity]);
 
-  const createCompany = useCallback<AuthApi["createCompany"]>(async name => {
-    const result = await withIdentity(token => apiRequest("/companies", { token, body: { name } }, parseCreatedCompany));
+  const registerCompany = useCallback<AuthApi["registerCompany"]>(async input => {
+    const result = await apiRequest("/auth/web/register", { body: input, cookie: true }, parseSignedIn);
     if (result.kind !== "ok") return { ok: false, failure: failureOf(result) };
-    await loadAccount(currentCompany);
-    return { ok: true, membership: result.value };
-  }, [currentCompany, loadAccount, withIdentity]);
+    return loadAccount(enter(result.value));
+  }, [enter, loadAccount]);
 
   const selectCompany = useCallback<AuthApi["selectCompany"]>(async membershipId => {
     // The membership is a REQUEST; the server decides, from its own rows.
@@ -255,8 +267,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [withIdentity]);
 
   const api = useMemo<AuthApi>(() => ({
-    state, restore, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword,
-  }), [state, restore, login, logout, reloadAccount, resendVerification, createCompany, selectCompany, changePassword]);
+    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, selectCompany, changePassword,
+  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, selectCompany, changePassword]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

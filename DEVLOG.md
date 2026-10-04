@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-10-04 — Company registration completed end to end (D51, D53)
+
+**Built.** `POST /auth/web/register` now registers a COMPANY: one transaction
+writes the company account, its pending registration (name + chosen
+timezone) and a browser session, and the verification link goes out through
+the existing `Mailer`. Opening the link completes it in one transaction —
+token consumed, email verified, Company (pending name + timezone), the
+initial `admin` membership, pending row deleted. The web pages follow: the
+form submits for real, "Check your email" with resend, the link's outcomes,
+and the account page split by registration state. The person-first
+`POST /companies` and "Set up a company" are removed. Production email (SES)
+is the one part left, and needs no change to any of this.
+
+**Proven.** 20 new DB tests, RED first, including a fault injected at each
+completion step (all rolled back, the link still works), five simultaneous
+confirmations (one wins) and three simultaneous registrations (one account);
+Playwright registers through the real page and completes with the link from
+the development outbox. Mutations: London substituted, pending row kept,
+link replayable, transaction removed, same-email driver blocking, the
+website finding the driver, reset reaching the driver, company starting a
+shift — all caught.
+
+**Found on the way.** A Playwright step reopened a second link in the same
+tab already on `/verify-email`; the browser treated it as a hash change and
+nothing reloaded. Not a product defect (a link from an email opens a new
+page); the test now opens each link in its own tab. The rollback mutation's
+partial writes left orphan companies in the scratch check database, which a
+global by-name count then tripped on; that check now counts the account's
+own memberships.
+
+---
+
 ## 2026-10-01 — Company / web authentication (D46–D50)
 
 **Decided by the owner at the session's stop (B1–B8), recorded as D46–D50.**

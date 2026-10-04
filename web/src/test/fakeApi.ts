@@ -58,8 +58,16 @@ export function installFakeApi(): FakeApi {
 
 const USER = { id: "user-1", firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com" };
 
-export function account(overrides: { emailVerified?: boolean; memberships?: unknown[] } = {}) {
-  return { user: USER, emailVerified: overrides.emailVerified ?? true, memberships: overrides.memberships ?? [] };
+export function account(overrides: { emailVerified?: boolean; memberships?: unknown[]; pendingCompanyRegistration?: unknown } = {}) {
+  return {
+    user: USER,
+    emailVerified: overrides.emailVerified ?? true,
+    memberships: overrides.memberships ?? [],
+    pendingCompanyRegistration: overrides.pendingCompanyRegistration ?? null,
+  };
 }
+
+/** An unfinished company registration, as `/auth/me` reports it (D51). */
+export const PENDING = { companyName: "Kuizinas Haulage Ltd", timezone: "Europe/Vilnius" };
 
 export const MEMBERSHIP = { membershipId: "m-1", companyId: "c-1", companyName: "Kuizinas Haulage Ltd", role: "admin" };

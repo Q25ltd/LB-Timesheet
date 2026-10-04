@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PATHS } from "../paths";
-import { account, installFakeApi, MEMBERSHIP, type FakeApi } from "../test/fakeApi";
+import { account, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../test/fakeApi";
 import { renderRoute } from "../test/renderRoute";
 
 /**
@@ -214,7 +214,9 @@ describe("sign out", () => {
 });
 
 describe("registration and the emailed links", () => {
-  test("the company registration form holds the administrator's password to the rule, and sends nothing — before or after", async () => {
+  test("the company registration form holds the administrator's password to the rule, then registers through the cookie route and persists nothing readable", async () => {
+    api.on("POST /auth/web/register", { status: 201, body: { user: { id: "u-1", firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com" }, identityToken: IDENTITY, memberships: [] } });
+    api.on("GET /auth/me", { status: 200, body: account({ emailVerified: false, pendingCompanyRegistration: PENDING }) });
     renderRoute(PATHS.register);
     fill("Company name", "Kuizinas Haulage Ltd");
     // Chosen, as a company does — never left to whatever zone the machine
@@ -227,21 +229,22 @@ describe("registration and the emailed links", () => {
     fill("Repeat password", "short");
     fireEvent.click(screen.getByRole("button", { name: "Register company" }));
     expect(await screen.findByText("At least 10 characters", { selector: ".field__error" })).toBeTruthy();
+    expect(api.calls.some(c => c.path === "/auth/web/register"), "an invalid form sends nothing").toBe(false);
 
     fill("Password", PASSWORD);
     fill("Repeat password", PASSWORD);
     fireEvent.click(screen.getByRole("button", { name: "Register company" }));
-    await screen.findByRole("status");
-    // Company registration is not open yet (its API is the next increment):
-    // the old person-first endpoint is never used in its place.
-    expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(false);
+    await screen.findByRole("heading", { level: 1, name: "Check your email" });
+    const registration = api.calls.find(c => c.path === "/auth/web/register");
+    expect(registration?.credentials).toBe("include");
+    expect(registration?.authorization).toBeNull();
     expect(storageWrites).toEqual([]);
   });
 
   test("the verification link's token is read from the FRAGMENT, posted once, and removed from the address", async () => {
-    api.on("POST /auth/email-verification/confirm", { status: 204 });
+    api.on("POST /auth/email-verification/confirm", { status: 200, body: { companyRegistered: false } });
     const { router } = renderRoute(`${PATHS.verifyEmail}#token=abc123_-XYZ`);
-    await screen.findByText("Your email address is confirmed.");
+    await screen.findByRole("heading", { level: 1, name: "Your email address is confirmed" });
     const confirms = api.calls.filter(c => c.path === "/auth/email-verification/confirm");
     expect(confirms).toHaveLength(1);
     expect(confirms[0]?.body).toEqual({ token: "abc123_-XYZ" });
