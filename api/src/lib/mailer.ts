@@ -50,6 +50,29 @@ function sendGridMailer(apiKey: string, from: string): Mailer {
 /** Development only: `api/.mail-outbox/<time>-<id>.json`. */
 const OUTBOX_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "../../.mail-outbox");
 
+/**
+ * The mailer, and — ONLY when it is the development outbox — the directory it
+ * writes to. `outbox` is what makes the development email link route exist
+ * (`routes/devEmail.ts`): it is a string in exactly one case, development
+ * without a provider key, and null in production, in test and in development
+ * sending real email. A production process can never get one: the schema
+ * refuses to boot production without a key (F-07), and with a key the
+ * provider is chosen.
+ */
+export interface MailTransport {
+  mailer: Mailer;
+  outbox: string | null;
+}
+
+export function mailTransportFor(
+  env: { SENDGRID_API_KEY: string; MAIL_FROM: string; NODE_ENV: NodeEnv },
+  outboxDirectory: string = OUTBOX_DIRECTORY,
+): MailTransport {
+  if (env.SENDGRID_API_KEY.trim() !== "") return { mailer: sendGridMailer(env.SENDGRID_API_KEY.trim(), env.MAIL_FROM), outbox: null };
+  if (env.NODE_ENV === "development") return { mailer: directoryMailer(outboxDirectory), outbox: outboxDirectory };
+  return { mailer: unconfiguredMailer(), outbox: null };
+}
+
 function directoryMailer(directory: string): Mailer {
   return {
     async send(message) {
@@ -68,7 +91,5 @@ function unconfiguredMailer(): Mailer {
 }
 
 export function mailerFor(env: { SENDGRID_API_KEY: string; MAIL_FROM: string; NODE_ENV: NodeEnv }): Mailer {
-  if (env.SENDGRID_API_KEY.trim() !== "") return sendGridMailer(env.SENDGRID_API_KEY.trim(), env.MAIL_FROM);
-  if (env.NODE_ENV === "development") return directoryMailer(OUTBOX_DIRECTORY);
-  return unconfiguredMailer();
+  return mailTransportFor(env).mailer;
 }

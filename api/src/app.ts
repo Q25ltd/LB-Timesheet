@@ -15,7 +15,8 @@ import { registerShiftRoutes } from "./routes/shifts.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerWebAuthRoutes, WEB_AUTH_PREFIX } from "./routes/webAuth.js";
 import { refreshCookiePolicy } from "./lib/refreshCookie.js";
-import { mailerFor, type Mailer } from "./lib/mailer.js";
+import { mailTransportFor, type Mailer } from "./lib/mailer.js";
+import { registerDevEmailRoutes } from "./routes/devEmail.js";
 import { backgroundWork } from "./lib/backgroundWork.js";
 import { accountTokenRepository, type AccountTokenDatabase } from "./repositories/accountTokenRepository.js";
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
@@ -47,10 +48,16 @@ export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase 
 /**
  * What a caller may supply instead of the environment's choice. Only tests
  * use it — to read the account emails the app sends — and production passes
- * nothing, so its mailer is always `mailerFor(env)`.
+ * nothing, so its mailer is always `mailTransportFor(env)`'s.
  */
 export interface AppOptions {
   mailer?: Mailer;
+  /**
+   * Where the development outbox writes, instead of `api/.mail-outbox/` —
+   * tests only, so a development-mode test never writes into the developer's
+   * own outbox. Has no effect unless the transport IS the outbox.
+   */
+  outboxDirectory?: string;
 }
 
 export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): Promise<FastifyInstance> {
@@ -64,8 +71,12 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   const work = backgroundWork(app.log);
   app.addHook("onClose", async () => { await work.settled(); });
   const HOUR_MS = 60 * 60 * 1000;
+  // An injected mailer (tests) is never the development outbox.
+  const transport = options.mailer === undefined
+    ? mailTransportFor(env, options.outboxDirectory)
+    : { mailer: options.mailer, outbox: null };
   const mail = {
-    mailer:    options.mailer ?? mailerFor(env),
+    mailer:    transport.mailer,
     webAppUrl: webAppUrl(env),
     log:       app.log,
     throttles: {
@@ -210,6 +221,11 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // Email-ownership verification (B4): identity-posture resend, public
   // confirm. The token, not a header, authenticates the confirm.
   registerEmailVerificationRoutes(app, identityRepository(prisma), tokens, mail, limits);
+
+  // DEVELOPMENT ONLY: the link the development outbox received, for the
+  // account it was sent to. Registered only when the outbox IS the transport
+  // (development, no provider key) — in production the route does not exist.
+  if (transport.outbox !== null) registerDevEmailRoutes(app, identityRepository(prisma), tokens, transport.outbox);
 
   // Password recovery and change (B7). Reset revokes every session; change
   // revokes every session but the caller's.

@@ -73,6 +73,9 @@ export interface AccountTokenDatabase {
       update: { tokenHash: string; issuedAt: Date; expiresAt: Date; consumedAt: null };
     }): Promise<{ id: string }>;
     findUnique(args: { where: { tokenHash: string } }): Promise<AccountTokenRow | null>;
+    findFirst(args: {
+      where: { userId: string; purpose: AccountTokenPurpose; consumedAt: null; expiresAt: { gt: Date } };
+    }): Promise<{ tokenHash: string } | null>;
   };
   $transaction<T>(fn: (tx: AccountTokenTransaction) => Promise<T>): Promise<T>;
 }
@@ -98,6 +101,16 @@ export function accountTokenRepository(db: AccountTokenDatabase) {
         create: token,
         update: { tokenHash: token.tokenHash, issuedAt: token.issuedAt, expiresAt: token.expiresAt, consumedAt: null },
       });
+    },
+
+    /**
+     * The digest of the account's LIVE token of `purpose` — unconsumed and
+     * unexpired — or null. Only the development email link reads it, to
+     * recognise the account's own current link in the development outbox.
+     */
+    async liveTokenHash(userId: string, purpose: AccountTokenPurpose, now: Date): Promise<string | null> {
+      const row = await db.accountToken.findFirst({ where: { userId, purpose, consumedAt: null, expiresAt: { gt: now } } });
+      return row === null ? null : row.tokenHash;
     },
 
     /**

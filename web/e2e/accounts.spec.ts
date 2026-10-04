@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { linkSentTo } from "./mailbox";
+import { resetLinkSentTo } from "./mailbox";
 
 /**
  * The company web authentication flows, end to end, in a real browser
@@ -10,9 +10,11 @@ import { linkSentTo } from "./mailbox";
  * finished.
  *
  * Companies register through the REAL page (D51): Register your company →
- * Check your email → the link from the development outbox (the API writes
- * every message to `api/.mail-outbox/`; no provider is involved) → Your
- * company is registered → sign in.
+ * Check your email → "Open verification link" in its Development email
+ * section — the exact link the development outbox's message contains (the
+ * API writes every message to `api/.mail-outbox/`; no provider is involved)
+ * → Your company is registered → sign in. This suite reads the outbox
+ * directly only for password-reset links, which have no such helper.
  *
  * Registrations per run stay within the API's 5-per-hour-per-IP limit (D50):
  * every browser here shares 127.0.0.1.
@@ -40,10 +42,17 @@ async function registerThroughThePage(page: Page, email: string, companyName: st
   await expect(page.getByRole("heading", { level: 1, name: "Check your email", exact: true })).toBeVisible();
 }
 
+/** The verification link, as Check your email's development section offers it. */
+async function developmentLink(page: Page): Promise<string> {
+  const open = page.getByRole("region", { name: "Development email" }).getByRole("link", { name: "Open verification link", exact: true });
+  await expect(open).toHaveAttribute("href", /^http:\/\/localhost:4175\/verify-email#token=[A-Za-z0-9_-]+$/);
+  return String(await open.getAttribute("href"));
+}
+
 /** Register, then complete it with the emailed link — the company exists. */
 async function registeredCompany(page: Page, email: string, companyName: string): Promise<void> {
   await registerThroughThePage(page, email, companyName);
-  await page.goto(await linkSentTo(email, "verify-email"));
+  await page.getByRole("link", { name: "Open verification link", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your company is registered", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Continue", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your account", exact: true })).toBeVisible();
@@ -85,10 +94,11 @@ test("a company registers, confirms its email, reaches its company, signs out an
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Check your email", exact: true })).toBeVisible();
 
-  // The emailed link, opened in this browser: the company is created, the
-  // token consumed and removed from the address bar.
-  const link = await linkSentTo(email, "verify-email");
-  await page.goto(link);
+  // The emailed link, opened in this browser from Check your email's
+  // development section: the company is created, the token consumed and
+  // removed from the address bar.
+  const link = await developmentLink(page);
+  await page.getByRole("link", { name: "Open verification link", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your company is registered", exact: true })).toBeVisible();
   expect(page.url()).toBe(`${WEB}/verify-email`);
   await page.getByRole("link", { name: "Continue", exact: true }).click();
@@ -127,16 +137,21 @@ test("a pending registration signs in to Check your email, and a new link replac
   const other = await elsewhere.newPage();
   await signIn(other, email, PASSWORD);
   await expect(other.getByRole("heading", { level: 1, name: "Check your email", exact: true })).toBeVisible();
+  const firstLink = await developmentLink(other);
   await other.getByRole("button", { name: "Send a new link" }).click();
   await expect(other.getByText(`We have sent a new link to ${email}.`, { exact: true })).toBeVisible();
+
+  // The page now offers the NEW link, never the superseded one.
+  await expect(other.getByRole("link", { name: "Open verification link", exact: true })).not.toHaveAttribute("href", firstLink);
+  const secondLink = await developmentLink(other);
 
   // The first link was superseded by the second. Each opened as an email
   // client opens one: in a tab of its own.
   const first = await elsewhere.newPage();
-  await first.goto(await linkSentTo(email, "verify-email", 0));
+  await first.goto(firstLink);
   await expect(first.getByRole("heading", { level: 1, name: "This link has expired or was already used", exact: true })).toBeVisible();
   const second = await elsewhere.newPage();
-  await second.goto(await linkSentTo(email, "verify-email", 1));
+  await second.goto(secondLink);
   await expect(second.getByRole("heading", { level: 1, name: "Your company is registered", exact: true })).toBeVisible();
   await elsewhere.close();
 });
@@ -151,7 +166,7 @@ test("a password reset in another browser signs this one out; the old password s
   await other.getByLabel("Email").fill(email);
   await other.getByRole("button", { name: "Send reset link" }).click();
   await expect(other.getByText("If that address has an account, a reset link is on its way.", { exact: false })).toBeVisible();
-  await other.goto(await linkSentTo(email, "reset-password"));
+  await other.goto(await resetLinkSentTo(email));
   await other.getByLabel("New password", { exact: true }).fill("a-brand-new-passphrase");
   await other.getByLabel("Repeat new password").fill("a-brand-new-passphrase");
   await other.getByRole("button", { name: "Save new password" }).click();

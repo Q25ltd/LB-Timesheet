@@ -3,6 +3,7 @@ import { apiRequest, type ApiResult } from "./http";
 import {
   parseAccount,
   parseCompanySelection,
+  parseDevelopmentLink,
   parseIdentityToken,
   parseNoContent,
   parseSignedIn,
@@ -83,6 +84,14 @@ export interface AuthApi {
    * "check your email" state; no company exists until the email is confirmed.
    */
   registerCompany(input: CompanyRegistration): Promise<Outcome>;
+  /**
+   * DEVELOPMENT ONLY: the verification link the development outbox received
+   * for this account — the one its email contains — or null. In a production
+   * build this is always null and asks nothing: the API has no such route
+   * there, and this code is compiled out. A stable function (not a method),
+   * so a page can depend on it alone and fetch only when it means to.
+   */
+  developmentVerificationLink: () => Promise<string | null>;
   selectCompany(membershipId: string): Promise<Outcome>;
   changePassword(currentPassword: string, newPassword: string): Promise<Outcome>;
 }
@@ -266,9 +275,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.kind === "ok" ? { ok: true } : { ok: false, failure: failureOf(result) };
   }, [withIdentity]);
 
+  const developmentVerificationLink = useCallback<AuthApi["developmentVerificationLink"]>(async () => {
+    if (!import.meta.env.DEV) return null;
+    const result = await withIdentity(token => apiRequest("/dev/email-verification-link", { method: "GET", token }, parseDevelopmentLink));
+    return result.kind === "ok" ? result.value : null;
+  }, [withIdentity]);
+
   const api = useMemo<AuthApi>(() => ({
-    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, selectCompany, changePassword,
-  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, selectCompany, changePassword]);
+    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword,
+  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

@@ -119,6 +119,7 @@ function fixtures(options: { active?: boolean } = {}) {
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),
+      findFirst:  () => Promise.resolve(null),
     },
     $transaction: () => Promise.reject(new Error("$transaction must not be reached by a refused request")),
   };

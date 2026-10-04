@@ -6,6 +6,7 @@ import { Field, FormMessage } from "../../components/Field";
 import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
 import { AuthPanel } from "./AuthPanel";
+import { DevelopmentEmail } from "./DevelopmentEmail";
 import { failureText } from "./failureText";
 
 type Message = { tone: "error" | "success"; text: string } | null;
@@ -27,6 +28,8 @@ export function AccountPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const [verifyMessage, setVerifyMessage] = useState<Message>(null);
+  // Moves after each resend, so the development helper shows the NEW link.
+  const [linkRevision, setLinkRevision] = useState(0);
   const [selectMessage, setSelectMessage] = useState<Message>(null);
   const [passwords, setPasswords] = useState({ current: "", next: "" });
   const [passwordMessage, setPasswordMessage] = useState<Message>(null);
@@ -39,6 +42,7 @@ export function AccountPage() {
     setBusy("verify");
     const outcome = await auth.resendVerification();
     setBusy(null);
+    if (outcome.ok) setLinkRevision(revision => revision + 1);
     setVerifyMessage(outcome.ok
       ? { tone: "success", text: `We have sent a new link to ${account.user.email}.` }
       : { tone: "error", text: failureText(outcome.failure) });
@@ -96,11 +100,7 @@ export function AccountPage() {
           <p className="check-email__line">
             Open the link we sent to that address. It works once, and for 24 hours. Your company is set up the moment you open it.
           </p>
-          {import.meta.env.DEV ? (
-            <p className="check-email__dev">
-              Development: messages are not emailed — they are saved as files in <code>api/.mail-outbox</code>.
-            </p>
-          ) : null}
+          {import.meta.env.DEV ? <DevelopmentEmail revision={linkRevision} /> : null}
           {verifyMessage === null ? null : <FormMessage tone={verifyMessage.tone}>{verifyMessage.text}</FormMessage>}
           <button className="button button--secondary button--large check-email__resend" type="button" disabled={busy === "verify"} onClick={() => void resend()}>
             {busy === "verify" ? "Sending…" : "Send a new link"}

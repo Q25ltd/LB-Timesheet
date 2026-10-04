@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PATHS } from "../../paths";
 import { account, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../../test/fakeApi";
 import { renderRoute } from "../../test/renderRoute";
@@ -22,6 +22,10 @@ let api: FakeApi;
 
 beforeEach(() => {
   api = installFakeApi();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 function signedIn(overrides: Parameters<typeof account>[0]) {
@@ -72,6 +76,68 @@ describe("a pending company registration: Check your email", () => {
     renderRoute(PATHS.account);
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     await screen.findByText("You have signed out.");
+  });
+});
+
+describe("in DEVELOPMENT: the outbox's link, on the page", () => {
+  const firstLink = () => `${window.location.origin}/verify-email#token=dev_first_token`;
+  const secondLink = () => `${window.location.origin}/verify-email#token=dev_second_token`;
+
+  test("Check your email hands over the EXACT link the outbox received, asked for as THIS account", async () => {
+    signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
+    api.on("GET /dev/email-verification-link", { status: 200, body: { link: firstLink() } });
+    renderRoute(PATHS.account);
+    const region = await screen.findByRole("region", { name: "Development email" });
+    const open = await within(region).findByRole("link", { name: "Open verification link" });
+    expect(open.getAttribute("href")).toBe(firstLink());
+    const asked = api.calls.find(c => c.path === "/dev/email-verification-link");
+    expect(asked?.authorization).toBe("Bearer header.identity.sig");
+    expect(asked?.credentials).toBe("omit");
+  });
+
+  test("after Send a new link, the NEW link replaces the old one on the page", async () => {
+    signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
+    api.on("GET /dev/email-verification-link", { status: 200, body: { link: firstLink() } });
+    api.on("POST /auth/email-verification", { status: 204 });
+    renderRoute(PATHS.account);
+    await screen.findByRole("link", { name: "Open verification link" });
+
+    api.on("GET /dev/email-verification-link", { status: 200, body: { link: secondLink() } });
+    fireEvent.click(screen.getByRole("button", { name: "Send a new link" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Open verification link" }).getAttribute("href")).toBe(secondLink()));
+    expect(main().innerHTML).not.toContain("dev_first_token");
+    expect(api.calls.filter(c => c.path === "/dev/email-verification-link"), "once on arrival, once after the resend").toHaveLength(2);
+  });
+
+  test("with no message in the outbox, it says so and points at Send a new link", async () => {
+    signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
+    api.on("GET /dev/email-verification-link", { status: 404, body: { error: "No verification email in the development outbox", code: "NOT_FOUND" } });
+    renderRoute(PATHS.account);
+    const region = await screen.findByRole("region", { name: "Development email" });
+    expect(await within(region).findByText(/no verification email .*send a new link/i)).toBeTruthy();
+    expect(within(region).queryByRole("link", { name: "Open verification link" })).toBeNull();
+  });
+
+  test("a link that is not this site's verification page is never offered", async () => {
+    signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
+    api.on("GET /dev/email-verification-link", { status: 200, body: { link: "https://elsewhere.example.com/verify-email#token=x" } });
+    renderRoute(PATHS.account);
+    await screen.findByRole("region", { name: "Development email" });
+    await waitFor(() => expect(api.calls.some(c => c.path === "/dev/email-verification-link")).toBe(true));
+    expect(screen.queryByRole("link", { name: "Open verification link" })).toBeNull();
+  });
+});
+
+describe("in a PRODUCTION build", () => {
+  test("Check your email neither asks for nor shows any development email", async () => {
+    vi.stubEnv("DEV", false);
+    signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "Check your email" });
+    expect(screen.queryByRole("region", { name: "Development email" })).toBeNull();
+    expect(main().textContent).not.toMatch(/development|mail-outbox/i);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(api.calls.some(c => c.path.startsWith("/dev/"))).toBe(false);
   });
 });
 

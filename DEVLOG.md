@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-10-04 — Local company verification: the outbox link on the page
+
+**Why.** Locally no email is delivered — the API writes each message to
+`api/.mail-outbox/` — so finishing a company registration meant digging a
+token out of a JSON file. Verification stays mandatory; only reaching the
+link was the problem.
+
+**Built.** In development only, "Check your email" has a **Development
+email** section with **Open verification link**: the exact link the outbox
+message carries, from `GET /dev/email-verification-link` (identity token).
+The API returns only the message whose token digest matches the account's
+live verification token, and the page fetches it again after Send a new
+link, so the old link is never offered. Opening it is the normal `confirm`.
+The route is registered only when the transport is the development outbox
+(`mailTransportFor`), so production — which always has a provider key — has
+no such route; the web code sits behind `import.meta.env.DEV` and is absent
+from a production build (checked by grepping the built bundle). Playwright
+now takes verification links from the page; it reads the outbox only for
+password-reset links.
+
+**Proven.** RED first: 5 DB tests (exact link = outbox = stored digest,
+nothing created before opening; confirmation completes and the link is then
+gone; resend → new link, old refused; isolation from another company and
+the same-email driver; anonymous 401, empty outbox 404), a production-mode
+unit test (route not registered, 404, no token; outbox only for development
+without a key), 5 web tests (exact link and identity bearer; new link after
+resend; 404 message; foreign link never offered; production build shows and
+asks for nothing). Mutations killed: route always registered, digest match
+removed, consumed tokens handed out, DEV guard removed, origin check
+removed, no refetch after resend.
+
+---
+
 ## 2026-10-04 — Company registration completed end to end (D51, D53)
 
 **Built.** `POST /auth/web/register` now registers a COMPANY: one transaction

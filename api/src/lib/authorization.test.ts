@@ -286,7 +286,7 @@ interface IdentityReads {
   };
   // Company registration's (D51). No case here registers a company.
   pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
-  accountToken: { upsert(): Promise<never>; findUnique(): Promise<null> };
+  accountToken: { upsert(): Promise<never>; findUnique(): Promise<null>; findFirst(): Promise<null> };
   $transaction(): Promise<never>;
 }
 
@@ -353,6 +353,7 @@ function activeIdentity(): IdentityReads {
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),
+      findFirst:  () => Promise.resolve(null),
     },
     $transaction: () => Promise.reject(new Error("$transaction is not part of this test")),
   };

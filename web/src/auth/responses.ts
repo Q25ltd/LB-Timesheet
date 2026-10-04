@@ -135,6 +135,11 @@ export function parseCompanySelection(value: unknown): CompanySelection | null {
   return tenantToken === null || parsed === null ? null : { tenantToken, membership: parsed };
 }
 
+/** DEVELOPMENT ONLY: the outbox's verification link (`GET /dev/email-verification-link`). */
+export function parseDevelopmentLink(value: unknown): string | null {
+  return isRecord(value) ? text(value, "link") : null;
+}
+
 /** The `code` of the API's one error envelope, or null. */
 export function parseErrorCode(value: unknown): string | null {
   return isRecord(value) ? text(value, "code") : null;
