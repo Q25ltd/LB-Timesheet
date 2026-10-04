@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-10-04 — Company-web authorization contract (D54, O11 refined)
+
+**Audit.** Roles are `driver | admin` (an enum). The database pairs them
+with account kinds: a driver account's memberships are always `driver`, a
+company account's never are (CHECK, D51); the only uniqueness is one
+membership per company per account, so several admins already fit. Tenant
+tokens carry no role — `requireAuth` reads the membership row on every
+request and matches it to the token's company. The one role check in the
+code was Start Shift's (`driver` only). What was missing: any gate for
+company-side work. `authorizeTenant` accepts any ACTIVE membership, so a
+driver's tenant token would have passed it on a future Drivers route.
+
+**Built.** `authorizeCompanyAdmin` — `authorizeTenant` plus `role ===
+"admin"` — the one gate future company-side routes must use; no route uses
+it yet because none exists. The web workspace now presents only `admin`
+memberships as a company's workspace. D54 records the decision; O11 stays
+open for further users, roles and permissions; AUTH.md gains the gate.
+
+**Proven.** 8 DB tests driving a test-only probe with real accounts and
+tokens, 2 unit, 2 web — all written RED; mutations (any membership as admin,
+trusted role claim, token company over row, skipped active check, first
+membership without admin, a temporary one-admin-per-company index on the
+scratch database, the web filter) all caught. The temporary index was
+dropped and confirmed gone.
+
+**Corrected.** STATUS still said a company's creator reaches a company
+through `POST /companies`, which was removed with company registration.
+
+---
+
 ## 2026-10-04 — Company workspace: the shell and Home
 
 **Built.** The company web application's first screen. `/company` is now the

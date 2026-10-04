@@ -483,6 +483,27 @@ Denied:
 - starting a new shift
 - everything else
 
+### Company-web authority (D54)
+
+Tenant authority answers "may this membership act in its company at all?" A
+driver's membership is tenant authority too — it starts the driver's shifts.
+Company-side operations need the narrower answer, and get it from ONE gate:
+
+```
+AuthContext (requireAuth — membership row loaded on THIS request)
+ ↓ authorizeTenant        → membership not active   → 403
+ ↓ role === "admin"       → anything else           → 403   (role from the ROW)
+ ↓
+TenantContext for the administrator's own company
+```
+
+`authorizeCompanyAdmin(auth)` in `lib/authorization.ts`. Every future
+company-side route — drivers, submitted timesheets, PDFs, settings — calls it;
+none checks `role` itself. Tokens carry no role; a deactivated or deleted
+membership loses authority on the next request (403 / 401). A driver account
+never holds an `admin` membership and a company account never a `driver` one
+(database CHECK, D51), so a driver relationship can never pass this gate.
+
 ### Client-supplied tenant identifiers
 
 A `companyId`, `membershipId` or `userId` arriving in a request body, query or

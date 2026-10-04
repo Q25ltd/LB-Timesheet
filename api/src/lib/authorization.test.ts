@@ -398,3 +398,43 @@ test("5. the authorized tenant authority is scoped to the authenticated identity
     membershipId: MEMBERSHIP_ID,
   }, "tenant authority must come from the persisted, authenticated identity in request.auth — never from anything the caller sent");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. COMPANY-WEB authority (O11, V1): an ACTIVE membership whose ROLE is admin
+// ─────────────────────────────────────────────────────────────────────────────
+// `authorizeTenant` answers "may this membership act in its company at all?"
+// A driver's membership is active tenant authority too — that is how the phone
+// starts a shift. Company-side operations (drivers, timesheets, settings) need
+// the narrower answer, from ONE gate, so no route writes its own role check.
+test("7. company-admin authority: an active ADMIN membership is authorized, with exactly its own company, user and membership", async () => {
+  const { authorizeCompanyAdmin } = await authorization();
+
+  const ctx = authorizeCompanyAdmin(authenticatedAs("active", "admin"));
+
+  assert.ok(ctx instanceof TenantContext, "the same nominal tenant authority repositories accept");
+  assert.equal(ctx.companyId, COMPANY_ID);
+  assert.equal(ctx.userId, USER_ID);
+  assert.equal(ctx.membershipId, MEMBERSHIP_ID);
+});
+
+test("8. company-admin authority is refused to an active DRIVER membership and to an INACTIVE admin — with the one generic 403", async () => {
+  const { authorizeCompanyAdmin, authorizeTenant } = await authorization();
+
+  // The driver case is the one that matters: ordinary tenant authority, yes —
+  // company-web authority, never.
+  assert.ok(authorizeTenant(authenticatedAs("active", "driver")) instanceof TenantContext, "positive control: a driver IS ordinary tenant authority");
+  for (const auth of [authenticatedAs("active", "driver"), authenticatedAs("inactive", "admin"), authenticatedAs("inactive", "driver")]) {
+    let thrown: unknown;
+    try {
+      authorizeCompanyAdmin(auth);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof AppError, `${auth.role}/${auth.membershipStatus} must be refused`);
+    assert.equal(thrown.statusCode, 403);
+    assert.equal(thrown.code, "FORBIDDEN");
+    assert.equal(thrown.message, "Not allowed", "identical to every other authorization refusal — it never says why");
+    assert.equal(thrown.details, undefined);
+  }
+  assert.equal(authorizeCompanyAdmin.length, 1, "unary, like authorizeTenant: no channel for a role, company or bypass");
+});

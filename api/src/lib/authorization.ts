@@ -77,3 +77,26 @@ export function authorizeTenant(auth: AuthContext): TenantContext {
     membershipId: auth.membershipId,
   });
 }
+
+/**
+ * COMPANY-WEB authority (O11, V1 — owner decision 2026-10-04): the one gate
+ * every company-side operation uses — the company's drivers, its submitted
+ * timesheets, its settings — so no route writes its own `role` check.
+ *
+ *   an active membership (authorizeTenant)  AND  role === admin
+ *
+ * The role is the MEMBERSHIP ROW's, loaded by requireAuth on this request; a
+ * token carries none, and nothing a client sends can supply one. A driver's
+ * membership is ordinary tenant authority — it starts the driver's shifts —
+ * and is refused here: a driver relationship never makes a company-web user.
+ * The comparison is `!== "admin"`, so any role added later is refused until a
+ * decision says otherwise. The refusal is the same generic 403 as every other.
+ *
+ * The context it returns is the admin's own company and no other: the
+ * membership was matched to the token's company by requireAuth.
+ */
+export function authorizeCompanyAdmin(auth: AuthContext): TenantContext {
+  const ctx = authorizeTenant(auth);
+  if (auth.role !== "admin") throw forbidden();
+  return ctx;
+}

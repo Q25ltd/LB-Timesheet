@@ -111,6 +111,33 @@ describe("who reaches Home", () => {
     expect(api.calls.some(c => c.path === "/auth/switch-company")).toBe(false);
   });
 
+  test("7. only an ADMINISTRATOR membership opens the company workspace — a driver relationship never does", async () => {
+    // The database never gives a company account a `driver` membership (D51),
+    // and the API refuses one company-side authority; this is the browser not
+    // presenting one as a workspace either.
+    const DRIVER_MEMBERSHIP = { ...MEMBERSHIP, role: "driver" };
+    api.on("POST /auth/web/refresh", { status: 200, body: { identityToken: "header.identity.sig" } });
+    api.on("GET /auth/me", { status: 200, body: account({ memberships: [DRIVER_MEMBERSHIP] }) });
+    api.on("POST /auth/switch-company", { status: 200, body: { tenantToken: TENANT, membership: DRIVER_MEMBERSHIP } });
+    const { router } = renderRoute(PATHS.company);
+    await screen.findByRole("heading", { level: 1, name: "Your account" });
+    expect(router.state.location.pathname).toBe(PATHS.account);
+    expect(api.calls.some(c => c.path === "/auth/switch-company")).toBe(false);
+    expect(screen.queryByRole("navigation", { name: "Company" })).toBeNull();
+  });
+
+  test("7b. a selected company the server reports as a driver relationship is not shown as the workspace", async () => {
+    const DRIVER_MEMBERSHIP = { ...MEMBERSHIP, role: "driver" };
+    api.on("POST /auth/web/login", { status: 200, body: { user: account().user, identityToken: "header.identity.sig", tenantToken: TENANT, memberships: [DRIVER_MEMBERSHIP] } });
+    api.on("GET /auth/me", { status: 200, body: account({ memberships: [DRIVER_MEMBERSHIP] }) });
+    renderRoute(PATHS.login);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery-staple" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByRole("heading", { level: 1, name: "Your account" });
+    expect(screen.queryByRole("navigation", { name: "Company" })).toBeNull();
+  });
+
   test("12. the server refusing the membership (revoked, or never this account's) shows no company at all", async () => {
     api.on("POST /auth/web/refresh", { status: 200, body: { identityToken: "header.identity.sig" } });
     api.on("GET /auth/me", { status: 200, body: account({ memberships: [MEMBERSHIP] }) });

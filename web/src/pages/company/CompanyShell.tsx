@@ -29,7 +29,7 @@ export function CompanyShell() {
   const mainRef = useRef<HTMLElement>(null);
   useNavigationFocus(mainRef);
   const signedIn = auth.state.status === "signed-in" ? auth.state : null;
-  const inCompany = signedIn !== null && signedIn.company !== null;
+  const inCompany = signedIn !== null && isAdministrator(signedIn.company?.membership);
 
   return (
     <div className="workspace">
@@ -85,6 +85,16 @@ export function CompanyShell() {
 }
 
 /**
+ * Company-web authority is the ADMINISTRATOR's (O11, V1): only an `admin`
+ * membership is shown as the company's workspace. Presentation, mirroring the
+ * API — which refuses anything else at `authorizeCompanyAdmin` — never the
+ * guarantee itself.
+ */
+function isAdministrator(membership: { role: string } | undefined): boolean {
+  return membership?.role === "admin";
+}
+
+/**
  * The company pages need the TENANT context — a company the server confirmed.
  *
  * A reload forgets it (tokens live in memory only, D45). With exactly ONE
@@ -99,10 +109,12 @@ function RequireCompany({ children }: { children: ReactNode }) {
   const [failed, setFailed] = useState(false);
   const asked = useRef(false);
   const signedIn = auth.state.status === "signed-in" ? auth.state : null;
-  const company = signedIn?.company ?? null;
-  // A registration still pending has no membership yet (D51), so it, too,
-  // goes to the account page — which shows Check your email.
-  const only = signedIn !== null && signedIn.account.memberships.length === 1 ? signedIn.account.memberships[0] : undefined;
+  const company = signedIn !== null && isAdministrator(signedIn.company?.membership) ? signedIn.company : null;
+  // Only ADMINISTRATOR memberships are the company's workspace (O11). A
+  // registration still pending has no membership yet (D51), so it, too, goes
+  // to the account page — which shows Check your email.
+  const administered = signedIn === null ? [] : signedIn.account.memberships.filter(isAdministrator);
+  const only = administered.length === 1 ? administered[0] : undefined;
 
   useEffect(() => {
     if (company !== null || only === undefined || asked.current) return;

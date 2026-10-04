@@ -357,7 +357,10 @@ empty segment. Vehicle type belongs to the asset flow, not to starting work.
 and no RBAC.~~ *Superseded 2026-10-01 by D51:* an `admin` membership now
 belongs to a company account, and company accounts never start shifts — only
 a `driver` membership starts one (generic 403 otherwise). Admin confers no authority over another user or membership —
-ownership comes from `TenantContext` in every case.
+ownership comes from `TenantContext` in every case. *(2026-10-04: still true of
+everything built. D54 records what company-side features WILL grant an admin
+— its own company's driver relationships, submitted timesheets and settings —
+each through `authorizeCompanyAdmin`, as each feature is designed.)*
 
 **One open shift, and the refusal says nothing.** A genuinely new start while
 that user already has any open shift is `409 { code: "SHIFT_ALREADY_OPEN" }`,
@@ -2014,6 +2017,14 @@ browser client exists. **Must be decided before browser authentication is
 implemented.**
 
 ### O11 — Company authorization model
+
+*Refined 2026-10-04 by **D54**: the V1 company-web rule is decided (active
+`admin` membership, one gate). Still open — and to be decided with the
+features that need them: adding further company users or administrators
+(API/UI), any role other than `admin` on the company side, granular
+permissions, changing or removing a role, and ownership transfer if ever
+needed. The original text follows.*
+
 The company web application (D43) needs **explicit server-side authorization
 rules** for company-level capabilities: membership/driver administration,
 company settings, viewing submitted company timesheet snapshots, PDF access,
@@ -2113,3 +2124,44 @@ domain, a language or a country assumption.
   default; the migration refuses to run while any exist rather than invent
   one (none exist; nothing writes them yet).
 
+### D54 — V1 company-web authorization: an active `admin` membership, one gate (2026-10-04)
+
+Owner decision; refines **O11** (which stays open for what is listed there).
+
+- **`admin` is the only company-web role in V1.** An authorized company
+  administrator is: an authenticated **company** account + an **active**
+  `CompanyMembership` read from the database on the request + `role = admin`
+  on that row. The role is never taken from a token (tenant tokens carry
+  none) or from anything a client sends.
+- **The first administrator** is the `admin` membership company registration
+  creates when its email is confirmed (D51). It is simply the first admin —
+  no "owner", "creator" or "superadmin" exists, and nothing makes the first
+  admin permanent.
+- **What an administrator may do, as each feature is built:** use the
+  company's workspace; view its drivers; add/connect drivers and manage the
+  company's driver relationships; view the timesheets submitted TO the
+  company and their generated records/PDFs; manage company settings. All of
+  it for **its own company only**.
+- **One gate.** Every company-side operation is authorized by
+  `authorizeCompanyAdmin(auth)` (`api/src/lib/authorization.ts`): ordinary
+  tenant authority (`authorizeTenant`: active only) AND `role === "admin"`,
+  the same generic 403 otherwise. No route writes its own role check. A role
+  added later is refused until a decision admits it.
+- **A driver is not a company-web user.** A driver relationship is a
+  `driver` membership of a DRIVER account (D51, the database's pairing
+  CHECK). It is tenant authority for the driver's own work — it starts shifts
+  — and is refused company-web authority. It gives the company no access to
+  the driver's account, and the driver none to the company's. Same-email
+  driver and company accounts stay independent (D51); nothing links them.
+- **Isolation.** An administrator of company A has no authority over company
+  B: the membership the token names is matched to the token's company by
+  `requireAuth`, and `switch-company` validates a requested membership
+  against the account. A company-facing read of drivers or timesheets filters
+  by the administrator's company and must never reveal that a driver also
+  works for another company (CLAUDE.md privacy boundary).
+- **Several administrators are allowed by the data model** (the only
+  uniqueness is one membership per company per account). Adding them — API
+  or UI — is NOT built and NOT designed here.
+- **Not decided here:** how a driver connects to a company (the Drivers
+  design), the inactive-membership exceptions for company-side work, and
+  everything O11 still lists.
