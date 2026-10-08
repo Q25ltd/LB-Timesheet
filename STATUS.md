@@ -430,5 +430,5 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 | Database provisioned | ✅ 2026-10-08 — Railway project `LB-Timesheet`, PostgreSQL 18, EU West (Amsterdam), private networking only; all 17 migrations applied |
 | Deployment pipeline | ✅ API: Railway deploys `main` only after the `ci` and `e2e` checks pass (Wait for CI), migrations as the pre-deploy step. Web: Vercel builds `main` from `web/`. See DEPLOYMENT.md |
 | Production email (SES) | 🔲 `MAIL_TRANSPORT=disabled` — the code is ready for the `lb-timesheets` configuration set (D58); no access key, configuration set or SNS topic exists yet (DEPLOYMENT.md §7) |
-| Database backups | 🔲 none — Railway Hobby cannot create backups (DEPLOYMENT.md §6) |
+| Database backups | 🔶 built, not yet live (D59) — the nightly job `ops/backup/` (12 tests, 10 mutations killed; rehearsed end-to-end against PostgreSQL 18 and a restore into a fresh database). Railway Hobby creates no backups itself. Live once the owner creates the age key, the backup access key and the monitor (DEPLOYMENT.md §6.6) |
 | Marketing site menu linking both products | 🔶 the LogisticBay website (separate repo `Q25ltd/LB-Website`) links both products; it is deployed to a temporary Vercel address, not yet at `logisticbay.com` |

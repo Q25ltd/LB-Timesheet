@@ -199,17 +199,108 @@ is what Pro offers. On Hobby, the minimum is the independent daily
 | Point-in-time recovery (PITR) | ~4 weeks, to any moment | bad data at a known time | WAL archived to a Railway bucket; restores into a NEW service; no separate fee (bucket storage + egress); window starts at enabling |
 | Logical dump (`pg_dump`) to storage outside Railway | your choice | **deleting the volume or project** — which wipes every Railway backup | a scheduled job; must be restore-tested |
 
-Daily volume backups alone keep 6 days — short of a 7-day minimum.
-**Recommended minimum:**
+Daily volume backups alone keep 6 days — short of a 7-day minimum — and
+none of the Railway options exists on Hobby. **What runs instead (D59): a
+nightly encrypted `pg_dump` to S3, outside Railway** — the one copy that also
+survives losing the volume or the project.
 
-1. **Enable PITR** before real data — continuous, ~4-week window.
-2. Volume backups **daily + weekly** — 6 days of daily points, 27 days weekly.
-3. Before going public: a **daily `pg_dump` to storage outside the Railway
-   project** (e.g. an S3 bucket in the LogisticBay AWS account, encrypted,
-   lifecycle-expired after 14 days) — the only copy that survives losing the
-   project.
-4. **A restore drill** before real customers: restore into a new service,
-   point a scratch API at it, sign in.
+### 6.1 The nightly backup job
+
+```
+Railway Postgres ──private network──▶ timesheets-backup (cron, 03:00 UTC)
+   pg_dump -Fc as lb_backup (read-only role), 30-minute limit
+   → pg_restore --list: must read back, must hold _prisma_migrations
+   → age-encrypted to the owner's PUBLIC key; plaintext deleted
+   → S3 PutObject, SHA-256 checksum S3 verifies, If-None-Match: *,
+     key pg/YYYY/MM/DD/lb-timesheets-<UTC time>-<random>.dump.age
+   → S3's acknowledged checksum must equal ours
+   → only then the success ping; anything else pings /fail and exits 1
+```
+
+Code: `ops/backup/` — `backup.sh` (the job), `Dockerfile` (PostgreSQL 18
+client, age, AWS CLI; runs as a non-root user; no application code),
+`backup-role.sql`, `restore-check.sh`. Tests: `npm run test:backup`, part of
+`npm run check`. Overlap: Railway skips a cron run while the previous one is
+still running, and the job itself stops after 30 minutes.
+
+### 6.2 The bucket — `lb-timesheets-backups`, eu-west-2
+
+| Setting | Value | Why |
+|---|---|---|
+| Block Public Access | all four on | |
+| Object Ownership | bucket owner enforced (no ACLs) | |
+| Default encryption | SSE-S3 | the content is already age-encrypted; this is the second layer |
+| Versioning | on | Object Lock requires it |
+| Object Lock | **Governance, 14 days default retention** | no version can be deleted or overwritten for 14 days — not by the backup key, not by a stolen admin login without the explicit bypass header |
+| Lifecycle | current versions expire at **15 days** (a delete marker); noncurrent versions are deleted **1 day** after; expired delete markers removed; incomplete uploads aborted after 1 day | AWS: "a locked version of an object cannot be deleted by a S3 Lifecycle expiration policy" — expiry adds a delete marker, and the version itself goes only once its lock has lapsed. Effective retention: 14 days guaranteed, about 16 kept |
+| Bucket policy | deny any request not over TLS; deny `s3:BypassGovernanceRetention` to every principal but the account root | only the root user can shorten a lock |
+
+Compliance mode was not chosen: it cannot be shortened by anyone, including
+for an erasure request (O1 retention is still open).
+
+### 6.3 The backup identity — IAM user `lb-timesheets-backup`
+
+One inline policy: `s3:PutObject` on `arn:aws:s3:::lb-timesheets-backups/pg/*`
+— nothing else. It cannot read, list, delete, change retention, or touch SES
+or any other bucket; a stolen key can add files and nothing more. Its access
+key is created by the owner and pasted only into the backup service.
+
+### 6.4 The database role — `lb_backup`
+
+`ops/backup/backup-role.sql`, run once as the database owner: `LOGIN`, no
+superuser, no role or database creation, at most 2 connections, member of
+PostgreSQL's built-in read-only `pg_read_all_data`, sessions read-only by
+default. Rehearsed against PostgreSQL 18: even after switching read-only off
+and opening a read-write transaction it is refused every INSERT, UPDATE,
+DELETE, CREATE TABLE, DROP TABLE and CREATE ROLE. The backup service has
+THIS role's password — never the application's `DATABASE_URL`.
+
+### 6.5 The service — Railway `timesheets-backup`
+
+In project `LB-Timesheet`, EU West. Source `Q25ltd/LB-Timesheet`, root
+`/ops/backup`, Dockerfile builder, watch path `/ops/backup/**`, cron
+`0 3 * * *` (UTC), restart policy **never**, no public domain, Wait for CI.
+
+| Variable | Value |
+|---|---|
+| `PGHOST` | `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}` (`postgres.railway.internal`) |
+| `PGPORT` | `5432` |
+| `PGDATABASE` | `${{Postgres.PGDATABASE}}` |
+| `PGUSER` | `lb_backup` |
+| `PGPASSWORD` | the `lb_backup` password — generated at role creation, set once, never shown |
+| `AGE_RECIPIENT` | the owner's age PUBLIC key (`age1…`) |
+| `S3_BUCKET` | `lb-timesheets-backups` |
+| `AWS_REGION` | `eu-west-2` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `lb-timesheets-backup`'s key — the owner creates and pastes it |
+| `HEALTHCHECK_URL` | the healthchecks.io ping URL (check: period 1 day, grace 2 hours) |
+
+### 6.6 What only the owner does
+
+1. **The age key pair**, on the owner's own machine (`brew install age`):
+   `age-keygen -o lb-timesheets-backup.agekey`. It prints the PUBLIC key
+   (`age1…`) — that goes into `AGE_RECIPIENT`. The FILE is the private key:
+   keep it in a password manager and one offline copy, never in Git,
+   Railway, chat or email. Without it no backup can ever be read.
+2. **The backup access key**: IAM → Users → `lb-timesheets-backup` →
+   Security credentials → Create access key ("Application running outside
+   AWS"), pasted straight into the two Railway variables.
+3. **healthchecks.io**: a check named `lb-timesheets-backup`, period 1 day,
+   grace 2 hours, email notification; its ping URL into `HEALTHCHECK_URL`.
+
+### 6.7 Restore — and the drill
+
+Monthly, and before real customers:
+
+1. S3 console → `lb-timesheets-backups` → `pg/<date>/` → download the newest
+   `.dump.age` (the owner's own login; the backup key cannot read).
+2. `ops/backup/restore-check.sh <file>.dump.age <path-to>.agekey` — needs
+   Docker and age. It starts a throwaway PostgreSQL 18, streams the
+   decrypted dump into it (no plaintext on disk), and prints the migration
+   history, tables, constraints by kind, indexes, extensions and rows per
+   table, then removes the container. It fails unless every migration is
+   applied and none is unfinished.
+3. A real recovery restores the same way into a NEW Railway Postgres
+   service, then repoints `DATABASE_URL` — never over the live one.
 
 ## 7. Email — Amazon SES
 
@@ -245,7 +336,12 @@ approval at the time:
 6. IAM `lb-timesheets-ses`'s inline policy: also allow
    `arn:aws:ses:us-east-1:<account>:configuration-set/lb-timesheets` —
    `SendEmail` is authorised against the configuration set as well as the
-   identity. The `ses:FromAddress` condition stays.
+   identity. The `ses:FromAddress` condition stays. The IAM policy simulator
+   cannot evaluate configuration-set resources, so the first real send in
+   step 7 is the proof: if it is refused `AccessDenied` on the configuration
+   set, the fix is a SECOND statement allowing that ARN without the
+   condition — the identity statement keeps the sender restriction, and
+   every send must pass both.
 7. Go live: create the access key → set `AWS_ACCESS_KEY_ID`,
    `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-east-1`,
    `SES_CONFIGURATION_SET=lb-timesheets`, then `MAIL_TRANSPORT=ses` →

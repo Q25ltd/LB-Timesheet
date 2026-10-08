@@ -4,6 +4,43 @@
 
 ---
 
+## 2026-10-08 — SES events wired; the nightly encrypted backup (D59)
+
+**SES (owner-approved, us-east-1).** Created: configuration set
+`lb-timesheets` (reputation metrics on; NOT the identity's default — the
+pre-existing default `my-first-configuration-set`, which has no event
+destinations, was left untouched); SNS topic `lb-timesheets-ses-events`,
+whose policy lets only `ses.amazonaws.com` publish, from this account and
+this configuration set; event destination `lb-timesheets-bounces-complaints`
+(BOUNCE, COMPLAINT); `SES_NOTIFICATION_TOPIC_ARN` on `timesheets-api`; the
+HTTPS subscription, which the API confirmed itself after its signature and
+topic checks (SNS shows it Confirmed). The identity has no SNS notification
+topics, so nothing domain-wide changed. IAM `lb-timesheets-ses`: the
+configuration set's ARN added to its one statement, sender condition kept,
+still no access key. Found: the IAM policy simulator cannot evaluate SES v2
+configuration-set resources (it denies even an unconditional allow), so
+whether the sender condition also applies to that resource is proven only by
+the first real send — DEPLOYMENT.md §7 step 7.
+
+**Backups — built and rehearsed, not yet live.** Railway Hobby creates no
+backups, so `ops/backup/` (DEPLOYMENT.md §6, D59): a nightly custom-format
+`pg_dump` as a read-only role, read back, age-encrypted, uploaded with a
+verified SHA-256 checksum to a never-overwritten key in Object-Locked S3,
+and only then a success ping. Written RED first: 12 tests run the real
+script with stand-in tools — success only after a verified upload; a failed
+dump, unreadable dump, failed encryption, failed upload, wrong checksum,
+missing setting, private key as recipient and failed ping each refused —
+and 10 mutations killed. Rehearsed with the real image against PostgreSQL
+18 with all 17 migrations and seeded rows: the stored object is age output
+(no plaintext), and `restore-check.sh` restored it into a fresh PostgreSQL
+18 with the identical migration history, 13 tables, constraints by kind,
+43 indexes, extensions and row counts. The local S3 stand-in does not echo
+`ChecksumSHA256`, and the job — correctly — refused to call that success;
+the acknowledgement is proven on real S3 at the first live run. The backup
+role, rehearsed: refused every write even after switching read-only off.
+
+---
+
 ## 2026-10-08 — Timesheets' own SES configuration set; events only for its own mail (D58)
 
 **Why.** `logisticbay.com` is one SES identity. Identity-level notifications

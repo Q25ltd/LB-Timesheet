@@ -2293,3 +2293,26 @@ of bounces and complaints about ITS mail and nothing else.
   suppresses; a transient bounce does not) are unchanged.
 - **Not decided:** recording sends, deliveries or rejects; reputation
   alarms on the configuration set.
+
+### D59 — Backups: a nightly encrypted pg_dump to locked S3, outside Railway (2026-10-08)
+
+Owner decision. Railway Hobby creates no backups (Pro-only), and every
+Railway backup dies with the volume or project anyway.
+
+- **What:** a Railway cron service, `timesheets-backup`, at 03:00 UTC: a
+  custom-format `pg_dump` over the private network, read back before it is
+  trusted, `age`-encrypted to the owner's public key, uploaded to S3 with a
+  SHA-256 checksum S3 verifies and must acknowledge, to a unique key, never
+  overwriting. Success is reported to a monitor only after all of it; any
+  failure reports failure.
+- **Least privilege at every step:** the job's database role `lb_backup`
+  reads and cannot write; its IAM user `lb-timesheets-backup` can only add
+  objects under `pg/`; the private key that reads a backup exists only with
+  the owner. The service never holds the application's database credentials.
+- **Retention:** S3 Object Lock in GOVERNANCE mode, 14 days, with lifecycle
+  expiry at 15 days (+1 day for the noncurrent version) — at least 14 days,
+  about 16 kept. Only the account root may bypass the lock.
+- **Proven by restoring:** `ops/backup/restore-check.sh`, monthly and before
+  real customers (DEPLOYMENT.md §6.7).
+- **Not decided:** a longer retention tier (weekly/monthly copies) — tied to
+  O1, which is open.

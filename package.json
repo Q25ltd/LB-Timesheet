@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "npm run dev --prefix api",
     "typecheck": "npm run typecheck --prefix api",
+    "typecheck:ops": "api/node_modules/.bin/tsc -p ops/tsconfig.json",
     "test": "npm test --prefix api",
     "check:rules": "npm run check:rules --prefix api",
     "knip": "knip",
-    "check": "npm run generate && npm run typecheck && npm run lint && npm run check:rules && npm run validate:schema && npm run knip && npm test && npm run typecheck:mobile && npm run test:mobile && npm run typecheck:web && npm run test:web && npm run build:web && npm run test:db && npm run build:api && npm run smoke:api",
+    "check": "npm run generate && npm run typecheck && npm run typecheck:ops && npm run lint && npm run check:rules && npm run validate:schema && npm run knip && npm test && npm run typecheck:mobile && npm run test:mobile && npm run typecheck:web && npm run test:web && npm run build:web && npm run test:db && npm run test:backup && npm run build:api && npm run smoke:api",
     "typecheck:mobile": "npm run typecheck --prefix mobile",
     "test:mobile": "npm test --prefix mobile",
     "typecheck:web": "npm run typecheck --prefix web",
@@ -19,6 +20,7 @@
     "lint": "eslint .",
     "validate:schema": "npm run validate --prefix api",
     "test:db": "npm run test:db --prefix api",
+    "test:backup": "node --test ops/backup/backup.test.mjs",
     "test:e2e": "npm run test:e2e --prefix web",
     "generate": "npm run generate --prefix api"
   },

@@ -46,9 +46,19 @@ export default tseslint.config(
   },
 
   {
+    // Operations scripts' tests (ops/backup/) are plain ES modules run with
+    // `node --test`. ops/tsconfig.json type-checks them against Node's types;
+    // the same rules otherwise.
+    files: ["ops/**/*.mjs"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: `${import.meta.dirname}/ops` },
+    },
+  },
+
+  {
     // node:test's test() returns a promise that is not meant to be awaited at
     // the top level. This is the API's design, not a floating-promise bug.
-    files: ["**/*.test.ts"],
+    files: ["**/*.test.ts", "ops/**/*.test.mjs"],
     rules: { "@typescript-eslint/no-floating-promises": "off" },
   },
 
