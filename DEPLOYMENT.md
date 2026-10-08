@@ -17,8 +17,9 @@ LogisticBay Timesheets and LogisticBay TMS share the brand and the
 |---|---|---|
 | Repo | `Q25ltd/LB-Timesheet` | `Q25ltd/LB-TMS` |
 | Railway project | **`LB-Timesheet`** (new) | `LB-TMS` |
-| Vercel project | **new**, e.g. `lb-timesheets-web` | `logisticbay` |
-| Web | `timesheets.logisticbay.com` | `www.logisticbay.com` (apex redirects) |
+| Vercel project | **`lb-timesheets-web`** | `logisticbay` |
+| Railway region | **EU West (Amsterdam)** — `europe-west4-drams3a` | its own |
+| Web | `timesheets.logisticbay.com` | `tms.logisticbay.com` (and `www`, until the brand site takes it) |
 | API | `api.timesheets.logisticbay.com` | `api-production-cdc9.up.railway.app` |
 | Database | its own Railway Postgres | its own |
 | Email | Amazon SES (us-east-1) | SendGrid — its DNS records stay |
@@ -29,17 +30,28 @@ Vercel project, or environment variable. Never point a Timesheets
 
 ## 1. Railway — PostgreSQL
 
-1. Railway project **`LB-Timesheet`** → add **PostgreSQL**. No public
-   networking for it: the API reaches it over Railway's private network.
-2. Backups (section 6) — enable before the first real data.
-3. The migrations create the `citext` extension (`CREATE EXTENSION`); Railway
+1. Railway project **`LB-Timesheet`** (workspace plan: Hobby) → add
+   **PostgreSQL** (the template's image is pinned to major 18 — CI tests the
+   same major). No public networking for it: the template adds no TCP proxy
+   and no `DATABASE_PUBLIC_URL`, and none may be added — the API reaches it at
+   `postgres.railway.internal`.
+2. **Region: EU West (Amsterdam)** for both services. A region change on a
+   service with a volume migrates the volume (Railway backs it up in the old
+   region, copies it, checks it, then mounts it); the database is not
+   recreated and its credentials, being variables, do not change. Expect
+   downtime while it copies. Move Postgres first, then the API, so they share
+   a region.
+3. Backups (section 6) — in place before the first real data.
+4. The migrations create the `citext` extension (`CREATE EXTENSION`); Railway
    Postgres allows it.
 
 ## 2. Railway — the API service
 
-Service from `Q25ltd/LB-Timesheet`, **root directory `api/`**, builder
-Railpack. Settings in the Railway dashboard (Railway's `railway.json`
-config-as-code is deprecated, so none is committed):
+Service **`timesheets-api`** from `Q25ltd/LB-Timesheet`, **root directory
+`api/`**, builder Railpack. No `railway.json` is committed. The settings live
+in the Railway environment config — set in the dashboard, or with
+`railway environment edit` and a JSON patch on stdin (the `--service-config`
+form silently applies nothing); "Wait for CI" is `source.checkSuites: true`:
 
 | Setting | Value | Why |
 |---|---|---|
@@ -52,7 +64,7 @@ config-as-code is deprecated, so none is committed):
 | Restart policy | On failure | a database outage is a 503, not a crash — nothing restarts |
 | Wait for CI | **on** | a commit deploys only after the `ci` and `e2e` checks pass |
 | Watch paths | `api/**` | web or mobile commits do not redeploy the API |
-| Custom domain | `api.timesheets.logisticbay.com` | |
+| Custom domain | `api.timesheets.logisticbay.com`, target port 8080 | plus a generated `timesheets-api-production.up.railway.app` for checks |
 
 ### Environment variables
 
@@ -105,8 +117,14 @@ serves traffic. So every migration must work with the version before it:
 
 ## 3. Vercel — the company portal
 
-New Vercel project (never the TMS's `logisticbay`), from `Q25ltd/LB-Timesheet`,
-**root directory `web/`**. `web/vercel.json` carries the rest:
+Vercel project **`lb-timesheets-web`** (never the TMS's `logisticbay`), from
+`Q25ltd/LB-Timesheet`, production branch `main`, **root directory `web/`**,
+framework Vite, Node 22.x. Vercel's default deployment protection stays on:
+preview and branch URLs need a Vercel login; the production alias
+(`lb-timesheets-web.vercel.app`) and the custom domain do not. Because the
+build calls the production API host, a page on the `.vercel.app` alias cannot
+reach the API (CORS admits only the custom domain) — check the portal on
+`timesheets.logisticbay.com`. `web/vercel.json` carries the rest:
 
 - framework Vite, `npm ci`, `npm run build`, output `dist`
 - every path rewrites to `index.html` — direct visits, refreshes and the
@@ -125,16 +143,21 @@ CORS (exact origins only) — expected.
 
 ## 4. DNS — Wix
 
-Two new records, values given by Vercel and Railway when the domains are
-added; nothing existing is touched (the SendGrid, Google Workspace and SES
-records all stay):
+Three new records, values read from Vercel and Railway when the domains were
+added — never guessed; nothing existing is touched (the SendGrid, Google
+Workspace, SES and TMS records all stay):
 
 | Host | Type | Value |
 |---|---|---|
-| `timesheets` | CNAME | Vercel's target |
-| `api.timesheets` | CNAME | Railway's target (plus any verification TXT Railway asks for) |
+| `timesheets` | CNAME | `c6ab45be568d0a27.vercel-dns-017.com` (Vercel's first-ranked target for this project) |
+| `api.timesheets` | CNAME | `p0t5uy66.up.railway.app` |
+| `_railway-verify.api.timesheets` | TXT | Railway's ownership token (`railway-verify=…`) — required before Railway issues the certificate |
 
-Certificates are issued automatically.
+Certificates are issued automatically (Let's Encrypt); Railway's took about
+nine minutes after the records resolved. A resolver that looked a name up
+before its record existed caches the miss for up to an hour (the zone's SOA
+negative TTL): check from `1.1.1.1` or mobile data, not from a Mac that
+asked early.
 
 ## 5. Verifying the client address (F-15) — first private deploy
 
@@ -160,6 +183,12 @@ curl -s -D - -o /dev/null -H "X-Real-IP: 203.0.113.99" https://api.timesheets.lo
    going public.
 
 ## 6. Backups — Railway Postgres
+
+**On the Hobby plan Railway creates no backups at all.** The Postgres
+Backups tab says creating backups and enabling point-in-time recovery are
+Pro-only; Hobby can only restore backups that already exist. The table below
+is what Pro offers. On Hobby, the minimum is the independent daily
+`pg_dump` in point 3 of the recommendation — before any real data.
 
 | Option | Retention | Protects against | Notes |
 |---|---|---|---|
@@ -188,6 +217,11 @@ without AWS credentials, every send fails and is logged, and the startup log
 says email is disabled. Registration cannot be completed then — expected for
 an infrastructure test.
 
+Prerequisites (STATUS.md says which are met): the `logisticbay.com`
+identity verified in SES us-east-1; the account out of the SES sandbox; IAM
+user `lb-timesheets-ses` with an inline policy allowing `ses:SendEmail` only
+from the three senders, and no access key until go-live.
+
 To go live (owner approval each time): create the access key for
 `lb-timesheets-ses` → set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_REGION=us-east-1`, then `MAIL_TRANSPORT=ses` → redeploy → one test email.
@@ -195,6 +229,17 @@ Bounces and complaints: an SNS topic in us-east-1 → SES identity
 notifications (Bounce, Complaint) for `logisticbay.com` → subscribe
 `https://api.timesheets.logisticbay.com/webhooks/ses` (the API confirms it) →
 set `SES_NOTIFICATION_TOPIC_ARN`.
+
+**Pending owner decision — a Timesheets configuration set instead of identity
+notifications.** Identity notifications fire for every message sent as
+`logisticbay.com`, by any product; the webhook would store another product's
+bounces and suppress its addresses here. The proposal: an SES configuration
+set used by Timesheets alone, its event destination publishing Bounce and
+Complaint to the SNS topic, attached to every send by the mailer, with the
+IAM policy also allowing the configuration set's ARN. It needs a code change
+first — the mailer must pass the configuration set, and the webhook must
+accept the event-publishing format (`eventType`, not `notificationType`).
+Until that lands, do not wire the identity notifications either.
 
 ## 8. The mobile app
 

@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-10-08 — Amsterdam, the company portal, and both custom domains
+
+**Region (owner-approved).** Postgres, then `timesheets-api`, moved from US
+East to EU West (Amsterdam) with Railway's own region change — no service
+deleted or recreated. The same volume migrated (Railway backed it up, copied
+it, then mounted it); Postgres logged "Database directory appears to contain
+a database; Skipping initialization", the password's fingerprint is
+unchanged, and the API's pre-deploy step reported 17 migrations found and
+none pending.
+
+**Backups — a platform limit, not a choice.** The Postgres Backups tab: on
+Hobby, creating backups and point-in-time recovery are Pro-only. Nothing is
+backed up. DEPLOYMENT.md §6 now says so; the independent nightly `pg_dump`
+(encrypted, off Railway) is proposed and awaits approval.
+
+**Portal.** Vercel project `lb-timesheets-web` (root `web/`, Vite, Node
+22.x) builds `main`. Production headers as `web/vercel.json` declares them;
+every route serves the app, so refresh and deep links work.
+
+**Domains (owner-approved Wix records).** `timesheets` CNAME to Vercel,
+`api.timesheets` CNAME to Railway, and Railway's `_railway-verify` TXT —
+values read from Vercel and Railway, nothing existing touched (a before/after
+diff of the existing records is identical). Live: both certificates are
+Let's Encrypt; the portal's session restore reaches the API and a signed-out
+visit to `/company` lands on `/login`; CORS admits only
+`https://timesheets.logisticbay.com` (the TMS, `www`, the `.vercel.app` alias
+and foreign origins are refused, and a foreign Origin on a cookie route gets
+403); the refresh cookie is `__Host-lbts_refresh` — `Secure`, `HttpOnly`,
+`SameSite=Strict`, `Path=/`; the TMS API still refuses the portal's origin.
+
+**Email is still off and onboarding is not public.** SES is prepared but not
+live (STATUS.md, Infrastructure). Found while preparing it: identity-level
+SES notifications would deliver OTHER products' bounces to this webhook, and
+the repository records an event — and suppresses its addresses — even for a
+message this API never sent. A Timesheets configuration set is proposed
+instead (DEPLOYMENT.md §7); it needs the mailer to attach it and the parser
+to accept `eventType`.
+
+---
+
 ## 2026-10-08 — First private Railway deploy; HSTS and nosniff on every API response
 
 **Deployed (owner-approved, Hobby plan):** Railway project `LB-Timesheet`

@@ -133,8 +133,10 @@ unbuilt (`shiftDate` immutability enforcement and Night Out). *Public
 deployment* is blocked by at
 least F-15's live check: the client address is now read from Railway's
 edge-set `X-Real-IP` (`CLIENT_IP_SOURCE=x-real-ip`) and the global limit runs
-before authentication, but the edge's behaviour must be verified on the first
-private deployment before public traffic (DEPLOYMENT.md section 5). F-17 is
+before authentication. On the first private deployment (2026-10-08) the
+live edge passed steps 1–2 of DEPLOYMENT.md section 5 — a forged
+`X-Real-IP` or `X-Forwarded-For` continues the same count and cannot escape a
+429; step 3 (a second network starts its own count) is still to run. F-17 is
 closed (production runs `node dist/server.js`). **Refresh-token rotation is no longer blocked** — F-21 was closed on
 2026-09-11 and rotation is built. **Development itself is not blocked.**
 
@@ -423,8 +425,10 @@ Accepted gaps and deliberate trade-offs — not blocking, and not forgotten.
 | First Prisma schema | ✅ migration-managed (15 migrations; see "Migrations" row under Backend) — `db:push` bootstrapping was retired |
 | Local Postgres (docker-compose, port 5544) | ✅ running |
 | Dependencies installed | ✅ on the Mac; Node 22.13.0 (via `nvm use`, matching `.nvmrc`), npm 10.9.2. **Four workspaces now**: root, `api/`, `mobile/`, `web/` — each needs its own `npm install`/`npm ci`, and CI installs all four |
-| `timesheets.logisticbay.com` DNS | 🔲 |
-| `api.timesheets.logisticbay.com` DNS | 🔲 |
-| Database provisioned | 🔲 |
-| Deployment pipeline | 🔲 |
-| Marketing site menu linking both products | 🔲 |
+| `timesheets.logisticbay.com` DNS | ✅ 2026-10-08 — Wix CNAME to Vercel project `lb-timesheets-web`; HTTPS live. **Private test only** — public onboarding is not enabled (email is off, no backups yet) |
+| `api.timesheets.logisticbay.com` DNS | ✅ 2026-10-08 — Wix CNAME + `_railway-verify` TXT to Railway service `timesheets-api`; HTTPS live; CORS admits only the portal origin |
+| Database provisioned | ✅ 2026-10-08 — Railway project `LB-Timesheet`, PostgreSQL 18, EU West (Amsterdam), private networking only; all 17 migrations applied |
+| Deployment pipeline | ✅ API: Railway deploys `main` only after the `ci` and `e2e` checks pass (Wait for CI), migrations as the pre-deploy step. Web: Vercel builds `main` from `web/`. See DEPLOYMENT.md |
+| Production email (SES) | 🔲 `MAIL_TRANSPORT=disabled` — no access key, no SNS topic yet (DEPLOYMENT.md §7) |
+| Database backups | 🔲 none — Railway Hobby cannot create backups (DEPLOYMENT.md §6) |
+| Marketing site menu linking both products | 🔶 the LogisticBay website (separate repo `Q25ltd/LB-Website`) links both products; it is deployed to a temporary Vercel address, not yet at `logisticbay.com` |
