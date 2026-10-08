@@ -7,6 +7,7 @@ import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
 import { AuthPanel } from "./AuthPanel";
 import { DevelopmentEmail } from "./DevelopmentEmail";
+import { EmailCorrection } from "./EmailCorrection";
 import { failureText } from "./failureText";
 
 type Message = { tone: "error" | "success"; text: string } | null;
@@ -105,6 +106,7 @@ export function AccountPage() {
           <button className="button button--secondary button--large check-email__resend" type="button" disabled={busy === "verify"} onClick={() => void resend()}>
             {busy === "verify" ? "Sending…" : "Send a new link"}
           </button>
+          <EmailCorrection email={account.user.email} problem={account.emailDeliveryProblem} />
         </div>
       </AuthCard>
     );
@@ -128,6 +130,13 @@ export function AccountPage() {
           </>
         )}
       </div>
+
+      {account.emailDeliveryProblem === null ? null : (
+        <section className="account-block" aria-labelledby="email-address-title">
+          <h2 id="email-address-title" className="account-block__title">Your email address</h2>
+          <EmailCorrection email={account.user.email} problem={account.emailDeliveryProblem} />
+        </section>
+      )}
 
       <div className="account-block">
         <h2 className="account-block__title">Your companies</h2>

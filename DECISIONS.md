@@ -2165,3 +2165,69 @@ Owner decision; refines **O11** (which stays open for what is listed there).
 - **Not decided here:** how a driver connects to a company (the Drivers
   design), the inactive-membership exceptions for company-side work, and
   everything O11 still lists.
+
+### D55 — Amazon SES is the only email provider (2026-10-08)
+
+Owner decision. SendGrid is removed from LogisticBay Timesheets — code,
+package, configuration and environment variables.
+
+- **Amazon SES, API v2 (AWS SDK v3), region `us-east-1`**, where
+  `logisticbay.com` is verified (Easy DKIM 2048-bit, custom MAIL FROM
+  `mail.logisticbay.com`) and the account is in production, not the sandbox.
+- **Senders, one per kind of mail:** `accounts@logisticbay.com`
+  (registration and verification), `security@logisticbay.com` (password
+  resets and security notices), `timesheets@logisticbay.com` (timesheet
+  reports). **Reply-To** `support@logisticbay.com`. Fixed in code
+  (`MAIL_SENDERS`), not configuration.
+- **Explicit transport.** `MAIL_TRANSPORT` = `ses` | `outbox` | `disabled`,
+  never inferred from which keys are present. Production accepts only `ses`,
+  with its credentials (F-07 stands). `outbox` is development-only.
+- **Sending identity:** IAM user `lb-timesheets-ses`, allowed `ses:SendEmail`
+  on the `logisticbay.com` identity in `us-east-1` from those three addresses
+  only. Its access key is created by the owner and stored only in the
+  deployment's secret settings.
+- **Bounces and complaints:** SES's account-level suppression list (bounces
+  and complaints) stops further sending to such addresses. The application
+  receives SES notifications through ONE SNS topic at `POST /webhooks/ses`,
+  authenticated by SNS's signature, and records them without the address.
+  Whether to store them or tell an account its address bounces is NOT decided.
+- **SendGrid DNS records stay.** `s1._domainkey` / `s2._domainkey` on
+  `logisticbay.com` point to SendGrid and are used by the separate LogisticBay
+  TMS, which still sends through SendGrid. This decision changes nothing
+  outside this product.
+
+### D56 — Email delivery status: recorded per account, suppressed per address, correctable by the owner (2026-10-08)
+
+Owner decision (requirements given 2026-10-08), building on D55.
+
+- **What is stored, and nothing more.** Each email SES accepts:
+  `EmailMessage` — SES's message id, the ACCOUNT it was for, the sender, the
+  time. No address, subject or body. Each SES bounce or complaint:
+  `EmailDeliveryEvent` — SES's feedback id (unique: processed once), its kind,
+  SES's short subtype, when, and the email it concerns. Addresses SES will not
+  deliver to: `EmailSuppression` — address and reason.
+- **Kinds.** A PERMANENT bounce is `hard_bounce` and suppresses the address.
+  Transient and Undetermined bounces are `transient_bounce` and suppress
+  nothing. A complaint is `complaint`, recorded and suppressed as its own
+  reason.
+- **Boundaries.** An event is attributed through the email it concerns to
+  the one account that email was for — a driver and a company account sharing
+  an address stay separate (D51). Suppression is per ADDRESS, as SES's own
+  list is: a mailbox that does not receive mail does not receive it for either
+  account, and SES would refuse both. None of it is company data: no company
+  reads it, and the account sees only its own address's status.
+- **No avoidable repeat sends.** Every send checks the suppression list first.
+  The account owner is told (`409 EMAIL_UNDELIVERABLE`); a public route stays
+  silent, as it already was.
+- **Correction, not change.** `POST /auth/email/correction` — the account's
+  own address, with its password — only when the address is suppressed or a
+  company registration is waiting for its link. The new address must be
+  unused within the account's kind and not suppressed. The account becomes
+  unverified, every outstanding verification and reset link dies, sessions
+  are kept, and a new confirmation link goes to the new address. A general
+  "change my email" is NOT decided.
+- **Not decided:** how long these rows are kept (O1 — retention is open, and
+  `EmailMessage` grows with every email), removing an address from SES's
+  suppression list (a support act in AWS), and a correction screen in the
+  phone app.
+

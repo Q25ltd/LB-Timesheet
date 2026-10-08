@@ -212,6 +212,9 @@ interface AuthReads {
   // call landing here is itself the failure rather than a setup gap.
   // Company registration's (D51). No case here registers a company.
   pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
+  emailSuppression: { findMany(): Promise<never[]> };
+  emailMessage: { create(): Promise<never> };
+  emailDeliveryEvent: { findUnique(): Promise<null> };
   accountToken: { upsert(): Promise<never>; findUnique(): Promise<null>; findFirst(): Promise<null> };
   $transaction(): Promise<never>;
 }
@@ -250,6 +253,10 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
     },
+    // Email delivery status (D56): nothing is suppressed, and nothing here sends.
+    emailSuppression: { findMany: () => Promise.resolve([]) },
+    emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
+    emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),
@@ -470,6 +477,8 @@ const MeSnapshot = z.object({
   // D51: the account's own unfinished company registration, or null. A
   // driver account never has one, so for every account in this file: null.
   pendingCompanyRegistration: z.null(),
+  // D56: the account's own address's delivery problem — none known here.
+  emailDeliveryProblem: z.enum(["hard_bounce", "complaint"]).nullable(),
 }).strict();
 
 test("R10. GET /auth/me with no token is refused with the canonical envelope", async () => {
@@ -493,6 +502,7 @@ test("R11. a valid identity token and live session authenticate an account that 
   assert.deepEqual(me.memberships, [], "zero memberships is a legitimate authenticated state, expressed as an empty list");
   assert.equal(me.emailVerified, false, "an account with no emailVerifiedAt reports unverified");
   assert.equal(me.pendingCompanyRegistration, null, "a driver account registers no company");
+  assert.equal(me.emailDeliveryProblem, null, "nothing is known against this address");
 });
 
 test("R12. the identity response never carries tenant identity", async () => {

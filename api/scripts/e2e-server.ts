@@ -68,7 +68,7 @@ const server = spawn("npx", ["tsx", "src/server.ts"], {
     PORT:             process.env.E2E_API_PORT ?? "3100",
     WEB_ORIGIN:       webOrigin,
     WEB_APP_URL:      webOrigin,
-    SENDGRID_API_KEY: "",
+    MAIL_TRANSPORT:   "outbox",
     JWT_SECRET:       "e2e-only-7c1f9a3b5d2e8046b1c7a9f3e5d20b84",
   },
 });

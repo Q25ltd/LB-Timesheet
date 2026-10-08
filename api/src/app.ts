@@ -17,6 +17,12 @@ import { registerWebAuthRoutes, WEB_AUTH_PREFIX } from "./routes/webAuth.js";
 import { refreshCookiePolicy } from "./lib/refreshCookie.js";
 import { mailTransportFor, type Mailer } from "./lib/mailer.js";
 import { registerDevEmailRoutes } from "./routes/devEmail.js";
+import { registerSesNotificationRoutes } from "./routes/sesNotifications.js";
+import { emailDeliveryRepository, type EmailDeliveryDatabase } from "./repositories/emailDeliveryRepository.js";
+import { trackedMailer } from "./lib/emailDelivery.js";
+import { emailCorrectionRepository, type EmailCorrectionDatabase } from "./repositories/emailCorrectionRepository.js";
+import { registerEmailCorrectionRoutes } from "./routes/emailCorrection.js";
+import { fetchSnsText, type SnsFetch } from "./lib/sesNotifications.js";
 import { backgroundWork } from "./lib/backgroundWork.js";
 import { accountTokenRepository, type AccountTokenDatabase } from "./repositories/accountTokenRepository.js";
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
@@ -41,7 +47,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -58,6 +64,8 @@ export interface AppOptions {
    * own outbox. Has no effect unless the transport IS the outbox.
    */
   outboxDirectory?: string;
+  /** Reads SNS certificates and subscription URLs — tests only, so none reaches the network. */
+  snsFetch?: SnsFetch;
 }
 
 export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): Promise<FastifyInstance> {
@@ -75,8 +83,12 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   const transport = options.mailer === undefined
     ? mailTransportFor(env, options.outboxDirectory)
     : { mailer: options.mailer, outbox: null };
+  // Every transport — an injected one too — goes through delivery tracking
+  // (D56): a suppressed address is not asked again, and what SES accepts is
+  // recorded against its account.
+  const delivery = emailDeliveryRepository(prisma);
   const mail = {
-    mailer:    transport.mailer,
+    mailer:    trackedMailer(transport.mailer, delivery, app.log),
     webAppUrl: webAppUrl(env),
     log:       app.log,
     throttles: {
@@ -201,7 +213,7 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // `identityRepository` owns User/Session creation and membership reads,
   // `refreshRepository` owns credential resolution and rotation and is the
   // narrow surface that makes F-21's ambiguous lookup unexpressible.
-  registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma), limits);
+  registerAuthRoutes(app, identityRepository(prisma), refreshRepository(prisma), limits, delivery);
 
   // The BROWSER transport for the same lifecycle (D45, D46): the same
   // services and repositories, the refresh credential in an HttpOnly cookie,
@@ -227,9 +239,25 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // (development, no provider key) — in production the route does not exist.
   if (transport.outbox !== null) registerDevEmailRoutes(app, identityRepository(prisma), tokens, transport.outbox);
 
+  // SES bounces and complaints, from the ONE configured SNS topic (D55).
+  // Absent unless a topic is configured: there is nothing to receive.
+  if (env.SES_NOTIFICATION_TOPIC_ARN !== "") {
+    registerSesNotificationRoutes(app, env.SES_NOTIFICATION_TOPIC_ARN, options.snsFetch ?? fetchSnsText, delivery);
+  }
+
   // Password recovery and change (B7). Reset revokes every session; change
   // revokes every session but the caller's.
   registerPasswordRoutes(app, identityRepository(prisma), tokens, passwordRepository(prisma), mail, work, limits);
+
+  // Correcting an address that cannot receive mail (D56).
+  registerEmailCorrectionRoutes(app, {
+    accounts:    identityRepository(prisma),
+    passwords:   passwordRepository(prisma),
+    delivery,
+    corrections: emailCorrectionRepository(prisma),
+    tokens,
+    mail,
+  }, limits);
 
   app.get("/health", { config: { authPosture: "public" } }, async () => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);

@@ -162,6 +162,7 @@ model User {
   sessions      Session[]
   accountTokens AccountToken[]
   pendingCompanyRegistration PendingCompanyRegistration?
+  emailMessages EmailMessage[]
 
   /// One email per KIND (D22 as amended 2026-10-01): a driver and a company
   /// account may share an address; two accounts of one kind may not. The
@@ -534,3 +535,86 @@ model ShiftSubmitJob {
   @@index([status, nextAttemptAt])
   @@index([companyId, shiftId])
 }
+
+/// Which fixed sender an email went from (D55, `MAIL_SENDERS` in
+/// api/src/lib/mailer.ts). One concept, one name: these are its keys.
+enum EmailSender {
+  accounts
+  security
+  timesheets
+}
+
+/// What SES reported about an email it could not deliver, or that its
+/// recipient did not want (D56).
+///   hard_bounce       a Permanent bounce — the address does not receive mail
+///   transient_bounce  a Transient or Undetermined bounce — a full mailbox, a
+///                     server that was down; the address is NOT suppressed
+///   complaint         the recipient marked the email as spam
+enum EmailDeliveryEventKind {
+  hard_bounce
+  transient_bounce
+  complaint
+}
+
+/// Why SES will not send to an address (its account-level suppression list,
+/// mirrored here, D56). A transient failure is never a reason.
+enum EmailSuppressionReason {
+  hard_bounce
+  complaint
+}
+
+/// One email SES accepted for an account (D56): exactly what associates a
+/// later bounce or complaint with the ACCOUNT it was sent to — company or
+/// driver, never both, never by address. Nothing of the message is stored:
+/// no address, no subject, no body. Written only when SES returns a message
+/// id; the development outbox writes none.
+model EmailMessage {
+  id           String      @id @default(cuid())
+  /// SES's MessageId for the send — what its notifications name.
+  sesMessageId String      @unique
+  userId       String
+  sender       EmailSender
+  sentAt       DateTime    @default(now())
+
+  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events EmailDeliveryEvent[]
+
+  @@index([userId])
+}
+
+/// One bounce or complaint SES reported (D56), processed ONCE: SES's own
+/// feedback id is unique, so a redelivered notification records nothing new.
+/// No address is stored here — the account comes from the email it concerns,
+/// and the address, when it is suppressed, from EmailSuppression.
+model EmailDeliveryEvent {
+  id             String                 @id @default(cuid())
+  /// SES's feedbackId for this bounce or complaint.
+  feedbackId     String                 @unique
+  kind           EmailDeliveryEventKind
+  /// SES's bounce subtype or complaint feedback type, for support — when given.
+  detail         String?
+  /// The email it concerns, when it was one this application sent and
+  /// recorded. Null for anything else (sent before tracking, or not by us).
+  emailMessageId String?
+  /// When SES says it happened.
+  occurredAt     DateTime
+  recordedAt     DateTime               @default(now())
+
+  emailMessage EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+
+  @@index([emailMessageId])
+}
+
+/// An address SES will not deliver to (D56) — the application's copy of SES's
+/// account-level suppression list, so it stops asking. Keyed by ADDRESS, as
+/// SES's list is: a mailbox that does not exist does not exist for either
+/// account kind. A hard bounce and a complaint are separate rows.
+model EmailSuppression {
+  email      String                 @db.Citext
+  reason     EmailSuppressionReason
+  /// When SES last reported this reason for this address.
+  recordedAt DateTime
+
+  @@id([email, reason])
+}
+

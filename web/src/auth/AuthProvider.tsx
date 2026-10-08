@@ -47,7 +47,8 @@ export type AuthState =
 export type Failure =
   | "invalid"        // 400: the input was refused
   | "credentials"    // 401 at sign-in: wrong email or password
-  | "email-in-use"   // 409 EMAIL_IN_USE at registration (D24)
+  | "email-in-use"   // 409 EMAIL_IN_USE at registration (D24), or correcting to a taken address
+  | "undeliverable"  // 409 EMAIL_UNDELIVERABLE: the address cannot receive mail (D56)
   | "forbidden"      // 403: not allowed (D17 — deliberately unexplained)
   | "conflict"       // 409: e.g. an open shift elsewhere
   | "rate-limited"   // 429
@@ -64,7 +65,10 @@ function failureOf(result: Exclude<ApiResult<unknown>, { kind: "ok" }>): Failure
     case 400: return "invalid";
     case 401: return "credentials";
     case 403: return "forbidden";
-    case 409: return result.code === "EMAIL_IN_USE" ? "email-in-use" : "conflict";
+    case 409:
+      if (result.code === "EMAIL_IN_USE") return "email-in-use";
+      if (result.code === "EMAIL_UNDELIVERABLE") return "undeliverable";
+      return "conflict";
     case 429: return "rate-limited";
     case 503: return "unavailable";
     default:  return "unexpected";
@@ -96,6 +100,12 @@ export interface AuthApi {
   developmentVerificationLink: () => Promise<string | null>;
   selectCompany(membershipId: string): Promise<Outcome>;
   changePassword(currentPassword: string, newPassword: string): Promise<Outcome>;
+  /**
+   * Correct the account's OWN address when it cannot receive mail (D56). The
+   * server decides whether it may; on success the account is read again —
+   * the new address, unconfirmed, with a fresh link sent to it.
+   */
+  correctEmail(email: string, currentPassword: string): Promise<Outcome>;
 }
 
 /** Exactly what the company registration sends — the repeat box is the browser's own check. */
@@ -277,6 +287,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.kind === "ok" ? { ok: true } : { ok: false, failure: failureOf(result) };
   }, [withIdentity]);
 
+  const correctEmail = useCallback<AuthApi["correctEmail"]>(async (email, currentPassword) => {
+    const result = await withIdentity(token => apiRequest("/auth/email/correction", { token, body: { email, currentPassword } }, parseNoContent));
+    if (result.kind !== "ok") return { ok: false, failure: failureOf(result) };
+    return loadAccount(currentCompany);
+  }, [currentCompany, loadAccount, withIdentity]);
+
   const developmentVerificationLink = useCallback<AuthApi["developmentVerificationLink"]>(async () => {
     if (!import.meta.env.DEV) return null;
     const result = await withIdentity(token => apiRequest("/dev/email-verification-link", { method: "GET", token }, parseDevelopmentLink));
@@ -284,8 +300,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [withIdentity]);
 
   const api = useMemo<AuthApi>(() => ({
-    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword,
-  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword]);
+    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword, correctEmail,
+  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword, correctEmail]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

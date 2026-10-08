@@ -527,3 +527,19 @@
   text-underline-offset: 0.2em;
   cursor: pointer;
 }
+
+/* Correcting an address that cannot receive mail (D56). */
+.email-correction {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.email-correction__problem {
+  margin: 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--text);
+}
+

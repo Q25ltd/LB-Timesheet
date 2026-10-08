@@ -40,7 +40,11 @@ export interface Account {
   memberships: Membership[];
   /** Null once the company exists — and for any account that never registered one. */
   pendingCompanyRegistration: PendingCompanyRegistration | null;
+  /** Why email to the account's OWN address cannot be delivered (D56), or null when nothing is known. */
+  emailDeliveryProblem: EmailDeliveryProblem | null;
 }
+
+export type EmailDeliveryProblem = "hard_bounce" | "complaint";
 
 export interface CompanySelection {
   tenantToken: string;
@@ -118,7 +122,9 @@ export function parseAccount(value: unknown): Account | null {
     if (companyName === null || timezone === null) return null;
     pendingCompanyRegistration = { companyName, timezone };
   }
-  return { user: parsedUser, emailVerified, memberships: parsedMemberships, pendingCompanyRegistration };
+  const problem = value["emailDeliveryProblem"];
+  if (problem !== null && problem !== "hard_bounce" && problem !== "complaint") return null;
+  return { user: parsedUser, emailVerified, memberships: parsedMemberships, pendingCompanyRegistration, emailDeliveryProblem: problem };
 }
 
 /** What confirming an emailed link did (D51): whether it completed a company registration. */

@@ -21,6 +21,8 @@ export function escapeHtml(value: string): string {
 }
 
 interface AccountEmailInput {
+  /** The account it is for (D56) — never shown in the email. */
+  userId: string;
   to: string;
   firstName: string;
   link: string;
@@ -41,6 +43,8 @@ function htmlBody(firstName: string, paragraph: string, link: string, action: st
 /** Email-ownership verification (B4): the link is valid for 24 hours, once. */
 export function verificationEmail(input: AccountEmailInput): MailMessage {
   return {
+    sender: "accounts",
+    userId: input.userId,
     to: input.to,
     subject: "Confirm your email address — LogisticBay Timesheets",
     text: [
@@ -67,6 +71,8 @@ export function verificationEmail(input: AccountEmailInput): MailMessage {
 /** Self-service password recovery (B7): the link is valid for 30 minutes, once. */
 export function passwordResetEmail(input: AccountEmailInput): MailMessage {
   return {
+    sender: "security",
+    userId: input.userId,
     to: input.to,
     subject: "Reset your password — LogisticBay Timesheets",
     text: [

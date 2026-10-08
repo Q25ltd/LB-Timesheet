@@ -22,7 +22,7 @@ process.on("SIGTERM", () => { shutdown().catch(() => process.exit(1)); });
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`LogisticBay Timesheets API on http://localhost:${env.PORT}`);
-  if (mailDisabled) app.log.warn("SENDGRID_API_KEY is empty — email sending is disabled");
+  if (mailDisabled) app.log.warn("MAIL_TRANSPORT is disabled — every email send will fail");
 } catch (err) {
   app.log.error(err);
   process.exit(1);

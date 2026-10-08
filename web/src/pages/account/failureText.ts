@@ -6,6 +6,7 @@ export function failureText(failure: Failure): string {
     case "invalid":      return "Please check the details and try again.";
     case "credentials":  return "Email or password is incorrect.";
     case "email-in-use": return "An account with this email already exists. Sign in instead.";
+    case "undeliverable": return "Email cannot be delivered to this address. Correct your email address and try again.";
     case "forbidden":    return "That is not allowed.";
     case "conflict":     return "That cannot be done right now.";
     case "rate-limited": return "Too many attempts. Please wait a while and try again.";

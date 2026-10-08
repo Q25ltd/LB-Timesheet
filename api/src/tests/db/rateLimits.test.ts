@@ -57,7 +57,7 @@ const outbox: MailMessage[] = [];
 const capturingMailer: Mailer = {
   send(message) {
     outbox.push(message);
-    return Promise.resolve();
+    return Promise.resolve(null);
   },
 };
 

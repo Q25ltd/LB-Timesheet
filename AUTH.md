@@ -354,6 +354,26 @@ toward one: it can never reach tenant data, at any point, by any route. The
 tenant boundary is unchanged — *no token reaches tenant data without naming
 and validating a real membership*.
 
+## Correcting an email address (D56)
+
+`POST /auth/email/correction` — identity posture, sign-in's rate limit.
+`{ email, currentPassword }`, exactly.
+
+```
+password verifies?                         → no: 403 FORBIDDEN (generic)
+address suppressed (hard bounce/complaint)
+  OR a company registration awaits its link → neither: 403 FORBIDDEN
+new address suppressed?                    → 409 EMAIL_UNDELIVERABLE
+new address held by an account of the SAME KIND → 409 EMAIL_IN_USE
+ONE transaction: email replaced · emailVerifiedAt = null · every AccountToken deleted
+  ↓
+new verification link → the new address
+```
+
+A correction, not a change of email: an address nothing is known against
+cannot be replaced this way. Sessions are kept — the password was just proved.
+A driver account with the same new address is irrelevant (D51).
+
 ## Logout (2026-09-11)
 
 ```

@@ -23,5 +23,5 @@ function load(): Env {
 
 export const env = load();
 
-/** True when email is not configured — submissions log instead of sending. */
-export const mailDisabled = env.SENDGRID_API_KEY.trim() === "";
+/** True when email is switched off (MAIL_TRANSPORT=disabled) — every send fails. */
+export const mailDisabled = env.MAIL_TRANSPORT === "disabled";

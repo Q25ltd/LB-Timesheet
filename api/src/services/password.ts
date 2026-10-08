@@ -88,6 +88,7 @@ export function forgotPassword(
       expiresAt: new Date(issuedAt.getTime() + ACCOUNT_TOKEN_LIFETIME_MS.password_reset),
     });
     await mail.mailer.send(passwordResetEmail({
+      userId:    user.id,
       to:        user.email,
       firstName: user.firstName,
       link:      `${mail.webAppUrl}/reset-password#token=${token}`,

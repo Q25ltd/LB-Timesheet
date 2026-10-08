@@ -158,6 +158,13 @@ const GLOBAL_MODELS = new Set([
   // started it; there is no Company yet to scope it to — creating one is
   // what finishing the registration does (D51).
   "PendingCompanyRegistration",
+  // Email delivery status (D56) belongs to the ACCOUNT an email was sent to,
+  // or — for suppression — to a mailbox, exactly as SES keeps it. No company
+  // sends these emails or may read them: a companyId here would be an invented
+  // association, and a company-facing read of them a cross-boundary leak.
+  "EmailMessage",
+  "EmailDeliveryEvent",
+  "EmailSuppression",
 ]);
 
 for (const match of schemaText.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {

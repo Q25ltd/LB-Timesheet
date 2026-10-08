@@ -180,6 +180,9 @@ interface IdentityReads {
   };
   // Company registration's (D51). No case here registers a company.
   pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
+  emailSuppression: { findMany(): Promise<never[]> };
+  emailMessage: { create(): Promise<never> };
+  emailDeliveryEvent: { findUnique(): Promise<null> };
   accountToken: { upsert(): Promise<never>; findUnique(): Promise<null>; findFirst(): Promise<null> };
   $transaction(): Promise<never>;
 }
@@ -215,6 +218,10 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
     },
+    // Email delivery status (D56): nothing is suppressed, and nothing here sends.
+    emailSuppression: { findMany: () => Promise.resolve([]) },
+    emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
+    emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

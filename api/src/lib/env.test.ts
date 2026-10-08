@@ -20,8 +20,9 @@ const prod = {
   NODE_ENV: "production",
   WEB_ORIGIN: "https://timesheets.logisticbay.com",
   WEB_APP_URL: "https://timesheets.logisticbay.com",
-  SENDGRID_API_KEY: "SG.fake-but-present-for-tests",
-  MAIL_FROM: "timesheets@logisticbay.com",
+  MAIL_TRANSPORT: "ses",
+  AWS_ACCESS_KEY_ID: "AKIAFAKEFORTESTSONLY",
+  AWS_SECRET_ACCESS_KEY: "fake-secret-for-tests-only",
 };
 
 // ── Base environment ─────────────────────────────────────────────────────────
@@ -30,22 +31,45 @@ test("accepts a minimal valid environment and applies defaults", () => {
   const parsed = EnvSchema.parse({ ...valid, NODE_ENV: "development" });
   assert.equal(parsed.PORT, 3000);
   assert.equal(parsed.NODE_ENV, "development");
-  assert.equal(parsed.SENDGRID_API_KEY, "");
-  assert.equal(parsed.MAIL_FROM, "timesheets@logisticbay.com");
+  assert.equal(parsed.MAIL_TRANSPORT, "outbox", "development writes email to the local outbox unless told otherwise");
+  assert.equal(parsed.AWS_REGION, "us-east-1");
+  assert.equal(parsed.SES_NOTIFICATION_TOPIC_ARN, "");
+  assert.equal(EnvSchema.parse({ ...valid, NODE_ENV: "test" }).MAIL_TRANSPORT, "disabled", "test sends nothing unless a test injects a mailer");
 });
 
 // ── Email must be configured outside dev/test (F-07) ─────────────────────────
 
-test("production without a SendGrid key fails closed — the product IS an email", () => {
-  const result = EnvSchema.safeParse({ ...prod, SENDGRID_API_KEY: "" });
-  assert.equal(result.success, false);
-  assert.match(describeEnvFailure(result.error), /SENDGRID_API_KEY is required/);
+test("production sends through SES and nothing else — unset, outbox and disabled all fail closed", () => {
+  assert.equal(EnvSchema.parse(prod).MAIL_TRANSPORT, "ses");
+  const { MAIL_TRANSPORT: _unset, ...noTransport } = prod;
+  for (const candidate of [noTransport, { ...prod, MAIL_TRANSPORT: "outbox" }, { ...prod, MAIL_TRANSPORT: "disabled" }]) {
+    const result = EnvSchema.safeParse(candidate);
+    assert.equal(result.success, false);
+    assert.match(describeEnvFailure(result.error), /MAIL_TRANSPORT must be "ses"/);
+  }
 });
 
-test("production rejects a malformed MAIL_FROM", () => {
-  const result = EnvSchema.safeParse({ ...prod, MAIL_FROM: "not-an-address" });
+test("SES without its credentials fails closed, in every environment", () => {
+  for (const missing of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] as const) {
+    const result = EnvSchema.safeParse({ ...prod, [missing]: " " });
+    assert.equal(result.success, false);
+    assert.match(describeEnvFailure(result.error), new RegExp(`${missing} is required when MAIL_TRANSPORT is ses`));
+  }
+  assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "development", MAIL_TRANSPORT: "ses" }).success, false,
+    "a developer choosing live SES must supply its key too");
+});
+
+test("the local outbox is refused outside development — a test or production process never writes mail to disk", () => {
+  const result = EnvSchema.safeParse({ ...valid, NODE_ENV: "test", MAIL_TRANSPORT: "outbox" });
   assert.equal(result.success, false);
-  assert.match(describeEnvFailure(result.error), /MAIL_FROM must be a plain email address/);
+  assert.match(describeEnvFailure(result.error), /allowed only when NODE_ENV is development/);
+});
+
+test("the region and the notification topic must be well-formed", () => {
+  assert.equal(EnvSchema.safeParse({ ...prod, AWS_REGION: "London" }).success, false);
+  assert.equal(EnvSchema.safeParse({ ...prod, SES_NOTIFICATION_TOPIC_ARN: "https://sns.example.com/topic" }).success, false);
+  assert.equal(EnvSchema.parse({ ...prod, SES_NOTIFICATION_TOPIC_ARN: " arn:aws:sns:us-east-1:463470971979:lb-timesheets-ses-events " }).SES_NOTIFICATION_TOPIC_ARN,
+    "arn:aws:sns:us-east-1:463470971979:lb-timesheets-ses-events");
 });
 
 test("development and test run without email config on purpose", () => {

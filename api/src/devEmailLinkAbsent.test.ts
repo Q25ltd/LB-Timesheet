@@ -4,10 +4,10 @@
  *
  * `GET /dev/email-verification-link` hands a signed-in account the
  * verification link the DEVELOPMENT OUTBOX received. It is registered only
- * when the app's mail transport is that outbox (`NODE_ENV=development` and no
- * provider key). This process runs as PRODUCTION — with a SendGrid key, as
- * production must have — and proves the route does not exist: not refused,
- * not empty, absent from the router.
+ * when the app's mail transport is that outbox (`MAIL_TRANSPORT=outbox`, which
+ * the environment allows in development only). This process runs as
+ * PRODUCTION — with SES, as production must have — and proves the route does
+ * not exist: not refused, not empty, absent from the router.
  *
  * The transport rule itself is proven for every environment below, because
  * the environment is read once per process.
@@ -22,7 +22,9 @@ process.env.JWT_SECRET       = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24
 process.env.NODE_ENV         = "production";
 process.env.WEB_ORIGIN       = "https://timesheets.logisticbay.com";
 process.env.WEB_APP_URL      = "https://timesheets.logisticbay.com";
-process.env.SENDGRID_API_KEY = "SG.fake-but-present-for-tests";
+process.env.MAIL_TRANSPORT        = "ses";
+process.env.AWS_ACCESS_KEY_ID     = "AKIAFAKEFORTESTSONLY";
+process.env.AWS_SECRET_ACCESS_KEY = "fake-secret-for-tests-only-never-used-to-send";
 
 const { buildApp } = await import("./app.js");
 const { mailTransportFor } = await import("./lib/mailer.js");
@@ -65,6 +67,10 @@ const db = {
     findUnique: () => Promise.resolve(null),
     create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
   },
+  // Email delivery status (D56): nothing is suppressed, and nothing here sends.
+  emailSuppression: { findMany: () => Promise.resolve([]) },
+  emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
+  emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
   accountToken: {
     upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
     findUnique: () => Promise.resolve(null),
@@ -86,12 +92,18 @@ test("in production the development email link route is NOT REGISTERED", async (
   }
 });
 
-test("only the development OUTBOX transport exposes an outbox — never production, test, or development with a real provider", () => {
-  const from = "timesheets@logisticbay.com";
-  assert.equal(mailTransportFor({ NODE_ENV: "production", SENDGRID_API_KEY: "SG.key", MAIL_FROM: from }).outbox, null);
-  assert.equal(mailTransportFor({ NODE_ENV: "production", SENDGRID_API_KEY: "", MAIL_FROM: from }).outbox, null);
-  assert.equal(mailTransportFor({ NODE_ENV: "test", SENDGRID_API_KEY: "", MAIL_FROM: from }).outbox, null);
-  assert.equal(mailTransportFor({ NODE_ENV: "development", SENDGRID_API_KEY: "SG.key", MAIL_FROM: from }).outbox, null,
-    "development sending REAL email has no outbox to expose");
-  assert.equal(typeof mailTransportFor({ NODE_ENV: "development", SENDGRID_API_KEY: "", MAIL_FROM: from }).outbox, "string");
+test("with no notification topic configured, the SES notification endpoint does not exist either", async () => {
+  const app = await buildApp(db);
+  try {
+    assert.equal(app.hasRoute({ method: "POST", url: "/webhooks/ses" }), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("only the OUTBOX transport exposes an outbox — never SES, never disabled", () => {
+  const aws = { AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "AKIAFAKE", AWS_SECRET_ACCESS_KEY: "fake" };
+  assert.equal(mailTransportFor({ ...aws, MAIL_TRANSPORT: "ses" }).outbox, null, "real email has no outbox to expose");
+  assert.equal(mailTransportFor({ ...aws, MAIL_TRANSPORT: "disabled" }).outbox, null);
+  assert.equal(typeof mailTransportFor({ ...aws, MAIL_TRANSPORT: "outbox" }).outbox, "string");
 });

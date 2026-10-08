@@ -116,6 +116,10 @@ function fixtures(options: { active?: boolean } = {}) {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
     },
+    // Email delivery status (D56): nothing is suppressed, and nothing here sends.
+    emailSuppression: { findMany: () => Promise.resolve([]) },
+    emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
+    emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

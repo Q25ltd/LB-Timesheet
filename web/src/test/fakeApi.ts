@@ -58,12 +58,13 @@ export function installFakeApi(): FakeApi {
 
 const USER = { id: "user-1", firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com" };
 
-export function account(overrides: { emailVerified?: boolean; memberships?: unknown[]; pendingCompanyRegistration?: unknown } = {}) {
+export function account(overrides: { emailVerified?: boolean; memberships?: unknown[]; pendingCompanyRegistration?: unknown; emailDeliveryProblem?: "hard_bounce" | "complaint" | null; email?: string } = {}) {
   return {
-    user: USER,
+    user: overrides.email === undefined ? USER : { ...USER, email: overrides.email },
     emailVerified: overrides.emailVerified ?? true,
     memberships: overrides.memberships ?? [],
     pendingCompanyRegistration: overrides.pendingCompanyRegistration ?? null,
+    emailDeliveryProblem: overrides.emailDeliveryProblem ?? null,
   };
 }
 

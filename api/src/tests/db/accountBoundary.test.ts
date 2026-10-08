@@ -71,7 +71,7 @@ interface Injected { statusCode: number; body: unknown; raw: string; setCookie: 
 const mailbox: { to: string; text: string }[] = [];
 
 async function inject(options: { url: string; method?: "GET" | "POST"; payload?: object; token?: string; web?: boolean }): Promise<Injected> {
-  const app = await buildApp(prisma, { mailer: { send: message => { mailbox.push(message); return Promise.resolve(); } } });
+  const app = await buildApp(prisma, { mailer: { send: message => { mailbox.push(message); return Promise.resolve(null); } } });
   try {
     const headers: Record<string, string> = {};
     if (options.web === true) headers["origin"] = ORIGIN;
@@ -280,7 +280,7 @@ test("AB8. web password reset reaches the COMPANY account, never the driver acco
   const driver = await registerDriver(email);
   const company = await registerCompanyAccount(email);
   const sent: { to: string; text: string }[] = [];
-  const app = await buildApp(prisma, { mailer: { send: message => { sent.push(message); return Promise.resolve(); } } });
+  const app = await buildApp(prisma, { mailer: { send: message => { sent.push(message); return Promise.resolve(null); } } });
   try {
     const res = await app.inject({ method: "POST", url: "/auth/password/forgot", payload: { email } });
     assert.equal(res.statusCode, 204);
@@ -294,7 +294,7 @@ test("AB8. web password reset reaches the COMPANY account, never the driver acco
   // And a driver-only email gets no reset from the website.
   const onlyDriver = freshEmail();
   const lone = await registerDriver(onlyDriver);
-  const app2 = await buildApp(prisma, { mailer: { send: () => Promise.resolve() } });
+  const app2 = await buildApp(prisma, { mailer: { send: () => Promise.resolve(null) } });
   try {
     const res = await app2.inject({ method: "POST", url: "/auth/password/forgot", payload: { email: onlyDriver } });
     assert.equal(res.statusCode, 204, "the same answer as for any address");

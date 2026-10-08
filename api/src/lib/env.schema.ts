@@ -14,6 +14,26 @@ const NODE_ENVS = ["development", "test", "production"] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
 /**
+ * How email leaves this process (lib/mailer.ts). Explicit, never inferred from
+ * which keys are present, so live sending is never switched on by accident.
+ */
+const MAIL_TRANSPORTS = ["ses", "outbox", "disabled"] as const;
+export type MailTransportName = (typeof MAIL_TRANSPORTS)[number];
+
+/** The transport an UNSET MAIL_TRANSPORT means. Production has none: it must say `ses`. */
+function defaultMailTransport(nodeEnv: NodeEnv | undefined): MailTransportName | null {
+  if (nodeEnv === "development") return "outbox";
+  if (nodeEnv === "test") return "disabled";
+  return null;
+}
+
+/** An AWS Region code, e.g. `us-east-1`. */
+const AWS_REGION_PATTERN = /^[a-z]{2}(-[a-z]+)+-\d$/;
+
+/** An SNS topic ARN — where SES publishes bounces and complaints. */
+const SNS_TOPIC_ARN_PATTERN = /^arn:aws:sns:[a-z]{2}(-[a-z]+)+-\d:\d{12}:[A-Za-z0-9_-]{1,256}$/;
+
+/**
  * Only these two relax the CORS requirement. Note that NODE_ENV is OPTIONAL in
  * the schema: an unset NODE_ENV is NOT development. A deploy that forgets to set
  * it must fail closed, not inherit developer defaults.
@@ -101,8 +121,19 @@ function jwtSecretProblem(rawSecret: string, isProductionLike: boolean): string 
 const BaseEnv = z.object({
   DATABASE_URL:     z.string().min(1, "DATABASE_URL is required").max(500),
   JWT_SECRET:       z.string().min(1, "JWT_SECRET is required").max(500),
-  SENDGRID_API_KEY: z.string().max(200).default(""),
-  MAIL_FROM:        z.string().max(320).default("timesheets@logisticbay.com"),
+  /** ses | outbox | disabled — see MAIL_TRANSPORTS. Unset: development → outbox, test → disabled, production → refused. */
+  MAIL_TRANSPORT:   z.enum(MAIL_TRANSPORTS).optional(),
+  /** Where SES sends from: the region `logisticbay.com` is verified in (us-east-1). */
+  AWS_REGION:       z.string().max(32).default("us-east-1"),
+  /** The `lb-timesheets-ses` IAM user's key — required when MAIL_TRANSPORT is ses. */
+  AWS_ACCESS_KEY_ID:     z.string().max(128).default(""),
+  AWS_SECRET_ACCESS_KEY: z.string().max(128).default(""),
+  /**
+   * The SNS topic SES publishes bounces and complaints to. When set, the
+   * signed-notification endpoint exists and accepts messages from THIS topic
+   * only; when empty it is not registered.
+   */
+  SES_NOTIFICATION_TOPIC_ARN: z.string().max(400).default(""),
   /** Comma-separated origins allowed to call this API. */
   WEB_ORIGIN:       z.string().max(2000).default(""),
   /**
@@ -127,25 +158,38 @@ export const EnvSchema = BaseEnv
       ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: secretProblem });
     }
 
-    // The entire product is "PDF arrives in an inbox" (PRODUCT.md). A
-    // production process with email unconfigured would accept submissions it
-    // can never deliver — so it must not start. Dev/test run without a key on
-    // purpose (submissions log instead of send).
-    if (!devLike) {
-      if (value.SENDGRID_API_KEY.trim() === "") {
-        ctx.addIssue({
-          code: "custom",
-          path: ["SENDGRID_API_KEY"],
-          message: "SENDGRID_API_KEY is required unless NODE_ENV is explicitly development or test",
-        });
+    // The entire product is "PDF arrives in an inbox" (PRODUCT.md), and an
+    // account cannot be confirmed without its email. A production process
+    // with email unconfigured would accept what it can never deliver — so it
+    // must not start (F-07). Only SES sends from production.
+    const transport = value.MAIL_TRANSPORT ?? defaultMailTransport(value.NODE_ENV);
+    if (transport === null || (!devLike && transport !== "ses")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAIL_TRANSPORT"],
+        message: "MAIL_TRANSPORT must be \"ses\" unless NODE_ENV is explicitly development or test",
+      });
+    }
+    if (transport === "outbox" && value.NODE_ENV !== "development") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAIL_TRANSPORT"],
+        message: "MAIL_TRANSPORT=outbox writes email to local files and is allowed only when NODE_ENV is development",
+      });
+    }
+    if (transport === "ses") {
+      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] as const) {
+        if (value[key].trim() === "") {
+          ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when MAIL_TRANSPORT is ses` });
+        }
       }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.MAIL_FROM)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["MAIL_FROM"],
-          message: `MAIL_FROM must be a plain email address, got "${value.MAIL_FROM}"`,
-        });
-      }
+    }
+    if (!AWS_REGION_PATTERN.test(value.AWS_REGION)) {
+      ctx.addIssue({ code: "custom", path: ["AWS_REGION"], message: `"${value.AWS_REGION}" is not an AWS Region code (e.g. us-east-1)` });
+    }
+    const topic = value.SES_NOTIFICATION_TOPIC_ARN.trim();
+    if (topic !== "" && !SNS_TOPIC_ARN_PATTERN.test(topic)) {
+      ctx.addIssue({ code: "custom", path: ["SES_NOTIFICATION_TOPIC_ARN"], message: "SES_NOTIFICATION_TOPIC_ARN must be an SNS topic ARN (arn:aws:sns:<region>:<account>:<name>)" });
     }
 
     // An emailed link is a credential delivered to a person: it must point at
@@ -199,7 +243,13 @@ export const EnvSchema = BaseEnv
   // Validation above treats an unset NODE_ENV as production-like; the runtime
   // value must agree, or the logger and every future env.NODE_ENV branch would
   // run in dev mode under production rules. Unset resolves to "production".
-  .transform(value => ({ ...value, NODE_ENV: value.NODE_ENV ?? "production" }));
+  .transform(value => ({
+    ...value,
+    NODE_ENV: value.NODE_ENV ?? "production",
+    // Validation above has refused every case where this would be null.
+    MAIL_TRANSPORT: value.MAIL_TRANSPORT ?? defaultMailTransport(value.NODE_ENV) ?? "disabled",
+    SES_NOTIFICATION_TOPIC_ARN: value.SES_NOTIFICATION_TOPIC_ARN.trim(),
+  }));
 
 export type Env = z.infer<typeof EnvSchema>;
 

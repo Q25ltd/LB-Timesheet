@@ -11,6 +11,9 @@
  * request object (`no-request-in-services`), and there is no `companyId`
  * anywhere in this file — there is no tenant to scope to yet.
  */
+import type { EmailSuppressionReason } from "../generated/enums.js";
+import { deliveryProblem } from "../lib/emailDelivery.js";
+import type { EmailDeliveryRepository } from "../repositories/emailDeliveryRepository.js";
 import { z } from "zod";
 import type { JWT } from "@fastify/jwt";
 import type { SessionClientKind } from "../generated/enums.js";
@@ -93,7 +96,7 @@ export interface RegistrationResult {
  * needs an email provider and a verification lifecycle, neither of which
  * exists — and a driver who mistypes their own address has to be told.
  */
-function emailInUse(): AppError {
+export function emailInUse(): AppError {
   return new AppError(409, "Email already registered", "EMAIL_IN_USE");
 }
 
@@ -227,6 +230,12 @@ export interface AccountView {
    * null for a driver account, and once the registration is completed.
    */
   pendingCompanyRegistration: PendingCompanyRegistrationView | null;
+  /**
+   * Why email to this account's OWN address cannot be delivered (D56) — a
+   * hard bounce, or a complaint — or null when nothing is known. About the
+   * account's own mailbox only; it says nothing about any other account.
+   */
+  emailDeliveryProblem: EmailSuppressionReason | null;
 }
 
 /**
@@ -236,7 +245,7 @@ export interface AccountView {
  * A driver with no memberships is a SUCCESS with an empty list. Requiring one
  * here would reintroduce the "0 memberships → denied" rule D21 superseded.
  */
-export async function accountView(userId: string, accounts: IdentityRepository): Promise<AccountView> {
+export async function accountView(userId: string, accounts: IdentityRepository, delivery: EmailDeliveryRepository): Promise<AccountView> {
   const [state, memberships, pendingCompanyRegistration] = await Promise.all([
     accounts.findAccountState(userId),
     accounts.listActiveMemberships(userId),
@@ -248,5 +257,6 @@ export async function accountView(userId: string, accounts: IdentityRepository):
   // fails exactly as every other authentication failure does.
   if (state === null) throw new AppError(401, "Not authenticated", "UNAUTHENTICATED");
 
-  return { user: state.user, emailVerified: state.emailVerified, memberships, pendingCompanyRegistration };
+  const emailDeliveryProblem = deliveryProblem(await delivery.suppressionReasons(state.user.email));
+  return { user: state.user, emailVerified: state.emailVerified, memberships, pendingCompanyRegistration, emailDeliveryProblem };
 }

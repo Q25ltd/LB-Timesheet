@@ -4,6 +4,60 @@
 
 ---
 
+## 2026-10-08 — Email delivery status: bounces and complaints stored (D56)
+
+**Built.** Three account-level tables (migration `20261008120000`, additive):
+what SES accepted, per account (`EmailMessage`); each bounce or complaint,
+once (`EmailDeliveryEvent`, unique on SES's feedback id); suppressed
+addresses (`EmailSuppression`). The send path checks suppression first and
+records what SES accepts. The signed-SNS endpoint now records events. A
+password-confirmed correction (`POST /auth/email/correction`) for an address
+that is suppressed or a registration still waiting for its link; the website
+shows the problem and the correction.
+
+**Design points.** Attribution goes through the email, so a bounce belongs
+to the account the email was for, never to a same-email account of the
+other kind. Suppression is per address because SES's is. A unique violation
+is a duplicate only when the feedback id is already recorded; otherwise (a
+concurrent suppression of the same address) the write is retried once.
+
+**Proven.** 11 DB tests and 6 web tests, written RED; ten mutations caught.
+`prisma migrate diff` shows the migration equals the schema.
+
+**Found on the way.** `src/tests/db/registration.test.ts` contains a
+control character on line 328, so `grep` treats it as binary and reports
+nothing — a search for one of its tests silently found nothing. Not changed
+(not this task's); worth knowing when searching it.
+
+---
+
+## 2026-10-08 — SendGrid replaced by Amazon SES (D55)
+
+**Dependencies found first.** In this repo SendGrid was the API mailer, the
+`@sendgrid/mail` package, `SENDGRID_API_KEY` / `MAIL_FROM` in the
+environment schema, the boot warning and tests — nothing in web or mobile.
+Outside it: `logisticbay.com` carries SendGrid DKIM records
+(`s1/s2._domainkey`) and the separate TMS sends through SendGrid, so those
+records stay. The STATUS lineage row naming `api/src/email.ts` (SendGrid)
+describes the TMS; no shift-report email exists in this product.
+
+**Built.** An SES mailer (API v2, us-east-1); an explicit `MAIL_TRANSPORT`
+(`ses` required in production, `outbox` development-only, `disabled` the
+test default); fixed per-purpose senders with Reply-To support@; SES errors
+scrubbed of the message text before they can be logged; a signed-SNS
+endpoint for bounces and complaints that exists only when a topic is
+configured.
+
+**AWS (owner-approved, 2026-10-08).** IAM user `lb-timesheets-ses` created
+with one inline policy (send only, us-east-1, the three senders) and no
+access key. The account-level suppression list was already enabled for
+bounces and complaints — unchanged.
+
+**Not done, by instruction:** no access key, no Railway variables, no
+deployment, no DNS change, no live send.
+
+---
+
 ## 2026-10-04 — Company-web authorization contract (D54, O11 refined)
 
 **Audit.** Roles are `driver | admin` (an enum). The database pairs them

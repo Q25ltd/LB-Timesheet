@@ -30,6 +30,7 @@
  * transport for the same lifecycle — the secret in an HttpOnly cookie — is
  * `routes/webAuth.ts`, calling the same services (D45, D46).
  */
+import type { EmailDeliveryRepository } from "../repositories/emailDeliveryRepository.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IdentityContext } from "../lib/auth.js";
 import type { AuthRateLimits } from "../lib/authRateLimits.js";
@@ -61,6 +62,7 @@ export function registerAuthRoutes(
   accounts: IdentityRepository,
   sessions: RefreshRepository,
   limits: AuthRateLimits,
+  delivery: EmailDeliveryRepository,
 ): void {
   app.post(
     "/auth/register",
@@ -148,7 +150,7 @@ export function registerAuthRoutes(
     "/auth/me",
     { config: { authPosture: "identity" } },
     async (request: FastifyRequest) => {
-      return accountView(identified(request.identity).userId, accounts);
+      return accountView(identified(request.identity).userId, accounts, delivery);
     },
   );
 }

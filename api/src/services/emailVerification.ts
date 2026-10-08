@@ -15,6 +15,7 @@
  *            unknown, tampered, superseded, used, expired — is one identical
  *            400, so the endpoint cannot be probed for which.
  */
+import { RecipientSuppressedError } from "../lib/emailDelivery.js";
 import { z } from "zod";
 import { ACCOUNT_TOKEN_LIFETIME_MS, hashAccountToken, mintAccountToken } from "../lib/accountToken.js";
 import { verificationEmail } from "../lib/authEmails.js";
@@ -87,11 +88,20 @@ export async function issueEmailVerification(
   });
 
   const message = verificationEmail({
+    userId:    state.user.id,
     to:        state.user.email,
     firstName: state.user.firstName,
     link:      `${mail.webAppUrl}/verify-email#token=${token}`,
   });
-  return { kind: "ready", deliver: () => mail.mailer.send(message) };
+  return { kind: "ready", deliver: async () => { await mail.mailer.send(message); } };
+}
+
+/**
+ * The account's own address is suppressed after a hard bounce or complaint
+ * (D56). Said to the owner only — never on a public route.
+ */
+export function emailUndeliverable(): AppError {
+  return new AppError(409, "Email cannot be delivered to this address. Correct your email address.", "EMAIL_UNDELIVERABLE");
 }
 
 /**
@@ -116,6 +126,9 @@ export async function requestEmailVerification(
   try {
     await issued.deliver();
   } catch (error) {
+    // The address is known not to receive mail (D56): asking again cannot
+    // help, so the owner is told to correct it rather than to wait.
+    if (error instanceof RecipientSuppressedError) throw emailUndeliverable();
     // The provider's error goes to the server log; the account owner is told
     // only that it did not go, and may ask again (the new token supersedes).
     mail.log.error({ err: error, task: "email-verification" }, "verification email could not be sent");

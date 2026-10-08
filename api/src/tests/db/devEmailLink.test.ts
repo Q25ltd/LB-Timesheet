@@ -40,7 +40,7 @@ process.env.JWT_SECRET       = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24
 process.env.NODE_ENV         = "development";
 process.env.WEB_ORIGIN       = ORIGIN;
 process.env.WEB_APP_URL      = ORIGIN;
-process.env.SENDGRID_API_KEY = "";
+process.env.MAIL_TRANSPORT   = "outbox";
 
 const { buildApp } = await import("../../app.js");
 
