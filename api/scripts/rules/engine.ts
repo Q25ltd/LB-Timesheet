@@ -358,5 +358,71 @@ for (const file of files) {
   }
 }
 
+// ── 11. Migrations after the baseline are additive ──────────────────────────
+// Railway runs `prisma migrate deploy` BEFORE the new version takes traffic,
+// while the PREVIOUS version is still serving (DEPLOYMENT.md). A migration
+// that drops, renames, retypes, empties or tightens something the previous
+// version still uses breaks it mid-deploy — and loses data no backup restore
+// gets back cleanly. So a migration added after the pre-production baseline
+// may only ADD; a destructive change is a deliberate, owner-approved act,
+// written down IN the migration as
+//   -- migration-destructive-approved: <why, and the two-step plan>
+// The baseline was applied to empty databases only (D57); its files are not
+// edited — an applied migration's checksum must not change.
+const PRE_PRODUCTION_MIGRATIONS = new Set([
+    "20260830132905_init",
+    "20260830150000_submit_job_status_enum_and_one_outbox_per_shift",
+    "20260830160000_membership_role_enum",
+    "20260831090000_session_persistence_foundation",
+    "20260831210000_company_timezone_authority",
+    "20260909120000_shift_client_event_identity",
+    "20260910120000_user_identity_names",
+    "20260910130000_user_email_citext",
+    "20261001090000_remove_company_join_code",
+    "20261001100000_session_client_kind",
+    "20261001110000_account_tokens_and_email_verification",
+    "20261001120000_account_kind",
+    "20261001130000_account_kind_boundaries",
+    "20261002090000_pending_company_registration",
+    "20261002100000_pending_registration_single_unique",
+    "20261003120000_pending_registration_timezone",
+    "20261008120000_email_delivery_status",
+]);
+
+const DESTRUCTIVE_SQL = [
+  /\bDROP\s+(TABLE|COLUMN|TYPE|SCHEMA|EXTENSION|VIEW|CONSTRAINT|INDEX)\b/i,
+  /\bRENAME\b/i,
+  /\bTRUNCATE\b/i,
+  /\bDELETE\s+FROM\b/i,
+  /\bALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE\b/i,
+  /\bSET\s+NOT\s+NULL\b/i,
+];
+const APPROVAL = /^--\s*migration-destructive-approved:\s*\S.{9,}/m;
+
+const MIGRATIONS = join(API_ROOT, "prisma", "migrations");
+const migrationDirs = (() => {
+  try {
+    return readdirSync(MIGRATIONS).filter(name => statSync(join(MIGRATIONS, name)).isDirectory());
+  } catch {
+    return [];
+  }
+})();
+for (const name of migrationDirs) {
+  if (PRE_PRODUCTION_MIGRATIONS.has(name)) continue;
+  const file = join(MIGRATIONS, name, "migration.sql");
+  const source = readFileSync(file, "utf8");
+  if (APPROVAL.test(source)) continue;
+  source.split("\n").forEach((line, index) => {
+    const statement = line.replace(/--.*$/, "");
+    if (DESTRUCTIVE_SQL.some(pattern => pattern.test(statement))) {
+      report(
+        "migration-additive", file, index, line,
+        "A migration after the pre-production baseline may only ADD: the previous version is still serving while it runs. " +
+        "A destructive change needs the owner's approval, written in the file as `-- migration-destructive-approved: <why>` (DEPLOYMENT.md).",
+      );
+    }
+  });
+}
+
   return violations;
 }

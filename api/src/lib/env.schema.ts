@@ -27,6 +27,14 @@ function defaultMailTransport(nodeEnv: NodeEnv | undefined): MailTransportName |
   return null;
 }
 
+/**
+ * Where a request's client address comes from, for rate limiting (F-15,
+ * lib/clientAddress.ts). Explicit in production: behind a proxy the wrong
+ * choice puts every client in one bucket, or lets a client choose its own.
+ */
+const CLIENT_IP_SOURCES = ["socket", "x-real-ip"] as const;
+export type ClientIpSource = (typeof CLIENT_IP_SOURCES)[number];
+
 /** An AWS Region code, e.g. `us-east-1`. */
 const AWS_REGION_PATTERN = /^[a-z]{2}(-[a-z]+)+-\d$/;
 
@@ -123,6 +131,8 @@ const BaseEnv = z.object({
   JWT_SECRET:       z.string().min(1, "JWT_SECRET is required").max(500),
   /** ses | outbox | disabled — see MAIL_TRANSPORTS. Unset: development → outbox, test → disabled, production → refused. */
   MAIL_TRANSPORT:   z.enum(MAIL_TRANSPORTS).optional(),
+  /** socket | x-real-ip — see CLIENT_IP_SOURCES. Unset: development and test → socket; production → refused. */
+  CLIENT_IP_SOURCE: z.enum(CLIENT_IP_SOURCES).optional(),
   /** Where SES sends from: the region `logisticbay.com` is verified in (us-east-1). */
   AWS_REGION:       z.string().max(32).default("us-east-1"),
   /** The `lb-timesheets-ses` IAM user's key — required when MAIL_TRANSPORT is ses. */
@@ -160,14 +170,25 @@ export const EnvSchema = BaseEnv
 
     // The entire product is "PDF arrives in an inbox" (PRODUCT.md), and an
     // account cannot be confirmed without its email. A production process
-    // with email unconfigured would accept what it can never deliver — so it
-    // must not start (F-07). Only SES sends from production.
+    // must never be UNCONFIGURED for email (F-07): it says which transport,
+    // explicitly. Two are possible there:
+    //   ses       real email — with its credentials, below
+    //   disabled  a deliberate, controlled deployment that sends nothing (a
+    //             private first deploy, D57); every send fails and is logged
+    // An unset value is refused, so "no email" is never an accident.
     const transport = value.MAIL_TRANSPORT ?? defaultMailTransport(value.NODE_ENV);
-    if (transport === null || (!devLike && transport !== "ses")) {
+    if (transport === null || (!devLike && transport !== "ses" && transport !== "disabled")) {
       ctx.addIssue({
         code: "custom",
         path: ["MAIL_TRANSPORT"],
-        message: "MAIL_TRANSPORT must be \"ses\" unless NODE_ENV is explicitly development or test",
+        message: "MAIL_TRANSPORT must be set explicitly to \"ses\" (or \"disabled\" for a deployment that sends no email) unless NODE_ENV is explicitly development or test",
+      });
+    }
+    if (value.CLIENT_IP_SOURCE === undefined && !devLike) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CLIENT_IP_SOURCE"],
+        message: "CLIENT_IP_SOURCE must be set explicitly unless NODE_ENV is explicitly development or test — \"x-real-ip\" behind Railway's edge, \"socket\" with no proxy in front",
       });
     }
     if (transport === "outbox" && value.NODE_ENV !== "development") {
@@ -249,6 +270,8 @@ export const EnvSchema = BaseEnv
     // Validation above has refused every case where this would be null.
     MAIL_TRANSPORT: value.MAIL_TRANSPORT ?? defaultMailTransport(value.NODE_ENV) ?? "disabled",
     SES_NOTIFICATION_TOPIC_ARN: value.SES_NOTIFICATION_TOPIC_ARN.trim(),
+    // Validation above has refused an unset value outside development and test.
+    CLIENT_IP_SOURCE: value.CLIENT_IP_SOURCE ?? "socket",
   }));
 
 export type Env = z.infer<typeof EnvSchema>;

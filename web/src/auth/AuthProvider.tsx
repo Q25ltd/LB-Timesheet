@@ -138,10 +138,15 @@ async function serialised<T>(task: () => Promise<T>): Promise<T> {
   return task();
 }
 
+/** After the API could not be reached, how long before a restore asks again. */
+const RESTORE_RETRY_AFTER_MS = 10_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "unknown" });
   const identityToken = useRef<string | null>(null);
   const restoring = useRef<Promise<void> | null>(null);
+  /** When the last restore could not reach the API, or null. */
+  const unreachableAt = useRef<number | null>(null);
   const refreshing = useRef<Promise<ApiResult<string>> | null>(null);
 
   const signOutLocally = useCallback(() => {
@@ -206,9 +211,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const restore = useCallback((): Promise<void> => {
     if (restoring.current !== null) return restoring.current;
+    // An API that could not be reached is not asked again AT ONCE. Pages
+    // restore whenever the auth state changes, and reporting "could not
+    // reach" IS a state change: without this pause every open browser would
+    // retry as fast as the network fails, aimed at an API already down. A
+    // later restore — the next page, a reload — tries again.
+    if (unreachableAt.current !== null && Date.now() - unreachableAt.current < RESTORE_RETRY_AFTER_MS) return Promise.resolve();
     const pending = (async () => {
       setState({ status: "restoring" });
       const unavailable = () => {
+        unreachableAt.current = Date.now();
         setState({ status: "unavailable" });
         restoring.current = null;   // a later attempt may succeed
       };
@@ -223,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signOutLocally();
         return;
       }
+      unreachableAt.current = null;
       identityToken.current = result.value;
       const loaded = await loadAccount(null);
       if (loaded.ok) return;

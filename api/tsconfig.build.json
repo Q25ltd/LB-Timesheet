@@ -1,0 +1,14 @@
+{
+  // The PRODUCTION build (F-17): `src/` compiled to `dist/`, run by plain
+  // `node dist/server.js`. Tests, scripts and fixtures are not part of it, so
+  // nothing a test imports can become a production dependency.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/tests/**", "node_modules", "dist"]
+}

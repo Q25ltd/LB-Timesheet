@@ -26,6 +26,7 @@ const EXPECTED_BAD = [
   "error-envelope  src/routes/leaky.ts:6",
   "error-envelope  src/routes/leaky.ts:16",
   "jwt-centralised  src/routes/leaky.ts:8",
+  "migration-additive  prisma/migrations/20990101000000_drop_name/migration.sql:3",
   "no-any  src/routes/leaky.ts:3",
   "no-client-tenant  src/routes/leaky.ts:11",
   "no-client-tenant  src/routes/leaky.ts:13",
@@ -66,6 +67,7 @@ test("every rule in the engine fires at least once on the bad tree", () => {
     "no-company-id-in-dto", "no-raw-request-past-route", "no-request-in-services",
     "tenant-models-via-repository", "tenant-context-trust-sites",
     "no-prisma-in-routes", "route-registered", "route-declares-auth",
+    "migration-additive",
   ];
   for (const id of ROSTER) {
     assert.ok(firedIds.has(id), `rule "${id}" never fires on the bad fixture — unwired or fixture gap`);

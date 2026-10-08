@@ -80,6 +80,7 @@ sentence — stop.
 | What was decided, and what is still open? | **DECISIONS.md** |
 | How do auth, tokens and tenant scoping work? | **AUTH.md** ← frozen contract, changing it is an architectural decision |
 | What happened in previous sessions? | **DEVLOG.md** |
+| How is it deployed — Railway, Vercel, DNS, backups? | **DEPLOYMENT.md** ← a runbook; every cloud change needs the owner's approval |
 
 **Never assume what exists. Always check STATUS.md and the actual code first.**
 

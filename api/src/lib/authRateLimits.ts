@@ -23,7 +23,7 @@
  * global limit already applies. Password CHANGE is here because it verifies a
  * password — the same guessing surface as login, so login's limit.
  */
-import type { FastifyInstance, onRequestAsyncHookHandler } from "fastify";
+import type { FastifyInstance, FastifyRequest, onRequestAsyncHookHandler } from "fastify";
 
 const AUTH_RATE_LIMITS = {
   login:              { max: 10, timeWindow: "1 minute" },
@@ -37,12 +37,18 @@ export const EMAILS_PER_ADDRESS_PER_HOUR = 3;
 
 export type AuthRateLimits = Record<keyof typeof AUTH_RATE_LIMITS, onRequestAsyncHookHandler>;
 
-/** Build one limiter hook per policy. Call once per app, after the plugin is registered. */
-export function authRateLimits(app: FastifyInstance): AuthRateLimits {
+/**
+ * Build one limiter hook per policy. Call once per app, after the plugin is
+ * registered. Every policy counts per CLIENT, as `clientAddress` decides it
+ * (lib/clientAddress.ts, F-15) — stated here rather than inherited, so no
+ * policy can quietly key on the proxy instead.
+ */
+export function authRateLimits(app: FastifyInstance, clientAddress: (request: FastifyRequest) => string): AuthRateLimits {
+  const keyGenerator = clientAddress;
   return {
-    login:              app.rateLimit({ ...AUTH_RATE_LIMITS.login }),
-    registration:       app.rateLimit({ ...AUTH_RATE_LIMITS.registration }),
-    passwordForgot:     app.rateLimit({ ...AUTH_RATE_LIMITS.passwordForgot }),
-    verificationResend: app.rateLimit({ ...AUTH_RATE_LIMITS.verificationResend }),
+    login:              app.rateLimit({ ...AUTH_RATE_LIMITS.login, keyGenerator }),
+    registration:       app.rateLimit({ ...AUTH_RATE_LIMITS.registration, keyGenerator }),
+    passwordForgot:     app.rateLimit({ ...AUTH_RATE_LIMITS.passwordForgot, keyGenerator }),
+    verificationResend: app.rateLimit({ ...AUTH_RATE_LIMITS.verificationResend, keyGenerator }),
   };
 }

@@ -3,9 +3,11 @@
  * sessions and tenant context (D44). The web app is only its client.
  *
  * `VITE_API_URL` overrides it. Without one, development uses the local API
- * and a production build uses the API host D3 assigns to this product.
+ * and a production build uses the API host D3 assigns to this product. The
+ * production host is also named in `vercel.json`'s Content-Security-Policy
+ * (`connect-src`); a test keeps the two in step.
  */
-const PRODUCTION_API = "https://timesheets-api.logisticbay.com";
+export const PRODUCTION_API = "https://api.timesheets.logisticbay.com";
 const DEVELOPMENT_API = "http://localhost:3000";
 
 function configured(): string | null {

@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-10-08 — Deployment prepared: B1–B4, email off by choice, health split (D57)
+
+**Owner decisions:** API host `api.timesheets.logisticbay.com` (D3 amended);
+a controlled private first deploy with `MAIL_TRANSPORT=disabled`; nothing of
+the TMS touched. Nothing was deployed and no cloud resource was created.
+
+**Built.**
+- B1: Fastify 5.12.1 → 5.12.5 (an authentication-bypass and three validation
+  advisories), fast-uri patched with it. Prisma's remaining advisory is the
+  unused `mysql2` driver; its only offered fix is a breaking downgrade.
+- B2 (F-17 closed): `npm run build` → `node dist/server.js`; Node `22.x`;
+  `prisma generate` no longer needs a database URL. `npm run smoke:api`, now
+  in `npm run check`, proves the start command, a dist that imports only
+  runtime dependencies, a production start with email disabled and no AWS
+  credentials, and that an unset transport is still refused.
+- B3 (F-15, live check pending): `CLIENT_IP_SOURCE` (`socket` | `x-real-ip`,
+  required in production), never `X-Forwarded-For`, `trustProxy` off; the
+  global limit before authentication, with `x-ratelimit-*` on every answer.
+- B4: `web/vercel.json` — SPA fallback, CSP, HSTS and the other headers.
+- Health: `/health/live` and `/health` (503 when the database is down).
+- `migration-additive`: later migrations may only add, unless approved in
+  the file.
+- `DEPLOYMENT.md`: Railway, Vercel, DNS, client-address verification,
+  backups, email switch-on and rollback.
+
+**Found on the way.**
+1. Fastify's rate-limit plugin attaches its "global" limit as a ROUTE-level
+   hook, which runs after every app-level hook — so authentication always ran
+   first and a request that failed authentication was never counted. An
+   app-level `app.rateLimit` hook does not work either: the plugin lets only
+   the first of its limiters count a request, which would have silently
+   disabled the endpoint limits. `createRateLimit` in our own hook does both.
+2. Serving the production build with the real headers against an API that
+   did not answer showed **246 refresh requests in a burst**: "could not
+   reach" changed the auth state, which re-ran the page's restore. A restore
+   that could not reach the API now waits 10 seconds before trying again;
+   proven in the browser (1 request) and by test.
+
+**Proven.** API 230 unit, web 139, the smoke check, Playwright; fourteen
+mutations caught. A mutation harness that used an unsplit zsh variable made
+no backups and stacked twelve mutations for one run; every one was undone by
+its exact inverse, the full suites confirmed the tree, and the proofs were
+re-run one at a time with real backups.
+
+---
+
 ## 2026-10-08 — Email delivery status: bounces and complaints stored (D56)
 
 **Built.** Three account-level tables (migration `20261008120000`, additive):

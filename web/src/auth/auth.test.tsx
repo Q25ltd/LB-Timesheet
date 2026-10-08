@@ -152,6 +152,35 @@ describe("session restore and expiry", () => {
     expect(screen.queryByRole("heading", { level: 1, name: "Company sign-in" })).toBeNull();
   });
 
+  // Found serving the production build against an API that did not answer:
+  // each 'could not reach' changed the auth state, which re-ran the page's
+  // restore, which failed again — hundreds of refreshes a second from every
+  // open browser, all aimed at an API that was already down.
+  test("an API that cannot be reached is asked ONCE — not again and again while the page waits", async () => {
+    api.on("POST /auth/web/refresh", () => "offline");
+    renderRoute(PATHS.account);
+    await screen.findByRole("heading", { level: 1, name: "We could not reach LogisticBay Timesheets" });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(api.calls.filter(c => c.path === "/auth/web/refresh")).toHaveLength(1);
+  });
+
+  test("after a pause, moving to another page asks again — and a recovered API restores the session", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      api.on("POST /auth/web/refresh", () => "offline");
+      const { router } = renderRoute(PATHS.account);
+      await screen.findByRole("heading", { level: 1, name: "We could not reach LogisticBay Timesheets" });
+
+      vi.setSystemTime(Date.now() + 15_000);
+      signedInApi();
+      await router.navigate(PATHS.company);
+      await waitFor(() => expect(api.calls.filter(c => c.path === "/auth/web/refresh")).toHaveLength(2));
+      await screen.findByRole("heading", { level: 1, name: "Your account" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("a server fault reading the account after a good restore is 'could not reach' too", async () => {
     api.on("POST /auth/web/refresh", { status: 200, body: { identityToken: IDENTITY } });
     api.on("GET /auth/me", { status: 503, body: { error: "Unavailable" } });

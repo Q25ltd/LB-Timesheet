@@ -21,6 +21,7 @@ const prod = {
   WEB_ORIGIN: "https://timesheets.logisticbay.com",
   WEB_APP_URL: "https://timesheets.logisticbay.com",
   MAIL_TRANSPORT: "ses",
+  CLIENT_IP_SOURCE: "x-real-ip",
   AWS_ACCESS_KEY_ID: "AKIAFAKEFORTESTSONLY",
   AWS_SECRET_ACCESS_KEY: "fake-secret-for-tests-only",
 };
@@ -39,14 +40,37 @@ test("accepts a minimal valid environment and applies defaults", () => {
 
 // ── Email must be configured outside dev/test (F-07) ─────────────────────────
 
-test("production sends through SES and nothing else — unset, outbox and disabled all fail closed", () => {
+test("production must SAY how email leaves: unset and the local outbox fail closed", () => {
   assert.equal(EnvSchema.parse(prod).MAIL_TRANSPORT, "ses");
   const { MAIL_TRANSPORT: _unset, ...noTransport } = prod;
-  for (const candidate of [noTransport, { ...prod, MAIL_TRANSPORT: "outbox" }, { ...prod, MAIL_TRANSPORT: "disabled" }]) {
-    const result = EnvSchema.safeParse(candidate);
-    assert.equal(result.success, false);
-    assert.match(describeEnvFailure(result.error), /MAIL_TRANSPORT must be "ses"/);
+  const unset = EnvSchema.safeParse(noTransport);
+  assert.equal(unset.success, false, "no email is never an accident");
+  assert.match(describeEnvFailure(unset.error), /MAIL_TRANSPORT must be set explicitly/);
+  const outbox = EnvSchema.safeParse({ ...prod, MAIL_TRANSPORT: "outbox" });
+  assert.equal(outbox.success, false, "production never writes email to disk");
+});
+
+test("a controlled production deployment may EXPLICITLY disable email — and then needs no AWS credentials (D57)", () => {
+  const { AWS_ACCESS_KEY_ID: _id, AWS_SECRET_ACCESS_KEY: _secret, ...noAws } = prod;
+  const parsed = EnvSchema.parse({ ...noAws, MAIL_TRANSPORT: "disabled" });
+  assert.equal(parsed.MAIL_TRANSPORT, "disabled");
+  assert.equal(parsed.AWS_ACCESS_KEY_ID, "");
+  // Switching to real email still demands the credentials.
+  const ses = EnvSchema.safeParse({ ...noAws, MAIL_TRANSPORT: "ses" });
+  assert.equal(ses.success, false);
+  assert.match(describeEnvFailure(ses.error), /AWS_ACCESS_KEY_ID is required when MAIL_TRANSPORT is ses/);
+});
+
+test("production must SAY where a client's address comes from — unset fails closed; a bogus source is refused (F-15)", () => {
+  const { CLIENT_IP_SOURCE: _unset, ...noSource } = prod;
+  const unset = EnvSchema.safeParse(noSource);
+  assert.equal(unset.success, false);
+  assert.match(describeEnvFailure(unset.error), /CLIENT_IP_SOURCE must be set explicitly/);
+  for (const source of ["x-forwarded-for", "any", "true", "1"]) {
+    assert.equal(EnvSchema.safeParse({ ...prod, CLIENT_IP_SOURCE: source }).success, false, `${source} is not a source`);
   }
+  assert.equal(EnvSchema.parse({ ...prod, CLIENT_IP_SOURCE: "socket" }).CLIENT_IP_SOURCE, "socket");
+  assert.equal(EnvSchema.parse({ ...valid, NODE_ENV: "development" }).CLIENT_IP_SOURCE, "socket", "development trusts no header");
 });
 
 test("SES without its credentials fails closed, in every environment", () => {

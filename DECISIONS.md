@@ -31,8 +31,10 @@ demand to log into both with one account.
 ### D3 — Domain layout (2026-08-25)
 - `logisticbay.com` — marketing site; the **only** shared surface
 - `timesheets.logisticbay.com` — this product
-- `timesheets-api.logisticbay.com` — this product's API
-- `app.logisticbay.com` / `api.logisticbay.com` — the TMS
+- ~~`timesheets-api.logisticbay.com`~~ **`api.timesheets.logisticbay.com`** — this product's API *(owner decision 2026-10-08, D57)*
+- ~~`app.logisticbay.com` / `api.logisticbay.com` — the TMS~~ *(2026-10-08: the TMS decided its own hosts — today its web app is
+  served from `www.logisticbay.com` (the apex redirects there) with a planned move to `tms.logisticbay.com`, and its API is on
+  Railway's own domain. Recorded for awareness only: this product never touches them.)*
 
 The marketing site is **dumb**: no login, no auth, no API calls — it links out,
 and each product owns its own login page. It may be a cheap static site.
@@ -2230,4 +2232,37 @@ Owner decision (requirements given 2026-10-08), building on D55.
   `EmailMessage` grows with every email), removing an address from SES's
   suppression list (a support act in AWS), and a correction screen in the
   phone app.
+
+### D57 — The first deployment: independent, private, and safe by configuration (2026-10-08)
+
+Owner decision.
+
+- **Hosts:** web `timesheets.logisticbay.com` (Vercel), API
+  `api.timesheets.logisticbay.com` (Railway), its own Railway PostgreSQL —
+  a new Railway project and a new Vercel project. Nothing of the TMS is
+  touched, reused or connected (DEPLOYMENT.md section 0). The JWT audience
+  `timesheets-api` is a token contract, not a host, and is unchanged.
+- **Email may be EXPLICITLY disabled in production.** `MAIL_TRANSPORT=disabled`
+  lets a controlled deployment start without AWS credentials; every send
+  fails and is logged. An UNSET transport is still refused (F-07), `ses`
+  still requires its credentials, `outbox` stays development-only.
+- **Client address for rate limits:** `CLIENT_IP_SOURCE` = `socket` |
+  `x-real-ip`, required in production. `x-real-ip` reads Railway's edge-set
+  header, as one valid address only. `X-Forwarded-For` is never read and
+  Fastify's `trustProxy` stays off — no hop count, no "trust everything".
+  Verified on the live edge at the first private deploy (DEPLOYMENT.md
+  section 5). The global limit runs before authentication (F-15).
+- **Health:** `/health/live` (process) and `/health` (database readiness,
+  503 when down). A database outage is visible and causes no restarts.
+- **Production runs compiled JavaScript** (`node dist/server.js`), never
+  `tsx` (F-17).
+- **Migrations:** applied by `prisma migrate deploy` before a new version
+  takes traffic; after the pre-production baseline they are additive only,
+  and a destructive one carries the owner's written approval
+  (`migration-additive`).
+- **Backups (recommended, not yet configured):** PITR, daily + weekly volume
+  backups, and a daily `pg_dump` outside Railway before going public, with a
+  restore drill (DEPLOYMENT.md section 6).
+- **Not in this deployment:** live email, app-store releases, and any TMS
+  change (including moving the TMS to `tms.logisticbay.com`).
 

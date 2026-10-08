@@ -127,9 +127,14 @@ test("a request with no Origin header still works and gets no CORS headers", asy
   await app.close();
 });
 
+function field(body: unknown, key: string): unknown {
+  return typeof body === "object" && body !== null ? (Reflect.get(body, key) as unknown) : undefined;
+}
+
 test("/health reports db up when the query succeeds", async () => {
   const app = await buildApp(db);
   const res = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(res.statusCode, 200, "ready");
   const body: unknown = res.json();
   assert.equal(health(body).db, "up");
   await app.close();
@@ -144,10 +149,17 @@ test("/health reports degraded when the query fails", async () => {
   };
   const app = await buildApp(failing);
   const res = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(res.statusCode, 503, "NOT ready — visible to a deploy gate or monitor");
   const body: unknown = res.json();
   const parsed = health(body);
   assert.equal(parsed.status, "degraded");
   assert.equal(parsed.db, "down");
+
+  // …while the process is ALIVE: liveness never asks the database, so an
+  // outage is no reason to restart it.
+  const live = await app.inject({ method: "GET", url: "/health/live" });
+  assert.equal(live.statusCode, 200);
+  assert.equal(field(live.json(), "status"), "ok");
   await app.close();
 });
 

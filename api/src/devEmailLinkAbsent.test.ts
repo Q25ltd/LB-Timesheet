@@ -23,6 +23,7 @@ process.env.NODE_ENV         = "production";
 process.env.WEB_ORIGIN       = "https://timesheets.logisticbay.com";
 process.env.WEB_APP_URL      = "https://timesheets.logisticbay.com";
 process.env.MAIL_TRANSPORT        = "ses";
+process.env.CLIENT_IP_SOURCE      = "x-real-ip";
 process.env.AWS_ACCESS_KEY_ID     = "AKIAFAKEFORTESTSONLY";
 process.env.AWS_SECRET_ACCESS_KEY = "fake-secret-for-tests-only-never-used-to-send";
 

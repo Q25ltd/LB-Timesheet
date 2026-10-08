@@ -3,7 +3,8 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { env } from "./lib/env.js";
-import { allowedOrigins, webAppUrl } from "./lib/env.schema.js";
+import { allowedOrigins, webAppUrl, type ClientIpSource } from "./lib/env.schema.js";
+import { clientAddressOf } from "./lib/clientAddress.js";
 import { AppError, registerErrorHandling } from "./lib/errors.js";
 import { requireAuth, requireSession } from "./lib/auth.js";
 import { TENANT_VERIFY_OPTIONS } from "./lib/tokens.js";
@@ -66,9 +67,19 @@ export interface AppOptions {
   outboxDirectory?: string;
   /** Reads SNS certificates and subscription URLs — tests only, so none reaches the network. */
   snsFetch?: SnsFetch;
+  /** Where a client's address comes from, instead of CLIENT_IP_SOURCE — tests only. */
+  clientIpSource?: ClientIpSource;
+}
+
+/** The one 429 every limit answers with (F-05): a fixed, safe message. */
+function rateLimited(): AppError {
+  return new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
 }
 
 export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): Promise<FastifyInstance> {
+  // Who a request is from, for every rate limit (F-15). Fastify's own
+  // `trustProxy` stays OFF: request.ip is always the socket peer.
+  const clientAddress = clientAddressOf(options.clientIpSource ?? env.CLIENT_IP_SOURCE);
   const app = Fastify({
     logger: env.NODE_ENV === "development" ? { transport: undefined, level: "info" } : true,
   });
@@ -150,6 +161,42 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // authentication boundary can read through.
   const identity = authStore(prisma);
 
+  // The global limit runs BEFORE authentication (F-15), so a client over its
+  // limit is refused before any Session or membership is read: a flood costs
+  // a counter, not the database.
+  //
+  // The plugin's own `global` mode cannot do that: it attaches a ROUTE-level
+  // hook, and route-level hooks run after every app-level one — a request
+  // that failed authentication was never even counted. Nor can an app-level
+  // `app.rateLimit(...)` hook: the plugin lets only the FIRST of its limiters
+  // count a request, so it would silently disable the endpoint limits (B6).
+  // `createRateLimit` only answers "over the limit?" with its own store, so
+  // it is checked here, first after cors (which answers a preflight itself),
+  // and the endpoint limits still count. Per CLIENT, as `clientAddress`
+  // decides it (lib/clientAddress.ts).
+  await app.register(rateLimit, {
+    global: false,
+    keyGenerator: clientAddress,
+    // Route rate-limit rejections through the app's own envelope with a
+    // fixed, safe message -- not the plugin's default body, and not the
+    // generic 4xx-passthrough this replaces (F-05).
+    errorResponseBuilder: () => rateLimited(),
+  });
+  const globalLimit = app.createRateLimit({ max: 300, timeWindow: "1 minute", keyGenerator: clientAddress });
+  app.addHook("onRequest", async (request, reply) => {
+    const verdict = await globalLimit(request);
+    if (verdict.isAllowed) return;
+    // The standard headers, as the plugin's own limiter sends them — and how
+    // the client-address source is verified against the live edge
+    // (DEPLOYMENT.md): a forged X-Real-IP must not reset `remaining`.
+    void reply.header("x-ratelimit-limit", String(verdict.max));
+    void reply.header("x-ratelimit-remaining", String(verdict.remaining));
+    void reply.header("x-ratelimit-reset", String(verdict.ttlInSeconds));
+    if (!verdict.isExceeded) return;
+    void reply.header("retry-after", String(verdict.ttlInSeconds));
+    throw rateLimited();
+  });
+
   // F-10, extended to three postures by D21: every route is TENANT-
   // authenticated by default. A route becomes public or identity-scoped only
   // through the explicit `config: { authPosture }` marker below -- never by
@@ -159,12 +206,11 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // including ones later split into their own plugin files -- with no
   // registration path that skips it.
   //
-  // Placed AFTER `cors` and BEFORE `rateLimit`: a CORS preflight carries no
-  // Authorization header by design, and cors's own onRequest hook already
-  // replies to OPTIONS and ends the hook chain before this one runs, so
-  // preflight is never blocked here. Placed before rate-limiting so a
-  // rejected request is denied as cheaply as possible, without spending a
-  // rate-limit slot on a request that was never getting through.
+  // Placed AFTER `cors`: a CORS preflight carries no Authorization header by
+  // design, and cors's own onRequest hook already replies to OPTIONS and ends
+  // the hook chain before this one runs, so preflight is never blocked here.
+  // Placed AFTER the global rate limit (F-15): authentication reads the
+  // database, and a client over its limit must not get that far.
   app.addHook("onRequest", async (request) => {
     if (request.is404) return; // no route matched -- let 404 handling run
 
@@ -183,15 +229,6 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
     await requireAuth(request, identity);
   });
 
-  await app.register(rateLimit, {
-    max: 300,
-    timeWindow: "1 minute",
-    // Route rate-limit rejections through the app's own envelope with a
-    // fixed, safe message -- not the plugin's default body, and not the
-    // generic 4xx-passthrough this replaces (F-05).
-    errorResponseBuilder: () => new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED"),
-  });
-
   // Every error path — thrown, validation, unknown route, crash — leaves
   // through the one envelope. Without this, Fastify's defaults return their
   // own shape and a 500 echoes the exception message to the client.
@@ -199,7 +236,7 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
 
   // B6's endpoint-specific limits — one shared hook per policy, built once
   // the plugin above has decorated the instance.
-  const limits = authRateLimits(app);
+  const limits = authRateLimits(app, clientAddress);
 
   // The first protected business routes. Registered AFTER the default-deny
   // hook above, so they inherit it; the explicit `authPosture: "tenant"`
@@ -259,14 +296,25 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
     mail,
   }, limits);
 
-  app.get("/health", { config: { authPosture: "public" } }, async () => {
+  // LIVENESS: the process is up and answering. Touches nothing else, so a
+  // database outage never makes a supervisor restart a healthy process.
+  app.get("/health/live", { config: { authPosture: "public" } }, (_request, reply) => reply.send({
+    status:  "ok",
+    service: "lb-timesheet-api",
+    time:    new Date().toISOString(),
+  }));
+
+  // READINESS: the process can serve — its database answers. 503 when it
+  // does not, so the outage is VISIBLE to a deploy gate or a monitor; the
+  // process keeps running and recovers by itself when the database returns.
+  app.get("/health", { config: { authPosture: "public" } }, async (_request, reply) => {
     const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
-    return {
+    return reply.status(dbOk ? 200 : 503).send({
       status:  dbOk ? "ok" : "degraded",
       service: "lb-timesheet-api",
       db:      dbOk ? "up" : "down",
       time:    new Date().toISOString(),
-    };
+    });
   });
 
   return app;
