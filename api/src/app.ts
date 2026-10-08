@@ -84,6 +84,18 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
     logger: env.NODE_ENV === "development" ? { transport: undefined, level: "info" } : true,
   });
 
+  // On EVERY response — success, preflight, 401, 404, 429, 500 — so it is
+  // the FIRST hook, ahead of cors and the rate limit, which can end a
+  // request early. HSTS: the API is HTTPS-only behind Railway's edge, and a
+  // browser that has seen this never downgrades a later request to http
+  // (browsers ignore it over plain http, so local development is
+  // unaffected). nosniff: every body is JSON or empty, and must never be
+  // reinterpreted as script or HTML.
+  app.addHook("onRequest", async (_request, reply) => {
+    void reply.header("strict-transport-security", "max-age=63072000");
+    void reply.header("x-content-type-options", "nosniff");
+  });
+
   // Account emails (B4, B7). The mailer is chosen here, when the app is
   // built — never at import time — and work a request starts but does not
   // await is settled before the app finishes closing.

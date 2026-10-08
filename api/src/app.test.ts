@@ -267,3 +267,58 @@ test("a route registered inside a child plugin is still denied by default -- no 
   assert.deepEqual(res.json(), { error: "Not authenticated", code: "UNAUTHENTICATED" });
   await app.close();
 });
+
+// ── Transport security headers on EVERY response ────────────────────────────
+// HSTS and nosniff are set by the app's FIRST onRequest hook, so the paths
+// that end a request early — a CORS preflight, the global rate limit, the
+// auth guard, an unknown route, a crash — carry them too, not only a 200.
+function assertSecurityHeaders(res: { headers: Record<string, unknown> }, what: string): void {
+  assert.equal(res.headers["strict-transport-security"], "max-age=63072000", `${what}: HSTS`);
+  assert.equal(res.headers["x-content-type-options"], "nosniff", `${what}: nosniff`);
+}
+
+test("HSTS and nosniff are on success, preflight, 401, 404 and 500 responses", async () => {
+  const app = await buildApp(db);
+  app.get("/test-only/protected", () => ({ ok: true }));
+  app.get("/test-only/crash", { config: { authPosture: "public" } }, () => {
+    throw new Error("deliberate crash");
+  });
+
+  const ok = await app.inject({ method: "GET", url: "/health/live" });
+  assert.equal(ok.statusCode, 200);
+  assertSecurityHeaders(ok, "200");
+
+  for (const origin of [ALLOWED, FOREIGN]) {
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: "/health",
+      headers: { origin, "access-control-request-method": "GET" },
+    });
+    assert.equal(preflight.statusCode, 204);
+    assertSecurityHeaders(preflight, `preflight from ${origin}`);
+  }
+
+  const denied = await app.inject({ method: "GET", url: "/test-only/protected" });
+  assert.equal(denied.statusCode, 401);
+  assertSecurityHeaders(denied, "401");
+
+  const missing = await app.inject({ method: "GET", url: "/no-such-route" });
+  assert.equal(missing.statusCode, 404);
+  assertSecurityHeaders(missing, "404");
+
+  const crashed = await app.inject({ method: "GET", url: "/test-only/crash" });
+  assert.equal(crashed.statusCode, 500);
+  assertSecurityHeaders(crashed, "500");
+  await app.close();
+});
+
+test("HSTS and nosniff are on a rate-limited 429, and the limit still applies", async () => {
+  const app = await buildApp(db);
+  let last = await app.inject({ method: "GET", url: "/health/live" });
+  for (let i = 0; i < 300 && last.statusCode !== 429; i += 1) {
+    last = await app.inject({ method: "GET", url: "/health/live" });
+  }
+  assert.equal(last.statusCode, 429, "the global limit still answers 429");
+  assertSecurityHeaders(last, "429");
+  await app.close();
+});

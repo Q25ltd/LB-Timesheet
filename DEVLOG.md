@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-10-08 — First private Railway deploy; HSTS and nosniff on every API response
+
+**Deployed (owner-approved, Hobby plan):** Railway project `LB-Timesheet`
+with two services, nothing shared with LB-TMS — `Postgres` (PostgreSQL 18,
+private networking only, no TCP proxy) and `timesheets-api` from `main`,
+configured as DEPLOYMENT.md §2, with `MAIL_TRANSPORT=disabled` and a newly
+generated `JWT_SECRET`. Temporary address
+`https://timesheets-api-production.up.railway.app`; no custom domain, no DNS.
+All 17 migrations applied to the empty database; `/health` reports the
+database up. Live checks: CORS admits only `https://timesheets.logisticbay.com`;
+every protected route refuses no token, a garbage token, `alg:none` and a
+wrong-key signature with 401; test and dev routes are 404. **F-15, steps 1–2
+of DEPLOYMENT.md §5 verified on the live edge:** forged `X-Real-IP` and
+`X-Forwarded-For` continue the same rate-limit count, and once the 300/min
+limit is exceeded no forged header escapes the 429. Step 3 (a second network
+starts its own count) is still to run.
+
+**Built — transport headers.** The live API sent no HSTS and no `nosniff`.
+`app.ts` now sets `Strict-Transport-Security: max-age=63072000` (as the web
+app's) and `X-Content-Type-Options: nosniff` in the app's FIRST `onRequest`
+hook, so the responses that end early — CORS preflight, the global 429, the
+auth guard's 401, an unknown route's 404, a 500 — carry them too. Nothing
+else in the request pipeline moved. Two tests in `app.test.ts`; removing
+`nosniff`, or moving the hook after cors and the rate limit, each fails 2.
+
+**Investigated — PostgreSQL 18.** Production runs 18; CI and `docker-compose`
+run 16. The full db stage (`npm run test:db`: clean migrate + 280 integrity
+and Company A/B tests) passes on a throwaway PostgreSQL 18.6. CI was not
+changed in this entry.
+
+---
+
 ## 2026-10-08 — Deployment prepared: B1–B4, email off by choice, health split (D57)
 
 **Owner decisions:** API host `api.timesheets.logisticbay.com` (D3 amended);
