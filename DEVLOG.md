@@ -39,6 +39,26 @@ and 10 mutations killed. Rehearsed with the real image against PostgreSQL
 the acknowledgement is proven on real S3 at the first live run. The backup
 role, rehearsed: refused every write even after switching read-only off.
 
+**Backup infrastructure (owner-approved).** S3 `lb-timesheets-backups`,
+eu-west-2: Object Lock GOVERNANCE 14 days, versioning, SSE-S3, all public
+access blocked, owner-enforced, lifecycle (15 days, noncurrent +1, expired
+delete markers, aborted uploads), a policy denying non-TLS requests and the
+governance bypass to all but root. Verified on the real bucket, as root: a
+permanent delete of a locked version is refused ("protected by object
+lock"), `If-None-Match` refuses an overwrite, S3 echoes our SHA-256
+(`FULL_OBJECT`) and rejects a wrong one (`BadDigest`). Two verification
+objects stay under `pg/0000/00/00/` until their lock and lifecycle end. IAM
+`lb-timesheets-backup`: PutObject under `pg/` only — the simulator denies
+every read, list, delete, retention, bypass, legal-hold, other-prefix, SES,
+SNS and IAM action; no access key. Database role `lb_backup` created in
+production as `backup-role.sql` specifies; its password was generated
+straight into the backup service's `PGPASSWORD` and only its SCRAM verifier
+was ever handled. Postgres still has no public domain or proxy. Railway
+`timesheets-backup`: Dockerfile build from `/ops/backup`, EU West, cron
+`0 3 * * *`, restart never, Wait for CI — built and deployed; it has not
+run, and cannot until the owner sets the age recipient, the backup key and
+the monitor URL.
+
 ---
 
 ## 2026-10-08 — Timesheets' own SES configuration set; events only for its own mail (D58)
