@@ -79,6 +79,7 @@ form silently applies nothing); "Wait for CI" is `source.checkSuites: true`:
 | `MAIL_TRANSPORT` | `disabled` for the first deploy; `ses` only when email goes live |
 | `AWS_REGION` | `us-east-1` (with `ses`) |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user `lb-timesheets-ses` — only with `ses`; created by the owner, pasted straight into Railway |
+| `SES_CONFIGURATION_SET` | `lb-timesheets` — required with `ses` (D58) |
 | `SES_NOTIFICATION_TOPIC_ARN` | only after section 7 |
 | `PORT` | set by Railway — not set by hand |
 
@@ -222,24 +223,35 @@ identity verified in SES us-east-1; the account out of the SES sandbox; IAM
 user `lb-timesheets-ses` with an inline policy allowing `ses:SendEmail` only
 from the three senders, and no access key until go-live.
 
-To go live (owner approval each time): create the access key for
-`lb-timesheets-ses` → set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-`AWS_REGION=us-east-1`, then `MAIL_TRANSPORT=ses` → redeploy → one test email.
-Bounces and complaints: an SNS topic in us-east-1 → SES identity
-notifications (Bounce, Complaint) for `logisticbay.com` → subscribe
-`https://api.timesheets.logisticbay.com/webhooks/ses` (the API confirms it) →
-set `SES_NOTIFICATION_TOPIC_ARN`.
+Bounces and complaints come from **Timesheets' own configuration set**,
+never from identity notifications on `logisticbay.com`, which would fire for
+every product sending as the domain (D58). Each step needs the owner's
+approval at the time:
 
-**Pending owner decision — a Timesheets configuration set instead of identity
-notifications.** Identity notifications fire for every message sent as
-`logisticbay.com`, by any product; the webhook would store another product's
-bounces and suppress its addresses here. The proposal: an SES configuration
-set used by Timesheets alone, its event destination publishing Bounce and
-Complaint to the SNS topic, attached to every send by the mailer, with the
-IAM policy also allowing the configuration set's ARN. It needs a code change
-first — the mailer must pass the configuration set, and the webhook must
-accept the event-publishing format (`eventType`, not `notificationType`).
-Until that lands, do not wire the identity notifications either.
+1. SES (us-east-1) → configuration set **`lb-timesheets`** — not the
+   identity's default.
+2. SNS (us-east-1) → standard topic **`lb-timesheets-ses-events`**; its
+   access policy lets only `ses.amazonaws.com` publish, with
+   `aws:SourceAccount` = this account and `aws:SourceArn` = the
+   configuration set's ARN.
+3. The configuration set → event destination: SNS, that topic, event types
+   **Bounce** and **Complaint** only.
+4. The API: set `SES_NOTIFICATION_TOPIC_ARN` to the topic's ARN and
+   redeploy (the webhook exists only when it is set).
+5. SNS → subscription: HTTPS,
+   `https://api.timesheets.logisticbay.com/webhooks/ses`. The API confirms
+   it itself, after verifying the signature, the topic and that the
+   confirmation URL is SNS's.
+6. IAM `lb-timesheets-ses`'s inline policy: also allow
+   `arn:aws:ses:us-east-1:<account>:configuration-set/lb-timesheets` —
+   `SendEmail` is authorised against the configuration set as well as the
+   identity. The `ses:FromAddress` condition stays.
+7. Go live: create the access key → set `AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY`, `AWS_REGION=us-east-1`,
+   `SES_CONFIGURATION_SET=lb-timesheets`, then `MAIL_TRANSPORT=ses` →
+   redeploy → one test email, then the SES mailbox simulator
+   (`bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`)
+   to prove the events arrive and are recorded once.
 
 ## 8. The mobile app
 

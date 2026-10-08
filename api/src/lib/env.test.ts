@@ -24,6 +24,7 @@ const prod = {
   CLIENT_IP_SOURCE: "x-real-ip",
   AWS_ACCESS_KEY_ID: "AKIAFAKEFORTESTSONLY",
   AWS_SECRET_ACCESS_KEY: "fake-secret-for-tests-only",
+  SES_CONFIGURATION_SET: "lb-timesheets",
 };
 
 // ── Base environment ─────────────────────────────────────────────────────────
@@ -81,6 +82,26 @@ test("SES without its credentials fails closed, in every environment", () => {
   }
   assert.equal(EnvSchema.safeParse({ ...valid, NODE_ENV: "development", MAIL_TRANSPORT: "ses" }).success, false,
     "a developer choosing live SES must supply its key too");
+});
+
+test("SES without its configuration set fails closed — every send must carry it, or its events reach no one (D58)", () => {
+  const { SES_CONFIGURATION_SET: _unset, ...noSet } = prod;
+  for (const env of [noSet, { ...prod, SES_CONFIGURATION_SET: "  " }]) {
+    const result = EnvSchema.safeParse(env);
+    assert.equal(result.success, false);
+    assert.match(describeEnvFailure(result.error), /SES_CONFIGURATION_SET is required when MAIL_TRANSPORT is ses/);
+  }
+  assert.equal(EnvSchema.parse({ ...prod, SES_CONFIGURATION_SET: " lb-timesheets " }).SES_CONFIGURATION_SET, "lb-timesheets");
+  // Not needed when nothing is sent.
+  assert.equal(EnvSchema.parse({ ...noSet, MAIL_TRANSPORT: "disabled" }).SES_CONFIGURATION_SET, "");
+  assert.equal(EnvSchema.parse({ ...valid, NODE_ENV: "development" }).SES_CONFIGURATION_SET, "");
+});
+
+test("an SES configuration set name must be one SES would accept", () => {
+  for (const name of ["lb timesheets", "lb/timesheets", "lb.timesheets", "x".repeat(65)]) {
+    assert.equal(EnvSchema.safeParse({ ...prod, SES_CONFIGURATION_SET: name }).success, false, name);
+  }
+  assert.equal(EnvSchema.parse({ ...prod, SES_CONFIGURATION_SET: "Lb_Timesheets-2" }).SES_CONFIGURATION_SET, "Lb_Timesheets-2");
 });
 
 test("the local outbox is refused outside development — a test or production process never writes mail to disk", () => {

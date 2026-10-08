@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { SnsEnvelope, isSnsUrl, notificationRecord, SesNotification, snsVerifier } from "./sesNotifications.js";
+import { SnsEnvelope, deliveryEventOf, isSnsUrl, notificationRecord, SesNotification, snsVerifier } from "./sesNotifications.js";
 import { CERT_URL, TOPIC, bounceNotification, fakeSns, sign, subscriptionConfirmation } from "../tests/snsSigning.js";
 
 async function verifies(message: Record<string, string>, options: { wrongKey?: boolean; topic?: string } = {}): Promise<boolean> {
@@ -79,4 +79,58 @@ test("what is recorded names the bounce, never the address: the domain and a dig
   }));
   assert.equal(complaint?.["event"], "ses.complaint");
   assert.equal(notificationRecord(SesNotification.parse({ notificationType: "Delivery", mail: { messageId: "m3" } })), null);
+});
+
+// ── Configuration-set events (D58) ──────────────────────────────────────────
+// SES publishes a configuration set's events with `eventType` where identity
+// notifications say `notificationType`; the bounce and complaint bodies are
+// the same. Both formats must record the same thing — and a message that
+// names two different kinds is not trusted to mean either.
+
+const BOUNCE_BODY = {
+  mail: { messageId: "ses-message-9", tags: { "ses:configuration-set": ["lb-timesheets"] } },
+  bounce: {
+    feedbackId: "feedback-cs-1", timestamp: "2026-10-08T12:00:00.000Z",
+    bounceType: "Permanent", bounceSubType: "General", bouncedRecipients: [{ emailAddress: "Owner@Example.com" }],
+  },
+};
+const COMPLAINT_BODY = {
+  mail: { messageId: "ses-message-10" },
+  complaint: { feedbackId: "feedback-cs-2", timestamp: "2026-10-08T12:00:00.000Z", complaintFeedbackType: "abuse", complainedRecipients: [{ emailAddress: "a@b.example" }] },
+};
+
+test("a configuration-set Bounce event records exactly what the identity notification does", () => {
+  const asEvent = SesNotification.parse({ eventType: "Bounce", ...BOUNCE_BODY });
+  const asNotification = SesNotification.parse({ notificationType: "Bounce", ...BOUNCE_BODY });
+  assert.deepEqual(deliveryEventOf(asEvent), deliveryEventOf(asNotification));
+  assert.deepEqual(deliveryEventOf(asEvent), {
+    feedbackId: "feedback-cs-1", kind: "hard_bounce", detail: "General", sesMessageId: "ses-message-9",
+    occurredAt: new Date("2026-10-08T12:00:00.000Z"),
+    suppress: [{ email: "owner@example.com", reason: "hard_bounce" }],
+  });
+  assert.equal(notificationRecord(asEvent)?.["event"], "ses.bounce");
+});
+
+test("a configuration-set Complaint event records exactly what the identity notification does", () => {
+  const asEvent = SesNotification.parse({ eventType: "Complaint", ...COMPLAINT_BODY });
+  assert.deepEqual(deliveryEventOf(asEvent), deliveryEventOf(SesNotification.parse({ notificationType: "Complaint", ...COMPLAINT_BODY })));
+  assert.equal(deliveryEventOf(asEvent)?.kind, "complaint");
+});
+
+test("other configuration-set events are read but record nothing", () => {
+  for (const eventType of ["Send", "Delivery", "Reject", "Open", "Click", "DeliveryDelay", "Rendering Failure", "Subscription"]) {
+    const parsed = SesNotification.parse({ eventType, mail: { messageId: "m" } });
+    assert.equal(deliveryEventOf(parsed), null, eventType);
+    assert.equal(notificationRecord(parsed), null, eventType);
+  }
+});
+
+test("a message naming no kind, or two DIFFERENT kinds, is refused", () => {
+  assert.equal(SesNotification.safeParse({ ...BOUNCE_BODY }).success, false, "no kind at all");
+  assert.equal(SesNotification.safeParse({ eventType: "Delivery", notificationType: "Bounce", ...BOUNCE_BODY }).success, false,
+    "a bounce body labelled two ways is not trusted");
+  assert.equal(SesNotification.safeParse({ eventType: 7, ...BOUNCE_BODY }).success, false);
+  assert.equal(SesNotification.safeParse({ eventType: "x".repeat(65), ...BOUNCE_BODY }).success, false);
+  assert.ok(deliveryEventOf(SesNotification.parse({ eventType: "Bounce", notificationType: "Bounce", ...BOUNCE_BODY })) !== null,
+    "two labels that agree are fine");
 });

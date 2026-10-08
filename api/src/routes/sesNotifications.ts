@@ -76,11 +76,18 @@ export function registerSesNotificationRoutes(
             request.log.warn({ event: "ses.unrecognised", snsMessageId: message.MessageId }, "an SES notification could not be read");
             return reply.status(204).send();
           }
-          // Recorded ONCE (D56); a redelivery of the same notification is a no-op.
+          // Recorded ONCE (D56); a redelivery of the same notification is a
+          // no-op, and one about an email this API never sent records nothing
+          // (D58). Either way SNS gets its 204, so it does not retry.
           const event = deliveryEventOf(notification.data);
           const outcome = event === null ? "not-recorded" : await delivery.recordEvent(event);
           const record = notificationRecord(notification.data);
-          if (record !== null) request.log.warn({ ...record, outcome }, "SES reported an undeliverable or unwanted email");
+          if (record === null) return reply.status(204).send();
+          if (outcome === "not_our_message") {
+            request.log.info({ event: record["event"], sesMessageId: record["sesMessageId"], outcome }, "SES reported on an email this API did not send — ignored");
+          } else {
+            request.log.warn({ ...record, outcome }, "SES reported an undeliverable or unwanted email");
+          }
           return reply.status(204).send();
         }
       }

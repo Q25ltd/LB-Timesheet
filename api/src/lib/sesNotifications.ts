@@ -143,9 +143,28 @@ export function snsVerifier(options: { topicArn: string; fetchText: SnsFetch; no
 
 const Recipient = z.object({ emailAddress: z.string().min(1).max(320) });
 
-/** The parts of an SES identity notification this application records. */
-export const SesNotification = z.object({
-  notificationType: z.enum(["Bounce", "Complaint", "Delivery"]),
+/**
+ * SES names an event's kind in one of two fields: `notificationType` in an
+ * IDENTITY notification, `eventType` in a CONFIGURATION SET's event (D58) —
+ * the bounce and complaint bodies are the same. Read as `notificationType`
+ * either way. A message carrying both with DIFFERENT values is not trusted to
+ * mean either: the kind is left unset, and the message fails to parse.
+ */
+function withOneKind(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const notificationType: unknown = Reflect.get(raw, "notificationType");
+  const eventType: unknown = Reflect.get(raw, "eventType");
+  if (eventType === undefined) return raw;
+  if (notificationType === undefined) return { ...raw, notificationType: eventType };
+  return notificationType === eventType ? raw : { ...raw, notificationType: undefined };
+}
+
+/**
+ * The parts of an SES notification this application records. Any kind is
+ * read; only Bounce and Complaint record anything (`deliveryEventOf`).
+ */
+export const SesNotification = z.preprocess(withOneKind, z.object({
+  notificationType: z.string().min(1).max(64),
   mail: z.object({ messageId: z.string().min(1).max(256) }),
   bounce: z.object({
     feedbackId:        z.string().min(1).max(256),
@@ -160,7 +179,7 @@ export const SesNotification = z.object({
     complaintFeedbackType: z.string().max(64).optional(),
     complainedRecipients:  z.array(Recipient).max(100),
   }).optional(),
-});
+}));
 export type SesNotification = z.infer<typeof SesNotification>;
 
 /** A recipient as it may be logged: its domain, and a digest — never the address. */

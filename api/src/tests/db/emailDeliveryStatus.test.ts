@@ -117,13 +117,23 @@ function tokenIn(message: MailMessage): string {
   return token;
 }
 
-/** SES's notification for `sesMessageId`, signed as SNS signs it, posted to the endpoint. */
-function notify(sesMessageId: string, event: { type: "Bounce"; bounceType: string; to: string; feedbackId?: string } | { type: "Complaint"; to: string; feedbackId?: string }): Promise<Injected> {
+/**
+ * SES's notification for `sesMessageId`, signed as SNS signs it, posted to the
+ * endpoint — as an identity notification (`notificationType`) or, with
+ * `configurationSet`, as the Timesheets configuration set publishes it
+ * (`eventType`, D58).
+ */
+function notify(
+  sesMessageId: string,
+  event: { type: "Bounce"; bounceType: string; to: string; feedbackId?: string } | { type: "Complaint"; to: string; feedbackId?: string },
+  format: "identity" | "configurationSet" = "identity",
+): Promise<Injected> {
   const feedbackId = event.feedbackId ?? `feedback-${randomUUID()}`;
   const timestamp = new Date().toISOString();
+  const kind = format === "identity" ? { notificationType: event.type } : { eventType: event.type };
   const message = event.type === "Bounce"
-    ? { notificationType: "Bounce", mail: { messageId: sesMessageId }, bounce: { feedbackId, timestamp, bounceType: event.bounceType, bounceSubType: "General", bouncedRecipients: [{ emailAddress: event.to.toUpperCase() }] } }
-    : { notificationType: "Complaint", mail: { messageId: sesMessageId }, complaint: { feedbackId, timestamp, complaintFeedbackType: "abuse", complainedRecipients: [{ emailAddress: event.to }] } };
+    ? { ...kind, mail: { messageId: sesMessageId }, bounce: { feedbackId, timestamp, bounceType: event.bounceType, bounceSubType: "General", bouncedRecipients: [{ emailAddress: event.to.toUpperCase() }] } }
+    : { ...kind, mail: { messageId: sesMessageId }, complaint: { feedbackId, timestamp, complaintFeedbackType: "abuse", complainedRecipients: [{ emailAddress: event.to }] } };
   const envelope = sign({ Type: "Notification", MessageId: randomUUID(), TopicArn: TOPIC, Message: JSON.stringify(message), Timestamp: timestamp });
   return inject({ url: "/webhooks/ses", text: true, payload: JSON.stringify(envelope) });
 }
@@ -341,4 +351,57 @@ test("ED11. after a hard bounce a REGISTERED company's administrator may correct
   assert.equal(await prisma.accountToken.count({ where: { userId: account.id, purpose: "password_reset" } }), 0);
   assert.equal(field(await me(token), "emailDeliveryProblem"), null, "the new address has no problem");
   assert.equal(await prisma.companyMembership.count({ where: { userId: account.id } }), 1, "the company is untouched");
+});
+
+// ── D58: the Timesheets configuration set, and only Timesheets' own mail ────
+
+test("ED12. a CONFIGURATION-SET bounce and complaint (eventType) are recorded and suppress exactly as identity notifications do", async () => {
+  const email = freshEmail();
+  const token = await registerCompany(email);
+  const { sesMessageId } = lastSentTo(email);
+
+  assert.equal((await notify(sesMessageId, { type: "Bounce", bounceType: "Permanent", to: email }, "configurationSet")).statusCode, 204);
+  assert.equal((await notify(sesMessageId, { type: "Complaint", to: email }, "configurationSet")).statusCode, 204);
+
+  const events = await prisma.emailDeliveryEvent.findMany({ where: { emailMessage: { sesMessageId } }, orderBy: { occurredAt: "asc" } });
+  assert.deepEqual(events.map(e => e.kind).sort(), ["complaint", "hard_bounce"]);
+  assert.deepEqual((await prisma.emailSuppression.findMany({ where: { email } })).map(s => s.reason).sort(), ["complaint", "hard_bounce"]);
+  assert.equal(field(await me(token), "emailDeliveryProblem"), "hard_bounce");
+});
+
+test("ED13. an event for a message Timesheets NEVER SENT records nothing and suppresses nothing — in either format", async () => {
+  const email = freshEmail();
+  const token = await registerCompany(email);
+  const eventsBefore = await prisma.emailDeliveryEvent.count();
+
+  // Signed, from the configured topic, naming a real Timesheets address — but
+  // about an email this API never sent (another product's, or a forgery
+  // signed with a stolen key cannot be told apart from it here).
+  for (const format of ["identity", "configurationSet"] as const) {
+    const foreign = `ses-not-ours-${randomUUID()}`;
+    assert.equal((await notify(foreign, { type: "Bounce", bounceType: "Permanent", to: email }, format)).statusCode, 204, format);
+    assert.equal((await notify(foreign, { type: "Complaint", to: email }, format)).statusCode, 204, format);
+  }
+
+  assert.equal(await prisma.emailDeliveryEvent.count(), eventsBefore, "no event row for a message that is not ours");
+  assert.equal(await prisma.emailSuppression.count({ where: { email } }), 0, "and the address is NOT suppressed");
+  assert.equal(field(await me(token), "emailDeliveryProblem"), null, "the account is not told of someone else's bounce");
+
+  // Positive control: the same address's OWN email still records.
+  const { sesMessageId } = lastSentTo(email);
+  assert.equal((await notify(sesMessageId, { type: "Bounce", bounceType: "Permanent", to: email }, "configurationSet")).statusCode, 204);
+  assert.equal(await prisma.emailSuppression.count({ where: { email } }), 1);
+});
+
+test("ED14. the same configuration-set event delivered three times is recorded ONCE", async () => {
+  const email = freshEmail();
+  await registerCompany(email);
+  const { sesMessageId } = lastSentTo(email);
+  const feedbackId = `feedback-${randomUUID()}`;
+
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal((await notify(sesMessageId, { type: "Bounce", bounceType: "Permanent", to: email, feedbackId }, "configurationSet")).statusCode, 204);
+  }
+  assert.equal(await prisma.emailDeliveryEvent.count({ where: { feedbackId } }), 1);
+  assert.equal(await prisma.emailSuppression.count({ where: { email } }), 1);
 });

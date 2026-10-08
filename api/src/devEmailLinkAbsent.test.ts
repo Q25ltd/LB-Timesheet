@@ -26,6 +26,7 @@ process.env.MAIL_TRANSPORT        = "ses";
 process.env.CLIENT_IP_SOURCE      = "x-real-ip";
 process.env.AWS_ACCESS_KEY_ID     = "AKIAFAKEFORTESTSONLY";
 process.env.AWS_SECRET_ACCESS_KEY = "fake-secret-for-tests-only-never-used-to-send";
+process.env.SES_CONFIGURATION_SET = "lb-timesheets";
 
 const { buildApp } = await import("./app.js");
 const { mailTransportFor } = await import("./lib/mailer.js");
@@ -103,7 +104,7 @@ test("with no notification topic configured, the SES notification endpoint does 
 });
 
 test("only the OUTBOX transport exposes an outbox — never SES, never disabled", () => {
-  const aws = { AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "AKIAFAKE", AWS_SECRET_ACCESS_KEY: "fake" };
+  const aws = { AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "AKIAFAKE", AWS_SECRET_ACCESS_KEY: "fake", SES_CONFIGURATION_SET: "lb-timesheets" };
   assert.equal(mailTransportFor({ ...aws, MAIL_TRANSPORT: "ses" }).outbox, null, "real email has no outbox to expose");
   assert.equal(mailTransportFor({ ...aws, MAIL_TRANSPORT: "disabled" }).outbox, null);
   assert.equal(typeof mailTransportFor({ ...aws, MAIL_TRANSPORT: "outbox" }).outbox, "string");

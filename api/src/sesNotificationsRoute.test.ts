@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOPIC, SUBSCRIBE_URL, bounceNotification, fakeSns, sign, subscriptionConfirmation } from "./tests/snsSigning.js";
+import { TOPIC, SUBSCRIBE_URL, bounceEvent, bounceNotification, fakeSns, sign, subscriptionConfirmation } from "./tests/snsSigning.js";
 
 process.env.DATABASE_URL          = "postgresql://app:app@localhost:5544/lb_timesheet_unused";
 process.env.JWT_SECRET            = "4f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c244f8a1c9e2b7d6053e9a8c1f4b2d70e6a5c3f9b1d8e0a7c24";
@@ -18,8 +18,12 @@ process.env.CLIENT_IP_SOURCE      = "x-real-ip";
 process.env.AWS_ACCESS_KEY_ID     = "AKIAFAKEFORTESTSONLY";
 process.env.AWS_SECRET_ACCESS_KEY = "fake-secret-for-tests-only-never-used-to-send";
 process.env.SES_NOTIFICATION_TOPIC_ARN = TOPIC;
+process.env.SES_CONFIGURATION_SET = "lb-timesheets";
 
 const { buildApp } = await import("./app.js");
+
+/** How many times a notification reached the store — what tells "read and recorded" from "unreadable, ignored". */
+let storeAttempts = 0;
 
 /** No database: nothing here may reach one. */
 const db = {
@@ -72,7 +76,10 @@ const db = {
     findUnique: () => Promise.resolve(null),
     findFirst:  () => Promise.resolve(null),
   },
-  $transaction: () => Promise.reject(Object.assign(new Error("Unique constraint failed on the fields: (`feedbackId`)"), { code: "P2002" })),
+  $transaction: () => {
+    storeAttempts += 1;
+    return Promise.reject(Object.assign(new Error("Unique constraint failed on the fields: (`feedbackId`)"), { code: "P2002" }));
+  },
 };
 
 const FORBIDDEN = { error: "Not allowed", code: "FORBIDDEN" };
@@ -93,8 +100,27 @@ async function post(body: unknown, options: { wrongKey?: boolean; contentType?: 
 }
 
 test("a genuine SES bounce from the configured topic is accepted — without any token — and reaches the store (here: already recorded)", async () => {
+  const before = storeAttempts;
   const res = await post(sign(bounceNotification()));
   assert.equal(res.statusCode, 204);
+  assert.equal(storeAttempts, before + 1, "positive control: the identity format reaches the store");
+});
+
+test("a genuine CONFIGURATION-SET bounce event (eventType) is accepted the same way (D58)", async () => {
+  const event = bounceEvent();
+  assert.match(event["Message"] ?? "", /"eventType":"Bounce"/);
+  assert.doesNotMatch(event["Message"] ?? "", /notificationType/);
+  const before = storeAttempts;
+  const res = await post(sign(event));
+  assert.equal(res.statusCode, 204);
+  assert.equal(storeAttempts, before + 1, "the event was READ and reached the store — not answered 204 as unrecognised");
+});
+
+test("a configuration-set event is held to the same signature and topic checks", async () => {
+  const signed = sign(bounceEvent());
+  assert.equal((await post({ ...signed, Message: (signed["Message"] ?? "").replace("Permanent", "Transient") })).statusCode, 403, "tampered");
+  assert.equal((await post(signed, { wrongKey: true })).statusCode, 403, "wrong key");
+  assert.equal((await post(sign(bounceEvent({ TopicArn: "arn:aws:sns:us-east-1:111111111111:other" })))).statusCode, 403, "other topic");
 });
 
 test("a tampered, re-keyed or other-topic message is refused with the one generic 403", async () => {

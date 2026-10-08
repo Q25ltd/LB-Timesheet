@@ -2266,3 +2266,30 @@ Owner decision.
 - **Not in this deployment:** live email, app-store releases, and any TMS
   change (including moving the TMS to `tms.logisticbay.com`).
 
+### D58 — Timesheets' own SES configuration set; delivery events only for its own mail (2026-10-08)
+
+Owner decision, narrowing D55/D56. `logisticbay.com` is one SES identity
+that more than one LogisticBay product may send as; Timesheets must learn
+of bounces and complaints about ITS mail and nothing else.
+
+- **Every send names the configuration set.** `SES_CONFIGURATION_SET`
+  (`lb-timesheets` in production) is required when `MAIL_TRANSPORT=ses`;
+  the SES mailer cannot be built without it and puts it on every
+  `SendEmail`. The set is not made the identity's default — another
+  product's mail on the same domain is untouched.
+- **Events come from the configuration set's destination** — an SNS topic
+  for this product — not from identity-level notifications, which would
+  fire for every product sending as the domain. The webhook reads both
+  formats (`eventType` and `notificationType`); the signature, certificate
+  host, freshness and topic checks are unchanged. A message labelled with
+  two different kinds is refused.
+- **Only for an email this API sent and recorded.** An event whose SES
+  message id has no `EmailMessage` row writes nothing — no event, and above
+  all no suppression — and is logged as ignored. Until now such an event
+  was stored with no email attached and still suppressed its addresses;
+  `EmailDeliveryEvent.emailMessageId` stays nullable (no migration), but
+  nothing writes it null any more. Idempotency (one row per SES
+  feedback id) and the suppression rules (a permanent bounce or a complaint
+  suppresses; a transient bounce does not) are unchanged.
+- **Not decided:** recording sends, deliveries or rejects; reputation
+  alarms on the configuration set.

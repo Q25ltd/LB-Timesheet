@@ -43,7 +43,7 @@ test("each kind of mail is sent FROM its own fixed address, with Reply-To suppor
 
   for (const sender of ["accounts", "security", "timesheets"] as const) {
     const { sent, client } = capturing();
-    await sesMailer(client).send({ ...MESSAGE, sender });
+    await sesMailer(client, "lb-timesheets").send({ ...MESSAGE, sender });
     assert.equal(sent[0]?.input.FromEmailAddress, MAIL_SENDERS[sender]);
     assert.deepEqual(sent[0]?.input.ReplyToAddresses, ["support@logisticbay.com"]);
   }
@@ -51,7 +51,7 @@ test("each kind of mail is sent FROM its own fixed address, with Reply-To suppor
 
 test("one message, one recipient — the account's own address, no CC, no BCC — and the content as written, in UTF-8; SES's message id is returned", async () => {
   const { sent, client } = capturing();
-  assert.equal(await sesMailer(client).send(MESSAGE), "ses-message-id", "what a later bounce will name (D56)");
+  assert.equal(await sesMailer(client, "lb-timesheets").send(MESSAGE), "ses-message-id", "what a later bounce will name (D56)");
   assert.equal(sent.length, 1);
   const input = sent[0]?.input;
   assert.deepEqual(input?.Destination, { ToAddresses: ["owner@example.com"] });
@@ -67,7 +67,7 @@ test("an SES failure is rethrown WITHOUT its message — SES errors can name the
     $metadata: { httpStatusCode: 400 },
   });
   const { client } = capturing(awsError);
-  await assert.rejects(sesMailer(client).send(MESSAGE), (error: unknown) => {
+  await assert.rejects(sesMailer(client, "lb-timesheets").send(MESSAGE), (error: unknown) => {
     assert.ok(error instanceof Error);
     assert.equal(error.message, "SES send failed: MessageRejected (HTTP 400)");
     assert.ok(!error.message.includes("@"), "no address in what gets logged");
@@ -75,10 +75,25 @@ test("an SES failure is rethrown WITHOUT its message — SES errors can name the
   });
 });
 
+test("EVERY SES send names the Timesheets configuration set — the only way its bounces and complaints reach this product (D58)", async () => {
+  for (const sender of ["accounts", "security", "timesheets"] as const) {
+    const { sent, client } = capturing();
+    await sesMailer(client, "lb-timesheets").send({ ...MESSAGE, sender });
+    assert.equal(sent[0]?.input.ConfigurationSetName, "lb-timesheets", sender);
+  }
+});
+
+test("an SES mailer cannot be built without a configuration set", () => {
+  const { client } = capturing();
+  for (const name of ["", "   "]) {
+    assert.throws(() => sesMailer(client, name), /configuration set/);
+  }
+});
+
 test("the development outbox writes the message as SES would send it — resolved From and Reply-To included", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lbts-outbox-test-"));
   try {
-    const { mailer, outbox } = mailTransportFor({ MAIL_TRANSPORT: "outbox", AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "" }, directory);
+    const { mailer, outbox } = mailTransportFor({ MAIL_TRANSPORT: "outbox", AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", SES_CONFIGURATION_SET: "" }, directory);
     assert.equal(outbox, directory);
     assert.equal(await mailer.send({ ...MESSAGE, sender: "security" }), null, "the outbox sends nothing to a provider, so there is no message id to record");
     const [name] = await readdir(directory);

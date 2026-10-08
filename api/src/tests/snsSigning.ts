@@ -45,6 +45,22 @@ export function bounceNotification(overrides: Record<string, string> = {}): Reco
   };
 }
 
+/** The same bounce as a CONFIGURATION SET publishes it: `eventType`, not `notificationType` (D58). */
+export function bounceEvent(overrides: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...bounceNotification(),
+    Message: JSON.stringify({
+      eventType: "Bounce",
+      mail: { messageId: "ses-message-1", destination: ["Owner@Example.com"], tags: { "ses:configuration-set": ["lb-timesheets"] } },
+      bounce: {
+        feedbackId: "0100017f-feedback-0002", timestamp: new Date().toISOString(),
+        bounceType: "Permanent", bounceSubType: "General", bouncedRecipients: [{ emailAddress: "Owner@Example.com" }],
+      },
+    }),
+    ...overrides,
+  };
+}
+
 export function subscriptionConfirmation(overrides: Record<string, string> = {}): Record<string, string> {
   return {
     Type: "SubscriptionConfirmation",

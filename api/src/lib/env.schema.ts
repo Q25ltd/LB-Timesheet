@@ -40,6 +40,8 @@ const AWS_REGION_PATTERN = /^[a-z]{2}(-[a-z]+)+-\d$/;
 
 /** An SNS topic ARN — where SES publishes bounces and complaints. */
 const SNS_TOPIC_ARN_PATTERN = /^arn:aws:sns:[a-z]{2}(-[a-z]+)+-\d:\d{12}:[A-Za-z0-9_-]{1,256}$/;
+/** An SES configuration set name: letters, digits, `_` and `-`, at most 64. */
+const SES_CONFIGURATION_SET_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Only these two relax the CORS requirement. Note that NODE_ENV is OPTIONAL in
@@ -144,6 +146,12 @@ const BaseEnv = z.object({
    * only; when empty it is not registered.
    */
   SES_NOTIFICATION_TOPIC_ARN: z.string().max(400).default(""),
+  /**
+   * The SES configuration set EVERY send names (D58) — Timesheets' own, so
+   * the bounces and complaints SES publishes for it are this product's mail
+   * alone. Required when MAIL_TRANSPORT is ses.
+   */
+  SES_CONFIGURATION_SET: z.string().max(64).default(""),
   /** Comma-separated origins allowed to call this API. */
   WEB_ORIGIN:       z.string().max(2000).default(""),
   /**
@@ -204,6 +212,12 @@ export const EnvSchema = BaseEnv
           ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when MAIL_TRANSPORT is ses` });
         }
       }
+    }
+    const configurationSet = value.SES_CONFIGURATION_SET.trim();
+    if (transport === "ses" && configurationSet === "") {
+      ctx.addIssue({ code: "custom", path: ["SES_CONFIGURATION_SET"], message: "SES_CONFIGURATION_SET is required when MAIL_TRANSPORT is ses" });
+    } else if (configurationSet !== "" && !SES_CONFIGURATION_SET_PATTERN.test(configurationSet)) {
+      ctx.addIssue({ code: "custom", path: ["SES_CONFIGURATION_SET"], message: "SES_CONFIGURATION_SET must be an SES configuration set name (letters, digits, _ and -; at most 64)" });
     }
     if (!AWS_REGION_PATTERN.test(value.AWS_REGION)) {
       ctx.addIssue({ code: "custom", path: ["AWS_REGION"], message: `"${value.AWS_REGION}" is not an AWS Region code (e.g. us-east-1)` });
@@ -270,6 +284,7 @@ export const EnvSchema = BaseEnv
     // Validation above has refused every case where this would be null.
     MAIL_TRANSPORT: value.MAIL_TRANSPORT ?? defaultMailTransport(value.NODE_ENV) ?? "disabled",
     SES_NOTIFICATION_TOPIC_ARN: value.SES_NOTIFICATION_TOPIC_ARN.trim(),
+    SES_CONFIGURATION_SET: value.SES_CONFIGURATION_SET.trim(),
     // Validation above has refused an unset value outside development and test.
     CLIENT_IP_SOURCE: value.CLIENT_IP_SOURCE ?? "socket",
   }));

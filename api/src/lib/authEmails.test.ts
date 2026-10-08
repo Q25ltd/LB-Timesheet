@@ -22,7 +22,7 @@ test("escapeHtml covers the five significant characters and nothing else", () =>
 });
 
 test("with email disabled (the test default), every send FAILS loudly — never a silent no-op, never a fallback recipient", async () => {
-  const { mailer } = mailTransportFor({ MAIL_TRANSPORT: "disabled", AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "" });
+  const { mailer } = mailTransportFor({ MAIL_TRANSPORT: "disabled", AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", SES_CONFIGURATION_SET: "" });
   await assert.rejects(mailer.send({ sender: "accounts", userId: "user-1", to: "a@example.com", subject: "s", text: "t", html: "h" }));
 });
 

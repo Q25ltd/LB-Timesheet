@@ -53,16 +53,23 @@ export interface DeliveryEventInput {
 }
 
 export function emailDeliveryRepository(db: EmailDeliveryDatabase) {
-  /** The event and its suppressions, together or not at all. */
-  async function write(input: DeliveryEventInput): Promise<void> {
-    await db.$transaction(async tx => {
+  /**
+   * The event and its suppressions, together or not at all — and only for an
+   * email THIS API sent and recorded (D58). An event about any other message
+   * (another product's mail on the same domain, or one this API has no record
+   * of) writes nothing: no event row, and above all no suppression, which
+   * would stop this product mailing an address on someone else's evidence.
+   */
+  async function write(input: DeliveryEventInput): Promise<"recorded" | "not_our_message"> {
+    return db.$transaction(async tx => {
       const message = await tx.emailMessage.findUnique({ where: { sesMessageId: input.sesMessageId } });
+      if (message === null) return "not_our_message";
       await tx.emailDeliveryEvent.create({
         data: {
           feedbackId:     input.feedbackId,
           kind:           input.kind,
           detail:         input.detail,
-          emailMessageId: message?.id ?? null,
+          emailMessageId: message.id,
           occurredAt:     input.occurredAt,
         },
       });
@@ -73,6 +80,7 @@ export function emailDeliveryRepository(db: EmailDeliveryDatabase) {
           update: { recordedAt: input.occurredAt },
         });
       }
+      return "recorded";
     });
   }
 
@@ -93,17 +101,18 @@ export function emailDeliveryRepository(db: EmailDeliveryDatabase) {
 
     /**
      * Record one bounce or complaint, ONCE. A redelivered notification (the
-     * same SES feedback id) changes nothing and answers "duplicate".
+     * same SES feedback id) changes nothing and answers "duplicate"; one about
+     * an email this API never sent changes nothing and answers
+     * "not_our_message".
      *
      * A unique violation is a duplicate only if THIS feedback id is already
      * recorded. Otherwise it was a concurrent suppression of the same address
      * racing this one (an upsert's insert), and one retry settles it.
      */
-    async recordEvent(input: DeliveryEventInput): Promise<"recorded" | "duplicate"> {
+    async recordEvent(input: DeliveryEventInput): Promise<"recorded" | "duplicate" | "not_our_message"> {
       for (let attempt = 1; ; attempt += 1) {
         try {
-          await write(input);
-          return "recorded";
+          return await write(input);
         } catch (error) {
           if (prismaErrorCode(error) !== UNIQUE_VIOLATION_CODE) throw error;
           if (await db.emailDeliveryEvent.findUnique({ where: { feedbackId: input.feedbackId } }) !== null) return "duplicate";

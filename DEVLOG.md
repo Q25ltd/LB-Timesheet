@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-10-08 — Timesheets' own SES configuration set; events only for its own mail (D58)
+
+**Why.** `logisticbay.com` is one SES identity. Identity-level notifications
+would deliver every product's bounces to this webhook, and the repository
+stored an event — and suppressed its addresses — even for a message this API
+never sent: one product's bounce could silence another's mail.
+
+**Built.**
+- `SES_CONFIGURATION_SET` is required when `MAIL_TRANSPORT=ses` (letters,
+  digits, `_`, `-`, at most 64; trimmed). The SES mailer takes it as a
+  required argument, refuses to be built without it, and puts
+  `ConfigurationSetName` on every `SendEmail`.
+- The webhook reads both SES formats: a configuration set's event
+  (`eventType`) and an identity notification (`notificationType`). The
+  bodies are the same; a message labelled with two DIFFERENT kinds is
+  refused. Any kind is read; only Bounce and Complaint record. Signature,
+  certificate host, replay window and topic checks are untouched.
+- `recordEvent` writes nothing for an SES message id with no `EmailMessage`
+  row and answers `not_our_message`; the route logs it at info as ignored
+  (event, SES message id, outcome — no recipient). Idempotency and the
+  suppression rules are unchanged.
+
+**Proof (RED first).** New tests failed before the code: 2 env, 2 mailer,
+4 parser, 1 endpoint (made to observe that the store was reached — a 204
+alone was not evidence, since an unreadable event also answers 204) and
+ED12–ED14 against PostgreSQL. ED13 failed for the exact reason: the identity
+format created 2 event rows for a message never sent. Eight mutations,
+each applied alone and reverted: set omitted from the send, set not
+required, empty set accepted, `eventType` not read, conflicting labels
+trusted, topic check removed, never-sent email recorded, duplicate detection
+removed — every one killed.
+
+**Not done (owner approval each):** the configuration set, SNS topic,
+event destination, subscription and the IAM policy's configuration-set
+resource (DEPLOYMENT.md §7); the access key; `MAIL_TRANSPORT=ses`.
+
+---
+
 ## 2026-10-08 — Amsterdam, the company portal, and both custom domains
 
 **Region (owner-approved).** Postgres, then `timesheets-api`, moved from US

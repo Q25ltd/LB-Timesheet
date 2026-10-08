@@ -87,11 +87,21 @@ function deliveryError(error: unknown): MailDeliveryError {
   return new MailDeliveryError(error.name, typeof status === "number" ? status : undefined);
 }
 
-/** Amazon SES (API v2). One recipient per message — never a list, never a BCC. */
-export function sesMailer(client: SesSend): Mailer {
+/**
+ * Amazon SES (API v2). One recipient per message — never a list, never a BCC.
+ *
+ * Every send names `configurationSet` (D58): Timesheets' own SES
+ * configuration set, whose event destination is the ONLY source of the
+ * bounces and complaints this product records. A send without it would go
+ * out with nobody told if it bounced — so a mailer cannot be built without it.
+ */
+export function sesMailer(client: SesSend, configurationSet: string): Mailer {
+  const configurationSetName = configurationSet.trim();
+  if (configurationSetName === "") throw new Error("an SES mailer needs the product's configuration set (SES_CONFIGURATION_SET)");
   return {
     async send(message) {
       const command = new SendEmailCommand({
+        ConfigurationSetName: configurationSetName,
         FromEmailAddress: MAIL_SENDERS[message.sender],
         ReplyToAddresses: [MAIL_REPLY_TO],
         Destination:      { ToAddresses: [message.to] },
@@ -135,6 +145,7 @@ interface MailEnv {
   AWS_REGION: string;
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;
+  SES_CONFIGURATION_SET: string;
 }
 
 export function mailTransportFor(env: MailEnv, outboxDirectory: string = OUTBOX_DIRECTORY): MailTransport {
@@ -144,7 +155,7 @@ export function mailTransportFor(env: MailEnv, outboxDirectory: string = OUTBOX_
         region: env.AWS_REGION,
         credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY },
       });
-      return { mailer: sesMailer({ send: command => client.send(command) }), outbox: null };
+      return { mailer: sesMailer({ send: command => client.send(command) }, env.SES_CONFIGURATION_SET), outbox: null };
     }
     case "outbox":
       return { mailer: directoryMailer(outboxDirectory), outbox: outboxDirectory };
