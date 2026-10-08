@@ -31,8 +31,11 @@ else in the request pipeline moved. Two tests in `app.test.ts`; removing
 
 **Investigated — PostgreSQL 18.** Production runs 18; CI and `docker-compose`
 run 16. The full db stage (`npm run test:db`: clean migrate + 280 integrity
-and Company A/B tests) passes on a throwaway PostgreSQL 18.6. CI was not
-changed in this entry.
+and Company A/B tests) passes on a throwaway PostgreSQL 18.6. **Then
+(owner-approved): both CI jobs moved to `postgres:18`**, so CI tests what
+production runs. `docker-compose.yml` deliberately stays on 16: a major
+version cannot read the existing local data volume, so moving it is a
+planned dump-and-restore, not an image bump.
 
 ---
 
