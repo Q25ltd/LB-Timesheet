@@ -499,3 +499,22 @@ test("PC8. a change that fails part-way leaves the outstanding reset link usable
   assert.ok(await canLogIn(devices.email, OLD_PASSWORD), "the password did not change");
   assert.equal((await reset(token)).statusCode, 204, "so the link was not invalidated either");
 });
+
+test("PC9. a change succeeds when the account's reset link has already EXPIRED unused — the lapsed link is left exactly as it was", async () => {
+  const devices = await signedInEverywhere();
+  await forgot(devices.email);
+  resetTokenSentTo(devices.email);
+  // Issued 40 minutes ago, lapsed 10 minutes ago, never used.
+  await prisma.$executeRaw`UPDATE "AccountToken" SET "issuedAt" = now() - interval '40 minutes', "expiresAt" = now() - interval '10 minutes' WHERE "userId" = ${devices.userId}`;
+  const lapsedBefore = await prisma.accountToken.findFirstOrThrow({ where: { userId: devices.userId, purpose: "password_reset" } });
+
+  const changed = await change(devices.here.identityToken, { currentPassword: OLD_PASSWORD, newPassword: NEW_PASSWORD });
+  assert.equal(changed.statusCode, 204, `an expired link must not block a signed-in change — got ${changed.raw}`);
+
+  assert.ok(await canLogIn(devices.email, NEW_PASSWORD), "the new password stands");
+  assert.ok(!await canLogIn(devices.email, OLD_PASSWORD), "the old one is gone");
+  assert.ok(await cookieRefreshWorks(devices.here.cookieSecret), "the session that changed it stays signed in");
+  assert.ok(!await cookieRefreshWorks(devices.other.cookieSecret), "every other session is revoked");
+  const lapsedAfter = await prisma.accountToken.findUniqueOrThrow({ where: { id: lapsedBefore.id } });
+  assert.equal(lapsedAfter.consumedAt, null, "a lapsed link is already unusable; the change does not rewrite it");
+});

@@ -31,7 +31,7 @@ interface PasswordTransaction {
     updateMany(args: {
       where:
         | { tokenHash: string; userId: string; purpose: AccountTokenPurpose; consumedAt: null; expiresAt: { gt: Date } }
-        | { userId: string; purpose: AccountTokenPurpose; consumedAt: null };
+        | { userId: string; purpose: AccountTokenPurpose; consumedAt: null; expiresAt: { gt: Date } };
       data: { consumedAt: Date };
     }): Promise<{ count: number }>;
   };
@@ -115,12 +115,16 @@ export function passwordRepository(db: PasswordDatabase) {
      * link issued before it must not change the password after it. The link
      * is spent the way a redeemed one is — `consumedAt` — so `redeemReset`
      * refuses it exactly as it refuses a used link. Scoped to THIS account.
+     *
+     * Only a LIVE link is spent. A lapsed one is already refused by
+     * `redeemReset`, and stamping it would break the database's rule that a
+     * token is consumed within its lifetime — failing the whole change.
      */
     async changePassword(input: { userId: string; keepSessionId: string; passwordHash: string; now: Date }): Promise<void> {
       await db.$transaction(async tx => {
         await tx.user.update({ where: { id: input.userId }, data: { passwordHash: input.passwordHash } });
         await tx.accountToken.updateMany({
-          where: { userId: input.userId, purpose: "password_reset", consumedAt: null },
+          where: { userId: input.userId, purpose: "password_reset", consumedAt: null, expiresAt: { gt: input.now } },
           data:  { consumedAt: input.now },
         });
         await tx.session.updateMany({
