@@ -148,6 +148,8 @@ interface IdentityTransaction {
   pendingCompanyRegistration: {
     create(args: { data: { userId: string; accountKind: AccountKind; companyName: string; timezone: string } }): Promise<{ id: string }>;
   };
+  /** Login's credential lock, and nothing else — see `createSession`. Parameterised by the tagged template. */
+  $queryRaw(query: TemplateStringsArray, ...values: string[]): Promise<unknown>;
 }
 
 /**
@@ -335,25 +337,46 @@ export function identityRepository(db: IdentityDatabase) {
     },
 
     /**
-     * A NEW device session for an account that has just authenticated.
+     * A NEW device session for an account that has just authenticated — but
+     * only while the password it authenticated with is STILL the stored one.
+     * Null, writing nothing, when it is not.
      *
-     * Separate from `createAccount` because login is not registration: there
-     * is no User to write and therefore no transaction to hold one — a single
-     * insert is already atomic. Every successful login creates a new row;
-     * nothing here revokes, reuses or touches another session, and nothing
-     * here carries company identity, because a Session never does (AUTH.md).
+     * Login verifies `verifiedPasswordHash` with ~240 ms of bcrypt before it
+     * gets here, and a password reset (every session revoked) or change
+     * (every other one) can commit inside that window. An unconditional
+     * insert would then outlive the revocation: the old password would have
+     * opened a session after the reset that was meant to end them all.
+     *
+     * The User row is read `FOR SHARE` in the same transaction as the insert.
+     * A replacement that already committed is seen and refused; one still in
+     * flight holds the row, so this waits for it and then refuses; and one
+     * that starts after this read cannot write the hash — and so cannot reach
+     * its session revocation — until this insert has committed, which it then
+     * revokes. No ordering leaves a session the replacement did not end.
+     *
+     * Every successful login creates a new row; nothing here revokes, reuses
+     * or touches another session, and nothing here carries company identity,
+     * because a Session never does (AUTH.md).
      */
-    async createSession(session: NewSession): Promise<{ sessionId: string }> {
-      const row = await db.session.create({
-        data: {
-          userId:           session.userId,
-          accountKind:      session.accountKind,
-          clientKind:       session.clientKind,
-          expiresAt:        session.expiresAt,
-          refreshTokenHash: session.refreshTokenHash,
-        },
+    async createSession(session: NewSession, verifiedPasswordHash: string): Promise<{ sessionId: string } | null> {
+      return db.$transaction(async tx => {
+        const current = await tx.$queryRaw`
+          SELECT "id" FROM "User"
+          WHERE "id" = ${session.userId} AND "passwordHash" = ${verifiedPasswordHash}
+          FOR SHARE`;
+        // One row, or none: the id is the primary key.
+        if (!Array.isArray(current) || current.length !== 1) return null;
+        const row = await tx.session.create({
+          data: {
+            userId:           session.userId,
+            accountKind:      session.accountKind,
+            clientKind:       session.clientKind,
+            expiresAt:        session.expiresAt,
+            refreshTokenHash: session.refreshTokenHash,
+          },
+        });
+        return { sessionId: row.id };
       });
-      return { sessionId: row.id };
     },
 
     /**

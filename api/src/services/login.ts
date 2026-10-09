@@ -150,8 +150,9 @@ export async function login(
   // a 500 that would identify the account as the broken one.
   if (!await verifyPassword(input.password, credential.passwordHash)) throw notAuthenticated();
 
-  // From here the credential is proven and `credential.passwordHash` is never
-  // touched again: only `credential.user` travels on.
+  // From here the credential is proven. `credential.passwordHash` goes no
+  // further than the session write's condition — only `credential.user`
+  // travels on.
 
   // Minted BEFORE the write so the value stored is provably the digest of the
   // value returned: the plaintext exists only in this scope and in the
@@ -168,7 +169,11 @@ export async function login(
   //
   // The session carries NO company, because a Session never does: it survives
   // company switching, and a switch reuses this same session (AUTH.md).
-  const { sessionId } = await accounts.createSession({
+  //
+  // Written only while the verified hash is still the stored one: a password
+  // reset or change that committed during the verification above refuses
+  // this login exactly like a wrong password (`createSession`).
+  const created = await accounts.createSession({
     userId:           credential.user.id,
     accountKind,
     clientKind,
@@ -176,7 +181,9 @@ export async function login(
     // extended by anything later — rotation will not move it either.
     expiresAt:        sessionExpiresAt,
     refreshTokenHash: hashRefreshToken(refreshToken),
-  });
+  }, credential.passwordHash);
+  if (created === null) throw notAuthenticated();
+  const { sessionId } = created;
 
   // ACTIVE memberships only. An inactive membership is not offered (AUTH.md
   // contract test 5) and is not a company to select: a driver whose only
