@@ -59,8 +59,10 @@ export type AuthStatus = "restoring" | "authenticated" | "unauthenticated";
 export type RestoreOutcome =
   | "none"              // nothing stored; an ordinary first run
   | "biometric-locked"  // a credential exists, biometrics were not satisfied
-  | "expired"           // the server refused the credential; it has been cleared
-  | "offline";          // the request never arrived; the credential is KEPT
+  | "expired"           // the server refused the credential (401); it has been cleared
+  | "offline";          // no usable answer — no signal, a timeout, a temporary
+                        // server failure (5xx, 429, 408) or an unreadable body;
+                        // the credential is KEPT
 
 interface AuthValue {
   status: AuthStatus;
@@ -89,6 +91,9 @@ interface AuthValue {
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
+
+/** The server's one answer for a credential it will never accept again. */
+const UNAUTHENTICATED_STATUS = 401;
 
 const NO_BIOMETRICS: BiometricCapability = { available: false, label: "biometrics" };
 
@@ -192,10 +197,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("unauthenticated");
         return false;
       }
-      if (redeemed.kind === "api") {
+      if (redeemed.kind === "api" && redeemed.status === UNAUTHENTICATED_STATUS) {
         // The server refused it: revoked, expired, reused or unknown. It will
-        // never work again, so it is removed.
+        // never work again, so it is removed. This is the ONLY answer that
+        // says so — the server's every refusal of a credential is this 401.
         await clearLocalSession("expired");
+        return false;
+      }
+      if (redeemed.kind === "api") {
+        // Any other status says nothing about the credential: a restarting
+        // edge, a rate limit, a gateway timeout. Deleting it here would log a
+        // driver out for good because the server had a bad minute.
+        setRestoreOutcome("offline");
+        setStatus("unauthenticated");
         return false;
       }
 
@@ -209,7 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // The credential rotated but the account read failed. The new secret is
         // already stored, so a retry is possible; the app just is not
         // authenticated yet.
-        setRestoreOutcome(state.kind === "network" ? "offline" : "expired");
+        setRestoreOutcome(state.kind === "api" && state.status === UNAUTHENTICATED_STATUS ? "expired" : "offline");
         setStatus("unauthenticated");
         return false;
       }

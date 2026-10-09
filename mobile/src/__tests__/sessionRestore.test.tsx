@@ -270,6 +270,53 @@ test("an OFFLINE startup KEEPS the credential — a tunnel is not a logout", asy
   await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBe(STORED_SECRET);
 });
 
+test.each([500, 502, 503, 504, 429, 408])("a TEMPORARY server failure (%i) KEEPS the credential — an outage is not a logout", async status => {
+  // Only the server's 401 means the credential is dead. A restarting edge,
+  // a rate limit or a gateway timeout says nothing about it.
+  await SecureStore.setItemAsync(REFRESH_KEY, STORED_SECRET);
+  happyNetwork({ refresh: () => jsonResponse(status, { error: "Something went wrong" }) });
+
+  const view = await wrap(<Probe />);
+  await settled(view);
+
+  expect(text(view, "status")).toBe("unauthenticated");
+  expect(text(view, "outcome")).toBe("offline");
+  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBe(STORED_SECRET);
+});
+
+test("a temporary failure of the ACCOUNT read after rotation is reported as offline, not expired — the rotated secret is kept", async () => {
+  await SecureStore.setItemAsync(REFRESH_KEY, STORED_SECRET);
+  happyNetwork({ me: () => jsonResponse(503, { error: "Something went wrong" }) });
+
+  const view = await wrap(<Probe />);
+  await settled(view);
+
+  expect(text(view, "status")).toBe("unauthenticated");
+  expect(text(view, "outcome")).toBe("offline");
+  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBe(ROTATED_SECRET);
+});
+
+test.each([
+  ["an empty object", {}],
+  ["no refresh secret", { identityToken: "fresh.identity.token" }],
+  ["a non-string secret", { identityToken: "fresh.identity.token", refreshToken: 42 }],
+  ["an empty secret", { identityToken: "fresh.identity.token", refreshToken: "" }],
+  ["null", null],
+])("a 200 refresh answer with %s is not trusted: no crash, no authenticated state, the stored secret is not overwritten", async (_label, body) => {
+  await SecureStore.setItemAsync(REFRESH_KEY, STORED_SECRET);
+  const fetchSpy = happyNetwork({ refresh: () => jsonResponse(200, body) });
+
+  const view = await wrap(<Probe />);
+  await settled(view);
+
+  expect(text(view, "status")).toBe("unauthenticated");
+  expect(text(view, "outcome")).toBe("offline");
+  await expect(SecureStore.getItemAsync(REFRESH_KEY)).resolves.toBe(STORED_SECRET);
+  // Nothing was sent onward with a token the server never issued.
+  const calls = fetchSpy.mock.calls as unknown as FetchCall[];
+  expect(calls.some(call => callUrl(call).includes("/auth/me"))).toBe(false);
+});
+
 test("company authority is NOT restored — a tenant token is never stored, so never returned", async () => {
   await SecureStore.setItemAsync(REFRESH_KEY, STORED_SECRET);
   happyNetwork();

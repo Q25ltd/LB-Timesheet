@@ -60,8 +60,71 @@ export interface SignInRequest {
   password: string;
 }
 
+// ─── Runtime shape checks ─────────────────────────────────────────────────
+//
+// The client's `ok` value is whatever the body parsed to. Every answer below
+// carries a credential or an identity the app goes on to STORE or ACT on, so
+// each is checked before it leaves this file: a 2xx whose body is not the
+// frozen shape — a proxy page, a truncated body, a future server bug — is
+// treated as no usable answer (`network`), never as a success with holes in
+// it. That keeps the stored refresh secret untouched, and keeps a value the
+// server never issued from being stored or sent onward.
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function text(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isAccountUser(value: unknown): value is AccountUser {
+  const r = record(value);
+  return r !== null && text(r["id"]) && typeof r["firstName"] === "string" && typeof r["lastName"] === "string" && text(r["email"]);
+}
+
+function isAccountMembership(value: unknown): value is AccountMembership {
+  const r = record(value);
+  return r !== null && text(r["membershipId"]) && text(r["companyId"]) && typeof r["companyName"] === "string"
+    && (r["role"] === "driver" || r["role"] === "admin");
+}
+
+function isMemberships(value: unknown): value is AccountMembership[] {
+  return Array.isArray(value) && value.every(isAccountMembership);
+}
+
+export function isAuthenticatedAccount(value: unknown): value is AuthenticatedAccount {
+  const r = record(value);
+  return r !== null && isAccountUser(r["user"]) && text(r["identityToken"]) && text(r["refreshToken"])
+    && isMemberships(r["memberships"]) && (r["tenantToken"] === undefined || text(r["tenantToken"]));
+}
+
+function isRefreshedCredentials(value: unknown): value is RefreshedCredentials {
+  const r = record(value);
+  return r !== null && text(r["identityToken"]) && text(r["refreshToken"]);
+}
+
+function isAccountState(value: unknown): value is AccountState {
+  const r = record(value);
+  return r !== null && isAccountUser(r["user"]) && isMemberships(r["memberships"]);
+}
+
+function isSwitchedCompany(value: unknown): value is SwitchedCompany {
+  const r = record(value);
+  return r !== null && text(r["tenantToken"]) && isAccountMembership(r["membership"]);
+}
+
+/** An `ok` whose body fails `guard` becomes "no usable answer". */
+export async function checked<T>(pending: Promise<ApiResult<unknown>>, guard: (value: unknown) => value is T): Promise<ApiResult<T>> {
+  const result = await pending;
+  if (result.kind !== "ok") return result;
+  return guard(result.value)
+    ? { kind: "ok", value: result.value }
+    : { kind: "network", message: "The response could not be read", detail: null };
+}
+
 export function signIn(request: SignInRequest): Promise<ApiResult<AuthenticatedAccount>> {
-  return postJson<AuthenticatedAccount>("/auth/login", request);
+  return checked(postJson<unknown>("/auth/login", request), isAuthenticatedAccount);
 }
 
 /**
@@ -96,12 +159,12 @@ export interface SwitchedCompany {
  * secret, so the value returned here MUST replace the stored one.
  */
 export function refreshSession(refreshToken: string): Promise<ApiResult<RefreshedCredentials>> {
-  return postJson<RefreshedCredentials>("/auth/refresh", { refreshToken });
+  return checked(postJson<unknown>("/auth/refresh", { refreshToken }), isRefreshedCredentials);
 }
 
 /** The authenticated account, for restoring state after a refresh. */
 export function fetchAccount(identityToken: string): Promise<ApiResult<AccountState>> {
-  return getJson<AccountState>("/auth/me", identityToken);
+  return checked(getJson<unknown>("/auth/me", identityToken), isAccountState);
 }
 
 /**
@@ -123,5 +186,5 @@ export function logoutSession(identityToken: string): Promise<ApiResult<unknown>
  * company.
  */
 export function switchCompany(identityToken: string, membershipId: string): Promise<ApiResult<SwitchedCompany>> {
-  return postJson<SwitchedCompany>("/auth/switch-company", { membershipId }, identityToken);
+  return checked(postJson<unknown>("/auth/switch-company", { membershipId }, identityToken), isSwitchedCompany);
 }

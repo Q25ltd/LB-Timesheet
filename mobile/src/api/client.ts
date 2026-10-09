@@ -7,7 +7,8 @@
  *
  *   ok        the request succeeded
  *   api       the server answered with the project's error envelope
- *   network   the request never got an answer (no signal, server down, timeout)
+ *   network   the request never got a usable answer (no signal, server down,
+ *             a timeout — of the headers or of the body)
  */
 import { apiBaseUrl, describeApiResolution } from "./config";
 
@@ -26,7 +27,7 @@ export type ApiResult<T> =
   // and "check your signal" points the reader at the wrong thing entirely.
   | { kind: "network"; message: string; detail: string | null };
 
-/** How long to wait before calling it a network failure. */
+/** How long to wait for the WHOLE answer, body included, before calling it a network failure. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
 function asErrorBody(payload: unknown): ApiErrorBody {
@@ -80,37 +81,45 @@ async function send<T>(
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
 
-  let response: Response;
+  // The timer runs until the BODY has been read, not just the headers: a
+  // server or proxy that sends headers and then stalls would otherwise hang
+  // the caller forever — and app start waits on one of these calls.
   try {
-    response = await fetch(url, {
-      method:  init.method,
-      headers: {
-        "content-type": "application/json",
-        accept:         "application/json",
-        ...(init.token === undefined ? {} : { authorization: `Bearer ${init.token}` }),
-      },
-      ...(init.payload === undefined ? {} : { body: JSON.stringify(init.payload) }),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    // No answer at all. NOT an API error -- the UI must say "connection",
-    // never "email already registered", for a request that never arrived.
-    return { kind: "network", message: error instanceof Error ? error.message : "Request failed", detail: unreachable(url) };
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method:  init.method,
+        headers: {
+          "content-type": "application/json",
+          accept:         "application/json",
+          ...(init.token === undefined ? {} : { authorization: `Bearer ${init.token}` }),
+        },
+        ...(init.payload === undefined ? {} : { body: JSON.stringify(init.payload) }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      // No answer at all. NOT an API error -- the UI must say "connection",
+      // never "email already registered", for a request that never arrived.
+      return { kind: "network", message: error instanceof Error ? error.message : "Request failed", detail: unreachable(url) };
+    }
+
+    let parsed: unknown = null;
+    try {
+      parsed = (await response.json()) as unknown;
+    } catch {
+      // The answer was cut off by the timeout: no usable answer arrived.
+      if (controller.signal.aborted) return { kind: "network", message: "The response timed out", detail: unreachable(url) };
+      // A body we cannot read is only a problem when the status says failure;
+      // a 2xx with no body is still a success for callers expecting nothing.
+      if (!response.ok) return { kind: "api", status: response.status, body: { error: "Something went wrong" } };
+    }
+
+    if (!response.ok) return { kind: "api", status: response.status, body: asErrorBody(parsed) };
+    // Unchecked here: a caller that relies on the shape validates it (`account.ts`).
+    return { kind: "ok", value: parsed as T };
   } finally {
     clearTimeout(timeout);
   }
-
-  let parsed: unknown = null;
-  try {
-    parsed = (await response.json()) as unknown;
-  } catch {
-    // A body we cannot read is only a problem when the status says failure;
-    // a 2xx with no body is still a success for callers expecting nothing.
-    if (!response.ok) return { kind: "api", status: response.status, body: { error: "Something went wrong" } };
-  }
-
-  if (!response.ok) return { kind: "api", status: response.status, body: asErrorBody(parsed) };
-  return { kind: "ok", value: parsed as T };
 }
 
 export function postJson<T>(path: string, payload: unknown, token?: string): Promise<ApiResult<T>> {

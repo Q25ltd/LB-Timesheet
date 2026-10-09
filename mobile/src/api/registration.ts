@@ -8,7 +8,7 @@
  * concept is exactly what CLAUDE.md forbids.
  */
 import { postJson, type ApiResult } from "./client";
-import type { AuthenticatedAccount } from "./account";
+import { checked, isAuthenticatedAccount, type AuthenticatedAccount } from "./account";
 
 /** Exactly the four fields the server accepts. Anything else is REFUSED. */
 export interface RegistrationRequest {
@@ -22,5 +22,5 @@ export interface RegistrationRequest {
 export const EMAIL_IN_USE = "EMAIL_IN_USE";
 
 export function registerAccount(request: RegistrationRequest): Promise<ApiResult<AuthenticatedAccount>> {
-  return postJson<AuthenticatedAccount>("/auth/register", request);
+  return checked(postJson<unknown>("/auth/register", request), isAuthenticatedAccount);
 }
