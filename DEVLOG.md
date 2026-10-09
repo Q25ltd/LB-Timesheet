@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-10-09 — Codex audit of `6f58f9f`: four findings fixed, one open (F-31…F-35)
+
+Baseline `f252618` (local `main` fast-forwarded two commits — the homepage
+merge — to the live remote; no local-only commits). Both audited commits are
+ancestors: `efbe46d` (2026-09-11, registration docs) is 68 commits back and
+predates F-21's closure in `a292161` the same day; `6f58f9f` is five back.
+Baseline gate green before any change (api 242, mobile 1395, web 139, db 283,
+backup 12, smoke). Registration unchanged: five fields on the phone, repeat
+password client-only, exactly four sent.
+
+Each finding reproduced against HEAD with a RED test first, then fixed, then
+proven load-bearing by reverted mutation:
+
+- **A3 → F-33** (`fdd7e8e`): an expired, unused reset link made a signed-in
+  password change fail 500 (the consumed-within-lifetime CHECK). Only live
+  links are spent now.
+- **A2 → F-32** (`548e171`): a reset or change committing during login's
+  bcrypt verification left the login's new session alive. The session insert
+  is now conditioned on the verified hash, with the User row read `FOR SHARE`
+  in the same transaction.
+- **A5 → F-35** (`f9baeef`): a bounce arriving before its send was recorded
+  got 204 and was lost. Now 503, so SNS redelivers; still nothing written
+  for an unattributed event (D58). Corrected a false `trackedMailer` comment.
+- **A4 → F-34** (`b1504fb`): any non-2xx from `/auth/refresh` deleted the
+  phone's session — now only 401 does. Same path: the timeout now covers the
+  response body (a stalled body hung app start), and every auth answer is
+  shape-checked (a malformed 200 crashed restore into a permanent
+  `restoring`).
+- **A1 → F-31, OPEN**: local records carry no account identity, so the next
+  account on a phone sees and can change the previous driver's days.
+  Confirmed, NOT fixed — it needs an ownership design that interlocks with
+  offline cold-restart access, which is an owner decision.
+
+Gate after the fixes: exit 0 — api 242, mobile 1410, web 139, db 288
+(+PC9, LR1–3, ED15), backup 12, both builds, start smoke.
+
+Investigated, nothing changed: password/token tests do not depend on the
+timezone (api and auth DB suites green at UTC+14 and UTC−11); the Jest
+"worker failed to exit" warning appears only with parallel workers and
+`--detectOpenHandles` finds no handle (baseline has it too); proxy trust is
+F-15's open live check; `db-check`'s force-drop remains the recorded backlog
+item; the local-file crash window is the one `persist` already documents.
+
+Found and NOT built (the owner's to decide): after an offline cold restart
+the driver is sent to Sign-in and cannot reach the open day until signal
+returns and they type a password; and the driver-to-company end of the v1
+workflow — joining a company, submit, server persistence of the day, PDF,
+report email, company views — does not exist (STATUS.md).
+
+---
+
 ## 2026-10-09 — Public homepage in the LogisticBay brand; real app captures; SEO
 
 Owner-approved three-site redesign ("The Lane"; guidelines in
