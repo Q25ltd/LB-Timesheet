@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import { PATHS, SECTION } from "./paths";
+import { LOGISTICBAY, PATHS, SECTION } from "./paths";
 import { renderRoute } from "./test/renderRoute";
 
 /**
@@ -11,6 +11,8 @@ import { renderRoute } from "./test/renderRoute";
  */
 
 const PAGES = [PATHS.home, PATHS.register, PATHS.login, PATHS.forgotPassword, PATHS.verifyEmail, PATHS.resetPassword] as const;
+
+const OUTBOUND: ReadonlySet<string> = new Set(Object.values(LOGISTICBAY));
 
 function linkHrefs(): string[] {
   return [...document.querySelectorAll("a[href]")].map(link => link.getAttribute("href") ?? "");
@@ -36,8 +38,10 @@ describe("links", () => {
         if (checked.has(href)) continue;
         checked.add(href);
 
-        // Nothing on this site links away from it: no social account,
+        // The only links away from this site are the other LogisticBay
+        // websites and support@ (BRAND.md § Navigation): no social account,
         // partner or legal page exists to link to.
+        if (OUTBOUND.has(href)) continue;
         expect(href.startsWith("/") || href.startsWith("#"), `link leaves the site: ${href}`).toBe(true);
 
         const [path = "", hash] = href.split("#");
@@ -50,7 +54,7 @@ describe("links", () => {
       }
     }
     // The walk really visited the section links and the company entry points.
-    for (const expected of [`/#${SECTION.howItWorks}`, PATHS.register, PATHS.login]) {
+    for (const expected of [`/#${SECTION.howItWorks}`, PATHS.register, PATHS.login, ...OUTBOUND]) {
       expect(checked.has(expected), `no link to ${expected} was found`).toBe(true);
     }
   });
@@ -72,9 +76,10 @@ describe("links", () => {
 
 describe("account entry points", () => {
   // Every way into company registration or sign-in that the site offers:
-  // in the header, in the hero, and in the closing call to action.
+  // in the header, in the hero, on the company-portal card and in the closing
+  // call to action (sign-in: header, hero, closing call to action).
   const ENTRY_POINTS = [
-    { name: "Register company", path: PATHS.register, count: 3 },
+    { name: "Register company", path: PATHS.register, count: 4 },
     { name: "Sign in", path: PATHS.login, count: 3 },
   ] as const;
 
@@ -170,16 +175,16 @@ describe("structure and accessible names", () => {
     expect(document.querySelectorAll("img:not([alt])")).toHaveLength(0);
   });
 
-  test("the driver-app pictures are described images, never controls that do nothing", () => {
+  test("the driver-app pictures are real captures, each one described image — never controls that do nothing", () => {
     renderRoute(PATHS.home);
     const pictures = screen.getAllByRole("img", { name: /^The Timesheets driver app on a phone/ });
-    expect(pictures).toHaveLength(2);
+    expect(pictures).toHaveLength(3);
     for (const picture of pictures) {
-      // Their contents LOOK like buttons ("Finish Shift"); nothing in them
-      // may be focusable or operable, and all of it is hidden from assistive
-      // technology so no one is offered a control that does nothing.
-      expect(picture.querySelector("a, button, input, [tabindex]")).toBeNull();
-      expect(within(picture).queryByText("Finish Shift", { ignore: '[aria-hidden="true"] *' })).toBeNull();
+      // A capture, not a drawing of the app: an <img>, so nothing in it can
+      // be focused or operated, and its reserved size prevents layout shift.
+      expect(picture.tagName).toBe("IMG");
+      expect(picture.getAttribute("width")).not.toBeNull();
+      expect(picture.getAttribute("height")).not.toBeNull();
     }
   });
 

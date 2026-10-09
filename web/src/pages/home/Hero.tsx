@@ -15,6 +15,7 @@ export function Hero() {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="container hero__copy">
+        <span className="status hero__status">Pre-release</span>
         <p className="hero__eyebrow">
           <span className="hero__product">LogisticBay Timesheets</span>
           <span className="hero__audience">For haulage and transport companies</span>

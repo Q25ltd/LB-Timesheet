@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /$
+Disallow: /account
+Disallow: /company
+Disallow: /verify-email
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://timesheets.logisticbay.com/sitemap.xml

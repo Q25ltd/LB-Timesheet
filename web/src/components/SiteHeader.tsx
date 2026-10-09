@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { PATHS, SECTION, sectionHref } from "../paths";
+import { LOGISTICBAY, PATHS, SECTION, sectionHref } from "../paths";
 import { BrandLockup } from "./BrandLockup";
 
 const NAV_ITEMS = [
@@ -65,6 +65,11 @@ export function SiteHeader() {
                   </Link>
                 </li>
               ))}
+              <li>
+                <a className="site-nav__link site-nav__link--brand" href={LOGISTICBAY.home}>
+                  LogisticBay
+                </a>
+              </li>
             </ul>
           </nav>
           <div className="site-header__actions">

@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-10-09 — Public homepage in the LogisticBay brand; real app captures; SEO
+
+Owner-approved three-site redesign ("The Lane"; guidelines in
+`Q25ltd/LB-Website` BRAND.md). Public presentation only — no API, auth,
+registration, workspace, mobile or data change; the registration routes and
+forms are untouched.
+
+- **Brand:** LogisticBay tokens copied into `web/src/styles/tokens.css`
+  (ink, restrained hi-vis amber for status and lane markings); self-hosted
+  Inter Variable (`web/src/assets/fonts/`, OFL licence alongside) — CSP
+  `font-src 'self'` unchanged. Eyebrows carry the amber lane marking.
+- **Real pictures:** the HTML-drawn phones are replaced by captures of the
+  real driver app (Release build in the iOS simulator, local API, fictional
+  driver "Sam Taylor", vehicle "EX24 HAU"). They show "Working for: Personal",
+  which is what the app shows today. Each is one described `<img>` with its
+  size reserved.
+- **New section — company portal and driver app:** says plainly that the
+  office uses the web portal and drivers use the app, and that registering a
+  company does not create driver accounts. Real capture of the company
+  workspace. Driver-to-company connection is named only inside a
+  `data-status="planned"` note that says "not available yet".
+- **Status:** a **Pre-release** badge in the hero.
+- **Navigation:** header and footer link to logisticbay.com, LogisticBay TMS
+  and support@; footer reads "LogisticBay is a brand of Q25 Ltd."
+- **SEO:** canonical, Open Graph / Twitter tags with a 1200×630 brand share
+  image, `robots.txt` (homepage allowed; account, company and token pages
+  disallowed) and a one-URL `sitemap.xml`.
+
+Tests: `site.test.tsx` now allows exactly the LogisticBay outbound links
+(and requires each), counts four "Register company" entry points, and checks
+the three app pictures are real `<img>` captures with reserved sizes; the
+claims tests are unchanged and pass.
+
+Gate: `npm run check` stages all green — generate, typecheck (api, ops, web,
+mobile), eslint, check-rules, prisma validate, knip, api tests, mobile
+1395/1395, web 139/139, web build, db stage, backup, api build, start smoke.
+The db and smoke stages were run with CI's settings against the local
+Postgres (this worktree has no `api/.env`); the first full run had 3 mobile
+tests time out under heavy machine load, and all 1395 passed on a rerun.
+
+Stale, not touched: STATUS.md still calls the web workspace "local only, not
+deployed", although `timesheets.logisticbay.com` is live.
+
+---
+
 ## 2026-10-09 — Custom backups postponed (D59)
 
 Owner decision: the custom `pg_dump` → age → S3 job is not activated. The

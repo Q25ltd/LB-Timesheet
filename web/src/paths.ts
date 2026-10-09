@@ -23,6 +23,17 @@ export const SECTION = {
   howItWorks: "how-it-works",
   features: "features",
   forCompanies: "for-companies",
+  portalAndApp: "portal-and-app",
+} as const;
+
+/**
+ * The other LogisticBay websites this site links to (BRAND.md § Navigation).
+ * Separate products: links only — no shared sign-in, cookie or data.
+ */
+export const LOGISTICBAY = {
+  home: "https://logisticbay.com",
+  tms: "https://tms.logisticbay.com",
+  support: "mailto:support@logisticbay.com",
 } as const;
 
 export type SectionId = (typeof SECTION)[keyof typeof SECTION];
