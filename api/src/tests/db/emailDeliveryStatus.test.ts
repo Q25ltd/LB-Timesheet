@@ -379,8 +379,10 @@ test("ED13. an event for a message Timesheets NEVER SENT records nothing and sup
   // signed with a stolen key cannot be told apart from it here).
   for (const format of ["identity", "configurationSet"] as const) {
     const foreign = `ses-not-ours-${randomUUID()}`;
-    assert.equal((await notify(foreign, { type: "Bounce", bounceType: "Permanent", to: email }, format)).statusCode, 204, format);
-    assert.equal((await notify(foreign, { type: "Complaint", to: email }, format)).statusCode, 204, format);
+    // Answered retryable, not acknowledged: from here an early event for our
+    // own send is indistinguishable from a foreign one (ED15).
+    assert.equal((await notify(foreign, { type: "Bounce", bounceType: "Permanent", to: email }, format)).statusCode, 503, format);
+    assert.equal((await notify(foreign, { type: "Complaint", to: email }, format)).statusCode, 503, format);
   }
 
   assert.equal(await prisma.emailDeliveryEvent.count(), eventsBefore, "no event row for a message that is not ours");
@@ -404,4 +406,31 @@ test("ED14. the same configuration-set event delivered three times is recorded O
   }
   assert.equal(await prisma.emailDeliveryEvent.count({ where: { feedbackId } }), 1);
   assert.equal(await prisma.emailSuppression.count({ where: { email } }), 1);
+});
+
+test("ED15. a bounce that ARRIVES BEFORE its send is recorded is not lost: answered retryable, recorded on redelivery once the send is attributed", async () => {
+  const email = freshEmail();
+  const token = await registerCompany(email);
+  const account = await companyAccount(email);
+  // SES has accepted the email, but the send has not yet been recorded —
+  // SNS can deliver the bounce inside that window.
+  const sesMessageId = `ses-early-${randomUUID()}`;
+  const feedbackId = `feedback-${randomUUID()}`;
+  const bounce = { type: "Bounce", bounceType: "Permanent", to: email, feedbackId } as const;
+
+  const early = await notify(sesMessageId, bounce, "configurationSet");
+  assert.equal(early.statusCode, 503, `SNS retries only a 5xx or 429 — got ${early.raw}`);
+  assert.equal(field(early.body, "code"), "NOT_YET_RECORDED");
+  assert.equal(await prisma.emailDeliveryEvent.count({ where: { feedbackId } }), 0, "nothing is recorded early");
+  assert.equal(await prisma.emailSuppression.count({ where: { email } }), 0, "and nothing is suppressed early");
+
+  // The send's own record lands, then SNS redelivers the same event.
+  const { emailDeliveryRepository } = await import("../../repositories/emailDeliveryRepository.js");
+  await emailDeliveryRepository(prisma).recordSent({ sesMessageId, userId: account.id, sender: "accounts" });
+  assert.equal((await notify(sesMessageId, bounce, "configurationSet")).statusCode, 204);
+
+  const events = await prisma.emailDeliveryEvent.findMany({ where: { feedbackId }, include: { emailMessage: true } });
+  assert.deepEqual(events.map(e => [e.kind, e.emailMessage?.userId]), [["hard_bounce", account.id]]);
+  assert.equal(await prisma.emailSuppression.count({ where: { email } }), 1);
+  assert.equal(field(await me(token), "emailDeliveryProblem"), "hard_bounce");
 });

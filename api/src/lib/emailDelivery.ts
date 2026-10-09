@@ -36,7 +36,8 @@ export function trackedMailer(inner: Mailer, delivery: EmailDeliveryRepository, 
         await delivery.recordSent({ sesMessageId, userId: message.userId, sender: message.sender });
       } catch (error) {
         // The email WAS sent; failing the request now would tell its owner
-        // otherwise. A bounce for it will be recorded without its account.
+        // otherwise. A bounce for it cannot be attributed, so it records
+        // nothing (D58): SNS retries it and then drops it.
         log.error({ err: error, sesMessageId }, "a sent email could not be recorded");
       }
       return sesMessageId;

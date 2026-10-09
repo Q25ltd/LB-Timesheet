@@ -77,17 +77,24 @@ export function registerSesNotificationRoutes(
             return reply.status(204).send();
           }
           // Recorded ONCE (D56); a redelivery of the same notification is a
-          // no-op, and one about an email this API never sent records nothing
-          // (D58). Either way SNS gets its 204, so it does not retry.
+          // no-op, answered 204 so SNS stops.
+          //
+          // One about an email with no record records nothing (D58) — but it
+          // is NOT acknowledged. The send is recorded only after SES accepts
+          // it, so a fast bounce can arrive first; a 204 would make SNS drop
+          // it for good. A 503 is retryable (SNS retries 5xx and 429 only):
+          // the redelivery records it once the send is attributed, and an
+          // event that is genuinely not ours is dropped by SNS when its
+          // retries run out, still having written nothing.
           const event = deliveryEventOf(notification.data);
           const outcome = event === null ? "not-recorded" : await delivery.recordEvent(event);
           const record = notificationRecord(notification.data);
           if (record === null) return reply.status(204).send();
           if (outcome === "not_our_message") {
-            request.log.info({ event: record["event"], sesMessageId: record["sesMessageId"], outcome }, "SES reported on an email this API did not send — ignored");
-          } else {
-            request.log.warn({ ...record, outcome }, "SES reported an undeliverable or unwanted email");
+            request.log.info({ event: record["event"], sesMessageId: record["sesMessageId"], outcome }, "SES reported on an email with no record yet — left for SNS to redeliver");
+            throw new AppError(503, "Not yet recorded", "NOT_YET_RECORDED");
           }
+          request.log.warn({ ...record, outcome }, "SES reported an undeliverable or unwanted email");
           return reply.status(204).send();
         }
       }
