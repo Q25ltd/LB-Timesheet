@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-10-09 — Custom backups postponed (D59)
+
+Owner decision: the custom `pg_dump` → age → S3 job is not activated. The
+workspace stays on Railway Hobby while Timesheets is developed and tested;
+Railway Pro's managed backups and point-in-time recovery are planned before
+the first paying customer. No age key, backup access key or monitor is
+created. Everything already built stays in place unused and is not deleted
+without approval: the S3 bucket (two locked verification objects of a few
+KB, expiring by lifecycle), the IAM user without a key, the `lb_backup`
+role, and the `timesheets-backup` cron service — which DID run at 03:00 UTC
+on 2026-10-09 and stopped at once on its missing configuration, as it will
+every night until its schedule is removed. Production has no database
+backups (STATUS.md).
+
+---
+
 ## 2026-10-08 — SES events wired; the nightly encrypted backup (D59)
 
 **SES (owner-approved, us-east-1).** Created: configuration set

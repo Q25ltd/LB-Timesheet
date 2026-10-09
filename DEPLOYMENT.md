@@ -199,6 +199,12 @@ is what Pro offers. On Hobby, the minimum is the independent daily
 | Point-in-time recovery (PITR) | ~4 weeks, to any moment | bad data at a known time | WAL archived to a Railway bucket; restores into a NEW service; no separate fee (bucket storage + egress); window starts at enabling |
 | Logical dump (`pg_dump`) to storage outside Railway | your choice | **deleting the volume or project** — which wipes every Railway backup | a scheduled job; must be restore-tested |
 
+> **Postponed (D59, 2026-10-09).** No backups run today. Before the first
+> paying customer: Railway Pro, then its point-in-time recovery plus daily and
+> weekly volume backups (the table above). Sections 6.1–6.7 describe the
+> custom job that was built instead and is idle; its credentials are not to
+> be created unless the owner revives it.
+
 Daily volume backups alone keep 6 days — short of a 7-day minimum — and
 none of the Railway options exists on Hobby. **What runs instead (D59): a
 nightly encrypted `pg_dump` to S3, outside Railway** — the one copy that also

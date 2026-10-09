@@ -2296,6 +2296,14 @@ of bounces and complaints about ITS mail and nothing else.
 
 ### D59 — Backups: a nightly encrypted pg_dump to locked S3, outside Railway (2026-10-08)
 
+> **POSTPONED (owner, 2026-10-09).** Not activated. While Timesheets is in
+> development and testing the workspace stays on Railway Hobby, with no
+> database backups. Before the first paying customer the plan is Railway Pro
+> and its managed PostgreSQL backups and point-in-time recovery, which would
+> supersede this. The infrastructure below was built and is left in place,
+> unused, until the owner decides; nothing is to be created for it or
+> deleted without approval.
+
 Owner decision. Railway Hobby creates no backups (Pro-only), and every
 Railway backup dies with the volume or project anyway.
 
