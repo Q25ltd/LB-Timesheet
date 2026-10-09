@@ -1,11 +1,12 @@
 import { Link } from "react-router";
-import { PATHS, SECTION, sectionHref } from "../paths";
+import { LOGISTICBAY, PATHS, SECTION, sectionHref } from "../paths";
 import { BrandLockup } from "./BrandLockup";
 
 /**
- * Only what exists: the product, the page's own sections and the company that
- * owns LogisticBay (D11). No address, social account, certification or legal
- * page is linked, because none exists yet.
+ * Only what exists: the product, the page's own sections, the other
+ * LogisticBay websites (BRAND.md § Navigation — links only, nothing shared)
+ * and the company that owns LogisticBay (D11). No address, social account,
+ * certification or legal page is linked, because none exists yet.
  */
 export function SiteFooter() {
   return (
@@ -17,6 +18,19 @@ export function SiteFooter() {
           </Link>
           <p className="site-footer__tagline">Driver timesheets and vehicle checks, on the phone instead of paper.</p>
         </div>
+        <nav aria-label="LogisticBay">
+          <ul className="site-footer__links">
+            <li>
+              <a href={LOGISTICBAY.home}>LogisticBay home</a>
+            </li>
+            <li>
+              <a href={LOGISTICBAY.tms}>LogisticBay TMS</a>
+            </li>
+            <li>
+              <a href={LOGISTICBAY.support}>support@logisticbay.com</a>
+            </li>
+          </ul>
+        </nav>
         <nav aria-label="Footer">
           <ul className="site-footer__links">
             <li>
@@ -32,7 +46,8 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="container site-footer__legal">
-        <p>© {new Date().getFullYear()} Q25 Ltd. LogisticBay Timesheets.</p>
+        <p>© {new Date().getFullYear()} Q25 Ltd. LogisticBay is a brand of Q25 Ltd.</p>
+        <span className="site-footer__lane" aria-hidden="true" />
       </div>
     </footer>
   );

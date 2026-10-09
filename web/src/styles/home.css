@@ -879,10 +879,10 @@
   gap: var(--space-2);
   margin-bottom: var(--space-4);
   padding: 0.3rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid #f0d58f;
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--brand-dark);
+  background: var(--amber-soft);
+  color: var(--amber-ink);
   font-size: 0.8125rem;
   font-weight: 700;
 }
@@ -890,8 +890,9 @@
 .companies__status-dot {
   width: 0.5rem;
   height: 0.5rem;
-  border: 2px solid var(--brand-dark);
   border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgb(242 169 0 / 22%);
 }
 
 .companies__focus {
@@ -984,5 +985,202 @@
 
   .final-cta__actions .button {
     flex: 1 1 100%;
+  }
+}
+
+/* ---------- Hero status ---------- */
+
+.hero__status {
+  margin-bottom: var(--space-4);
+}
+
+/* ---------- Company portal and driver app ----------
+   Two cards, one per interface, each with its real screen. */
+
+.parts__header {
+  max-width: 46rem;
+  margin: 0 auto var(--space-7);
+  text-align: center;
+}
+
+.parts__header .eyebrow {
+  justify-content: center;
+}
+
+.parts__heading-line {
+  display: block;
+  color: var(--brand-light);
+}
+
+.parts__header .section-intro {
+  margin-inline: auto;
+}
+
+.parts__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+}
+
+.part {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--brand-dark);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.part__copy {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-6) var(--space-6) var(--space-5);
+}
+
+.part__icon {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: var(--brand-dark);
+  color: var(--amber);
+}
+
+.part__icon .icon {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.part__title {
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+.part__where {
+  margin-top: calc(-1 * var(--space-2));
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.part__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.part__list li {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.part__tick {
+  flex-shrink: 0;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-top: 0.25rem;
+  color: var(--brand-light);
+}
+
+.part__link {
+  justify-self: start;
+  font-weight: 700;
+}
+
+.part__screen {
+  align-self: end;
+  margin: 0 var(--space-5);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--background);
+}
+
+.part__screen img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.part__screen--phone {
+  padding: var(--space-5) var(--space-5) 0;
+  border: 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 47px, rgb(11 60 122 / 5%) 47px 48px),
+    var(--surface-accent);
+  --phone-max: 230px;
+  max-height: 22rem;
+}
+
+.browser {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 1.9rem;
+  padding-inline: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.browser__dots {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.browser__dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.browser__address {
+  flex: 1;
+  max-width: 20rem;
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parts__caption {
+  margin-top: var(--space-4);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.parts__planned {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  color: var(--text);
+  font-weight: 600;
+  text-align: center;
+}
+
+@media (max-width: 899px) {
+  .parts__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 479px) {
+  .part__copy {
+    padding: var(--space-5) var(--space-5) var(--space-4);
+  }
+
+  .part__screen {
+    margin-inline: var(--space-3);
   }
 }

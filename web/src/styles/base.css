@@ -21,6 +21,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-sans);
+  font-optical-sizing: auto;
   font-size: 1.0625rem;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -209,12 +210,56 @@ a {
 }
 
 .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
   color: var(--brand-dark);
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+/* The LogisticBay lane marking: three dashes of road paint before an eyebrow. */
+.eyebrow::before {
+  content: "";
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--amber) 0 6px, transparent 6px 10px);
+}
+
+/* Figures that are data — times, registrations, mileage. */
+.num {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* A product's honest status: an amber dot and a short label (BRAND.md). */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+  border: 1px solid #f0d58f;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgb(242 169 0 / 22%);
 }
 
 .section-heading {

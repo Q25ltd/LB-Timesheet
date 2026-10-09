@@ -286,11 +286,23 @@
 }
 
 .site-footer__legal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
   margin-top: var(--space-6);
   padding-top: var(--space-5);
   border-top: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+/* The lane marking that closes every LogisticBay site. */
+.site-footer__lane {
+  width: 5rem;
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--amber) 0 8px, transparent 8px 14px);
 }
 
 /* ---------- "Not available yet" and "not found" pages ---------- */
