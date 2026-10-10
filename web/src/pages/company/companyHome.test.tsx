@@ -83,7 +83,8 @@ describe("who reaches Home", () => {
     await home("Baltic Reefer Lines");
     expect(router.state.location.pathname).toBe(PATHS.company);
     expect(main().textContent).not.toContain("Kuizinas Haulage Ltd");
-    expect(document.title).toBe("Baltic Reefer Lines · LogisticBay Timesheets");
+    // The title is set by an effect after the heading renders: wait for it.
+    await waitFor(() => { expect(document.title).toBe("Baltic Reefer Lines · LogisticBay Timesheets"); });
   });
 
   test("3. a PENDING registration does not reach Home — it is sent to Check your email", async () => {

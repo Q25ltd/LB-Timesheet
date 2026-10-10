@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PATHS } from "../../paths";
-import { account, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../../test/fakeApi";
+import { account, holdDevelopmentEmailLookup, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../../test/fakeApi";
 import { renderRoute } from "../../test/renderRoute";
 
 /**
@@ -54,9 +54,12 @@ describe("a pending company registration: Check your email", () => {
   test("the resend asks for a new link for THIS account, and says when it is sent", async () => {
     signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
     api.on("POST /auth/email-verification", { status: 204 });
+    holdDevelopmentEmailLookup();
     renderRoute(PATHS.account);
     fireEvent.click(await screen.findByRole("button", { name: "Send a new link" }));
-    expect((await screen.findByRole("status")).textContent).toMatch(/new link .*owner@example\.com/i);
+    // Its own confirmation — announced politely, as a status.
+    const sent = await screen.findByText(/new link .*owner@example\.com/i);
+    expect(sent.getAttribute("role")).toBe("status");
     const resend = api.calls.find(c => c.path === "/auth/email-verification");
     expect(resend?.body).toBeNull();
     expect(resend?.authorization).toBe("Bearer header.identity.sig");

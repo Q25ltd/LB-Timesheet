@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test } from "vitest";
 import { PATHS } from "../../paths";
-import { account, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../../test/fakeApi";
+import { account, holdDevelopmentEmailLookup, installFakeApi, MEMBERSHIP, PENDING, type FakeApi } from "../../test/fakeApi";
 import { renderRoute } from "../../test/renderRoute";
 
 /**
@@ -33,6 +33,7 @@ describe("Check your email, with a mistyped address", () => {
   test("offers to use a different address; correcting it sends ONLY the new address and the password, as THIS account", async () => {
     signedIn({ emailVerified: false, pendingCompanyRegistration: PENDING });
     api.on("POST /auth/email/correction", { status: 204 });
+    holdDevelopmentEmailLookup();
     renderRoute(PATHS.account);
     await screen.findByRole("heading", { level: 1, name: "Check your email" });
 
@@ -42,7 +43,9 @@ describe("Check your email, with a mistyped address", () => {
     api.on("GET /auth/me", { status: 200, body: account({ emailVerified: false, pendingCompanyRegistration: PENDING, email: "owner@example.org" }) });
     fireEvent.click(screen.getByRole("button", { name: "Use this address" }));
 
-    expect((await screen.findByRole("status")).textContent).toMatch(/new link .*owner@example\.org/i);
+    // The correction's own confirmation — announced politely, as a status.
+    const confirmed = await screen.findByText(/new link .*owner@example\.org/i);
+    expect(confirmed.getAttribute("role")).toBe("status");
     const call = api.calls.find(c => c.path === "/auth/email/correction");
     expect(call?.body).toEqual({ email: "owner@example.org", currentPassword: "correct-horse-battery-staple" });
     expect(call?.authorization).toBe("Bearer header.identity.sig");

@@ -56,6 +56,21 @@ export function installFakeApi(): FakeApi {
   };
 }
 
+/**
+ * Keep the page's development-only email panel waiting on its outbox lookup.
+ *
+ * That panel shows its OWN `role="status"` line ("Looking for the email…")
+ * until the lookup answers. On a slow runner it is still there when a test
+ * looks for a confirmation, so a test must name the message it means —
+ * never "the" status on the page. Holding the lookup open makes that timing
+ * certain instead of occasional. Call after `installFakeApi()`.
+ */
+export function holdDevelopmentEmailLookup(): void {
+  const scripted = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+    input.endsWith("/dev/email-verification-link") ? new Promise<Response>(() => undefined) : scripted(input, init));
+}
+
 const USER = { id: "user-1", firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com" };
 
 export function account(overrides: { emailVerified?: boolean; memberships?: unknown[]; pendingCompanyRegistration?: unknown; emailDeliveryProblem?: "hard_bounce" | "complaint" | null; email?: string } = {}) {
