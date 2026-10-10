@@ -4,6 +4,63 @@
 
 ---
 
+## 2026-10-10 — F-31 closed: local records belong to one account each
+
+Owner-approved design, implemented on `main` after `72a98e1` (SES live).
+Baseline gate green before the change.
+
+**RED first.** `accountSwitchRoute.test.tsx` drives the real AuthProvider
+and the real Start Shift route: A signs in and starts a day, signs out, B
+signs in. On `72a98e1` B was sent straight into A's open day ("Expected
+form, Received open-day"). The same test, unchanged, passes after the fix.
+
+**What changed** (mobile only — no auth, token, server or schema change):
+
+- `src/shift/accountScope.ts`: `AccountScope`, made only from the
+  server-confirmed `account.user.id` (one path segment), held in a private
+  live registry; `revoke()` ends it. `accountDirectory(scope)` re-checks
+  liveness on every file access.
+- `src/shift/localShift.ts`: every public function takes the scope first;
+  files live in `accounts/<user.id>/`; every record carries `ownerUserId`,
+  checked on read and before write. Queued writes re-check the scope when
+  they run, so a sign-out refuses work already waiting.
+- `src/shift/useAccountScope.ts`: the hook every route uses; it revokes the
+  scope on sign-out, on account switch and on unmount. All 19 storage routes
+  pass the scope and show `Restoring` until it exists.
+- Legacy records (written before F-31, in the shared directory) are moved
+  byte-for-byte into `quarantine/` and never shown. Recovery is a
+  persistence API only: conclusive only when every company membership the
+  record names is held by the signed-in account, and only on explicit
+  confirmation. Personal-only, foreign, owner-bearing and unreadable records
+  stay quarantined. **No recovery screen** — it needs the owner's approval.
+  A day planted in an account's directory naming another owner goes to
+  quarantine, not into that account's recovery files.
+
+**Tests.** 31 existing test files and helpers migrated to the scoped API; legacy-shape
+fixtures now carry their owner; route tests that render without a signed-in
+account mock `useAccountScope` to their store scope (the real hook is proven
+by `accountSwitchRoute`). New: 18 store tests and 2 route tests.
+
+**Mutation.** 18 reverted mutants; 16 were killed. Three were initially
+survivors and were killed by new tests:
+- an owner-bearing legacy record being claimable;
+- a foreign day kept in recovery files instead of quarantine;
+- "some" instead of "every" membership.
+
+Two remain as duplicate guards:
+- the queue's scope check, since `accountDirectory` re-checks;
+- `persist`'s owner check, since every caller builds from an owner-checked
+  read.
+
+**Gate:** exit 0. api 242, mobile 1428, web, db 288, Company A/B 12, backup,
+both builds and the start smoke all passed. The 10 "overlapping act()"
+console errors in `vehicleFill`/`finishShift` are identical on `72a98e1`.
+
+Not changed: offline cold restart still goes to Sign-in (no account, no
+scope, no records — as before).
+
+---
+
 ## 2026-10-09 — Codex audit of `6f58f9f`: four findings fixed, one open (F-31…F-35)
 
 Baseline `f252618` (local `main` fast-forwarded two commits — the homepage
