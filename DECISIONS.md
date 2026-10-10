@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-01 (D46 — session client kind and browser session lifetime; O10 closed. D47 — email-ownership verification. D48 — verified identity creates a company. D49 — password recovery and change. D50 — endpoint abuse limits. D51 — driver accounts and company accounts are separate)
+> Last updated: 2026-10-10 (D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -2324,3 +2324,34 @@ Railway backup dies with the volume or project anyway.
   real customers (DEPLOYMENT.md §6.7).
 - **Not decided:** a longer retention tier (weekly/monthly copies) — tied to
   O1, which is open.
+
+### D60 — Local driver records belong to one account each (2026-10-10)
+
+Owner decision; closes F-31. A phone can be shared: one driver signs out and
+another signs in. Records on the phone were in one shared place and named no
+account, so the next driver saw, and could change, finish and delete, the
+previous driver's days.
+
+- **Where:** every local record — the open day, its temporary and recovery
+  files, every finished day — lives under `accounts/<user.id>/`, keyed by the
+  immutable, server-confirmed account id, and names its owner in
+  `ownerUserId`.
+- **How it is reached:** every local read, write, correction, finish,
+  delete and recovery takes an explicit `AccountScope`, made only from the
+  signed-in account the server confirmed. There is no global current user.
+  The scope is revoked on sign-out and on account switch, and the store
+  refuses a revoked or counterfeit scope. Ownership is checked at the
+  persistence layer — on every read and before every write — not in the UI.
+- **Company associations stay inside the driver's account:** each day keeps
+  the membership it was worked under.
+- **Sign-out deletes nothing.** Unsent records wait for the same driver.
+- **Records written before this decision** are never given to whoever signs
+  in. They are quarantined byte-for-byte, outside every account, and never
+  silently deleted or overwritten. One is recoverable only on conclusive
+  evidence — every company membership it names is held by the signed-in
+  account — and only after the driver explicitly confirms. Personal-only,
+  conflicting or ambiguous records stay quarantined.
+- **Not decided:** a screen offering that recovery (the persistence API
+  exists; the screen needs approval); what happens to quarantined records
+  nobody claims (tied to O1); local offline unlock after a cold restart
+  (unchanged — a separate approval).

@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-10-10 — Documents brought up to date
+
+Owner request: every doc reconciled with what is built and live. Documents
+only; no code changed.
+
+- **STATUS.md:**
+  - Overall now says the product is deployed privately (since 2026-10-08), SES is live, F-31 is closed and public onboarding is not open, with the correct findings tally.
+  - Rows that still said "local only, not deployed", "no Railway or Vercel resource exists", "SES built but not yet live" and "email is off" are corrected.
+  - The gate row has today's counts (api 242, mobile 1428, web 139, db 288, Company A/B 12, backup 12), and the migration count is 17, not 15.
+  - The mileage, declaration and offline rows point at the local implementations.
+  - The backup row records that the idle cron still fires daily at 03:00 UTC and fails. Removing it awaits the owner.
+- **FINDINGS.md:**
+  - F-25's row was announced by `1e70e16` but never written. It is reconstructed from `e91998c`.
+  - F-31 cites D60.
+- **DECISIONS.md:** D60 records the F-31 ownership design; the header is current.
+- **DEVLOG.md:** the 2026-10-10 SES entry had been filed below two 2026-10-09 entries; it is now in date order.
+- **README.md:**
+  - The TMS repo path is corrected.
+  - The doc index adds AGENT_WORKFLOW, FINDINGS and DEPLOYMENT.
+  - The gate description matches `package.json`, and the layout notes are current.
+- **DEPLOYMENT.md:** two sentences no longer describe the idle backup job as running, or email as disabled.
+- **PRODUCT.md:** company setup no longer names the activation code removed by F-18.
+
+Left as history: earlier DEVLOG entries, and CLAUDE.md's fork-lineage path
+(where the code was forked from in 2026-08).
+
+---
+
 ## 2026-10-10 — F-31 closed: local records belong to one account each
 
 Owner-approved design, implemented on `main` after `72a98e1` (SES live).
@@ -58,6 +86,38 @@ console errors in `vehicleFill`/`finishShift` are identical on `72a98e1`.
 
 Not changed: offline cold restart still goes to Sign-in (no account, no
 scope, no records — as before).
+
+---
+
+## 2026-10-10 — Amazon SES live in production
+
+The owner created `lb-timesheets-ses`'s access key in the console and
+entered it in Railway; it was checked by shape and by the last four
+characters of its ID only (it is that user's single key, not root's).
+`MAIL_TRANSPORT=ses` went live in the same deploy as the key; the API
+started cleanly on `adcf821` + configuration.
+
+**The IAM question is answered:** the first real send was accepted with the
+existing single statement covering both the identity and the configuration
+set — the two-statement fallback was not needed.
+
+Tested in production with synthetic accounts (DEPLOYMENT.md §7.1):
+verification and reset emails landed in a Gmail inbox, SPF/DKIM/DMARC pass,
+From and Reply-To right, production links, one send per action; the
+verification link activated the account and created its company and was
+refused on reuse; the reset link reset the password, revoked the session at
+the same instant, and the old password now gets 401. SES simulator: the
+bounce and the complaint each reached the webhook about a second after the
+send, passed signature and topic checks, were recorded once and suppressed
+only their own address. No 5xx, no errors, no secret or address in the
+logs; authentication, CORS and webhook refusals unchanged. F-35 (the
+bounce-before-send race) was already closed on this code by `f9baeef`; in
+these runs the send was recorded before its event arrived, so the 503 retry
+path was not exercised live — it stands on ED15.
+
+Left in production, removal awaiting the owner: company "ZZ SES Test Co 1
+(synthetic)" with `q25limited+ts-verify@gmail.com`, and two unverified
+accounts at the simulator addresses with their suppressions.
 
 ---
 
@@ -154,38 +214,6 @@ tests time out under heavy machine load, and all 1395 passed on a rerun.
 
 Stale, not touched: STATUS.md still calls the web workspace "local only, not
 deployed", although `timesheets.logisticbay.com` is live.
-
----
-
-## 2026-10-10 — Amazon SES live in production
-
-The owner created `lb-timesheets-ses`'s access key in the console and
-entered it in Railway; it was checked by shape and by the last four
-characters of its ID only (it is that user's single key, not root's).
-`MAIL_TRANSPORT=ses` went live in the same deploy as the key; the API
-started cleanly on `adcf821` + configuration.
-
-**The IAM question is answered:** the first real send was accepted with the
-existing single statement covering both the identity and the configuration
-set — the two-statement fallback was not needed.
-
-Tested in production with synthetic accounts (DEPLOYMENT.md §7.1):
-verification and reset emails landed in a Gmail inbox, SPF/DKIM/DMARC pass,
-From and Reply-To right, production links, one send per action; the
-verification link activated the account and created its company and was
-refused on reuse; the reset link reset the password, revoked the session at
-the same instant, and the old password now gets 401. SES simulator: the
-bounce and the complaint each reached the webhook about a second after the
-send, passed signature and topic checks, were recorded once and suppressed
-only their own address. No 5xx, no errors, no secret or address in the
-logs; authentication, CORS and webhook refusals unchanged. F-35 (the
-bounce-before-send race) was already closed on this code by `f9baeef`; in
-these runs the send was recorded before its event arrived, so the 503 retry
-path was not exercised live — it stands on ED15.
-
-Left in production, removal awaiting the owner: company "ZZ SES Test Co 1
-(synthetic)" with `q25limited+ts-verify@gmail.com`, and two unverified
-accounts at the simulator addresses with their suppressions.
 
 ---
 

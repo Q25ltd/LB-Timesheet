@@ -2,7 +2,7 @@
 
 > What this product is and where its edges are.
 > For what is actually built, see **STATUS.md**. For settled/open decisions, see **DECISIONS.md**.
-> Last updated: 2026-09-10
+> Last updated: 2026-10-10 (onboarding no longer names an activation code — F-18)
 
 ---
 
@@ -50,7 +50,8 @@ Anything on that list belongs in the separate LogisticBay TMS product.
 
 The customer should not need to adopt a fleet-management system. Setup is:
 create account → company name → destination email → configure checks →
-subscribe → get activation code → give drivers access.
+subscribe → give drivers access. (The original plan's activation code was
+removed — F-18; how a driver joins a company is not yet decided.)
 
 **A driver account is not the same thing, and does not require a company.** A
 driver registers with first name, last name, email and password — nothing

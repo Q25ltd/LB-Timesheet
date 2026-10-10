@@ -206,8 +206,8 @@ is what Pro offers. On Hobby, the minimum is the independent daily
 > be created unless the owner revives it.
 
 Daily volume backups alone keep 6 days — short of a 7-day minimum — and
-none of the Railway options exists on Hobby. **What runs instead (D59): a
-nightly encrypted `pg_dump` to S3, outside Railway** — the one copy that also
+none of the Railway options exists on Hobby. **What was built instead (D59, now idle): a
+nightly encrypted `pg_dump` to S3, outside Railway** — a copy that would also
 survives losing the volume or the project.
 
 ### 6.1 The nightly backup job
@@ -310,7 +310,8 @@ Monthly, and before real customers:
 
 ## 7. Email — Amazon SES
 
-The first deployment runs with `MAIL_TRANSPORT=disabled`: the API starts
+The first deployment ran with `MAIL_TRANSPORT=disabled` until SES was
+activated (2026-10-10, §7.1). With it disabled, the API starts
 without AWS credentials, every send fails and is logged, and the startup log
 says email is disabled. Registration cannot be completed then — expected for
 an infrastructure test.

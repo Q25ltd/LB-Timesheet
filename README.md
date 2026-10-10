@@ -7,15 +7,18 @@ the company's office.
 **Paper form → phone → PDF → company email.**
 
 > This is **not** the LogisticBay TMS. That is a separate product in a separate
-> repo (`~/timesheet-app`) with its own database. See `CLAUDE.md`.
+> repo (`Q25ltd/LB-TMS`) with its own database. See `CLAUDE.md`.
 
 ## Docs
 
 | File | What it is |
 |---|---|
 | `CLAUDE.md` | Agent instructions and mandatory rules — read first |
+| `AGENT_WORKFLOW.md` | How agents work — authorisation, proof, when to stop |
 | `PRODUCT.md` | Product scope and the in/out boundary |
-| `STATUS.md` | What is actually built |
+| `STATUS.md` | What is actually built — and what is live |
+| `FINDINGS.md` | The canonical register of every `F-XX` finding |
+| `DEPLOYMENT.md` | Runbook: Railway, Vercel, DNS, SES, backups |
 | `AUTH.md` | Frozen auth/tenant contract — read before touching anything tenant-scoped |
 | `DECISIONS.md` | Settled decisions and open questions |
 | `audits/` | Adversarial review reports — what was found, what got fixed |
@@ -41,7 +44,7 @@ cd ..
 npm run check                 # the authoritative gate — see below
 npm run dev                   # API on http://localhost:3000/health
 npm start --prefix mobile     # Expo driver app (needs the API running)
-npm run dev --prefix web      # web app on http://localhost:5173 (calls no API yet)
+npm run dev --prefix web      # web app on http://localhost:5173 (needs the API for sign-in)
 ```
 
 In development the app derives the API host from the Metro dev server it was
@@ -82,7 +85,9 @@ else.
 `npm run check` = generate → typecheck → eslint (**every workspace**) →
 check-rules → prisma validate → knip → api unit tests → **mobile typecheck and
 tests** → **web typecheck, tests and build** → **db stage** (clean database +
-real migrations + the PostgreSQL integrity and Company A/B repository suites).
+real migrations + the PostgreSQL integrity and Company A/B repository suites)
+→ backup-job tests → API build → start smoke. Playwright (`web/e2e`) runs as
+its own CI job, `e2e`.
 CI runs exactly this one command — there is no separate CI checklist to drift,
 and no second, laxer standard for the app or the web.
 
@@ -96,6 +101,7 @@ passes them through as arguments.
 
 ```
 api/      Fastify + Prisma backend
-mobile/   Expo driver app          (registration only — see STATUS.md)
-web/      Timesheets web app       (public homepage only — see STATUS.md)
+mobile/   Expo driver app          (accounts + the local working day — see STATUS.md)
+web/      Timesheets web app       (homepage, company accounts, workspace Home — see STATUS.md)
+ops/      the idle backup job (D59)
 ```
