@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-10 (D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
+> Last updated: 2026-10-10 (D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -2398,3 +2398,85 @@ recovered from an unacknowledged save. A recovered completed copy loses any
 previous declaration and requires fresh review. Recovery is not proof the
 original save completed. Copies and archives remain subject to the undecided
 retention policy O1. No submission or offline cold-start authentication.
+
+### D63 — Companies add their drivers; drivers accept with a verified email (2026-10-10)
+
+Owner decision. The mechanism D51 left undesigned ("later the company adds
+its drivers explicitly through the website"). Replaces D12's activation codes
+(removed with `Company.joinCode`, F-18); no permanent joining code of any kind
+is introduced.
+
+**The company adds a driver.** An active company administrator (D54's one
+gate, `authorizeCompanyAdmin`) enters first name, last name, email address
+and an optional payroll/employee reference on the website. That creates a
+company-scoped **driver invitation** for that email address. Nothing about
+LogisticBay accounts is looked up for the company's benefit:
+
+- **No account search, no account-existence signal.** Adding an email answers
+  the same whether or not a driver account uses it, and the invitation stays
+  "Invited" until the driver accepts. The one refusal that names a person is
+  "already one of your drivers" — an ACTIVE membership of the company's own,
+  which the company already knows.
+- **One open invitation per company and email** (a partial unique index).
+  An expired one is marked expired when the company invites again.
+- **Invitations expire after 30 days.** The company may correct the names
+  and payroll reference of a pending invitation, or cancel it; the email
+  address of an invitation never changes — a different address is a new
+  invitation.
+
+**The invitation email** (owner-confirmed, 2026-10-10). Sent through the
+existing mailer, from `accounts@`, so the existing suppression check applies.
+A fixed template: the company's name appears only as escaped plain text, the
+one link is the website, and it says to ignore the email if the reader does
+not drive for that company. It carries no token: an email is never what
+accepts an invitation. **Tracked on the invitation itself** (sent time and
+SES message id), never in the account email records — those belong to an
+account and no company may read them (D56). `MailMessage.userId` becomes
+nullable for exactly this: null means the caller records the send. A bounce
+or complaint marking the invitation undeliverable is a later step.
+
+**Abuse limits** (anyone with a verified email can register a company, and
+every LogisticBay product sends as `logisticbay.com`):
+
+- at most **50 new invitations per company per 24 hours** — beyond it the
+  company is told to try later;
+- at most **3 invitation emails per address per 7 days, across all
+  companies**. Over that cap the invitation is still created and shown in
+  the app, but no email is sent — and the company is NOT told, because that
+  would reveal that other companies invited the person. This count is the
+  one cross-company read here: a number, by the address's own index, never a
+  row.
+
+**The driver accepts — never automatically.** Matching uses VERIFIED email
+ownership only (D24): a driver account sees invitations addressed to its
+email only once that email is verified, and until then sees none. A new
+driver's invitation waits, until it expires, for them to register and verify.
+A driver may hold invitations from several companies. Each offers
+**Accept** (creates the membership, or reactivates the driver's existing
+inactive one — the company then appears under Working for at Start Shift),
+**Decline** (no membership) or **Not now** (stays pending). Acceptance is one
+transaction, safe against a concurrent second acceptance; it grants no access
+to anything recorded before it, and none to the driver's personal records.
+
+**Company-specific records.** The driver has one global account and one
+membership per company (`@@unique([companyId, userId])`, so never two). What
+a company typed — names, payroll reference — is that company's record, kept
+on its invitation; the payroll reference becomes the membership's
+`payrollRef` on acceptance. No company can read or change another company's
+invitations or driver records, or learn of the driver's other employers,
+personal days or private diary (D12).
+
+**Leaving and rejoining.** A departing driver's membership is deactivated,
+never deleted: timesheets and company records stay (D9, D15's `Restrict`).
+Rejoining needs a new invitation and a new acceptance, which reactivates the
+same membership row. The removal screen is not part of this decision's first
+stages.
+
+**Built in stages, each stopped for review:** (1) invitation schema and the
+company invitation API; (2) driver email verification in the app; (3) the
+driver's list, accept and decline API; (4) the website's Drivers page;
+(5) the app's invitation screen and Start Shift's company list.
+
+**Not decided here:** which name a submitted timesheet prints when the
+company's typed name and the driver's account name differ (decided with
+submission); invitation bounce handling; the removal screen.
