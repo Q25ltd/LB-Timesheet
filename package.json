@@ -11,7 +11,7 @@
     "knip": "knip",
     "check": "npm run generate && npm run typecheck && npm run typecheck:ops && npm run lint && npm run check:rules && npm run validate:schema && npm run knip && npm test && npm run typecheck:mobile && npm run test:mobile && npm run typecheck:web && npm run test:web && npm run build:web && npm run test:db && npm run test:backup && npm run build:api && npm run smoke:api",
     "typecheck:mobile": "npm run typecheck --prefix mobile",
-    "test:mobile": "npm test --prefix mobile",
+    "test:mobile": "npm test --prefix mobile && npm run test:restart --prefix mobile",
     "typecheck:web": "npm run typecheck --prefix web",
     "test:web": "npm test --prefix web",
     "build:web": "npm run build --prefix web",
