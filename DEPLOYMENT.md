@@ -355,6 +355,45 @@ approval at the time:
    (`bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`)
    to prove the events arrive and are recorded once.
 
+### 7.1 Production configuration — verified 2026-10-10
+
+| Setting | Value |
+|---|---|
+| `MAIL_TRANSPORT` | `ses` |
+| `AWS_REGION` | `us-east-1` |
+| `SES_CONFIGURATION_SET` | `lb-timesheets` |
+| `SES_NOTIFICATION_TOPIC_ARN` | `arn:aws:sns:us-east-1:463470971979:lb-timesheets-ses-events` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `lb-timesheets-ses`'s single access key — created by the owner in the console, entered only in Railway; never root's |
+
+AWS: configuration set `lb-timesheets` (reputation metrics; not the
+identity's default — the older default `my-first-configuration-set` has no
+event destinations and was left alone); event destination
+`lb-timesheets-bounces-complaints` (BOUNCE, COMPLAINT) → SNS topic
+`lb-timesheets-ses-events`, whose policy admits only SES from this account
+and this configuration set; one HTTPS subscription to
+`https://api.timesheets.logisticbay.com/webhooks/ses`, confirmed by the API.
+IAM `lb-timesheets-ses`: one statement — `ses:SendEmail` on the identity and
+on the configuration set, From `accounts@`/`security@`/`timesheets@` only.
+**The real sends proved it sufficient**: the two-statement fallback in step 6
+was not needed.
+
+Verified in production with synthetic accounts:
+
+| Check | Result |
+|---|---|
+| Company verification email | delivered to Gmail **Inbox**; one send; link confirmed the account and created its company; a second use of the link refused |
+| Password reset email | delivered to Inbox from `security@`; one send; the link reset the password, revoked the account's session in the same instant, and the old password is refused |
+| Headers | `From: accounts@` / `security@logisticbay.com`, `Reply-To: support@logisticbay.com`, SPF pass (custom MAIL FROM `mail.logisticbay.com`), DKIM pass (`logisticbay.com`), DMARC pass |
+| Links | `https://timesheets.logisticbay.com/…` |
+| `bounce@simulator.amazonses.com` | hard bounce reached the webhook ~1 s after SES accepted the send; signature and topic accepted; one `EmailDeliveryEvent`; that address alone suppressed |
+| `complaint@simulator.amazonses.com` | complaint recorded once; that address alone suppressed |
+| Logs | no errors, no 5xx, no secret, address or token in any line |
+
+The synthetic records left in production: company "ZZ SES Test Co 1
+(synthetic)" with account `q25limited+ts-verify@gmail.com`, and two
+unverified accounts at the simulator addresses (with their suppressions).
+Removing them needs the owner's approval.
+
 ## 8. The mobile app
 
 Not released by this deployment. A development build reaches the deployed API

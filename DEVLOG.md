@@ -100,6 +100,38 @@ deployed", although `timesheets.logisticbay.com` is live.
 
 ---
 
+## 2026-10-10 — Amazon SES live in production
+
+The owner created `lb-timesheets-ses`'s access key in the console and
+entered it in Railway; it was checked by shape and by the last four
+characters of its ID only (it is that user's single key, not root's).
+`MAIL_TRANSPORT=ses` went live in the same deploy as the key; the API
+started cleanly on `adcf821` + configuration.
+
+**The IAM question is answered:** the first real send was accepted with the
+existing single statement covering both the identity and the configuration
+set — the two-statement fallback was not needed.
+
+Tested in production with synthetic accounts (DEPLOYMENT.md §7.1):
+verification and reset emails landed in a Gmail inbox, SPF/DKIM/DMARC pass,
+From and Reply-To right, production links, one send per action; the
+verification link activated the account and created its company and was
+refused on reuse; the reset link reset the password, revoked the session at
+the same instant, and the old password now gets 401. SES simulator: the
+bounce and the complaint each reached the webhook about a second after the
+send, passed signature and topic checks, were recorded once and suppressed
+only their own address. No 5xx, no errors, no secret or address in the
+logs; authentication, CORS and webhook refusals unchanged. F-35 (the
+bounce-before-send race) was already closed on this code by `f9baeef`; in
+these runs the send was recorded before its event arrived, so the 503 retry
+path was not exercised live — it stands on ED15.
+
+Left in production, removal awaiting the owner: company "ZZ SES Test Co 1
+(synthetic)" with `q25limited+ts-verify@gmail.com`, and two unverified
+accounts at the simulator addresses with their suppressions.
+
+---
+
 ## 2026-10-09 — Custom backups postponed (D59)
 
 Owner decision: the custom `pg_dump` → age → S3 job is not activated. The
