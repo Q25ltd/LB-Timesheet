@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-10-10 — Three web test races fixed; Codex leftovers cleaned up
+
+**Flaky CI.** The first CI attempt on `7034de2` failed in
+`emailCorrection.test.tsx` ("expected 'Looking for the email…' to match
+/new link/"); a rerun of the failed job passed. Cause: in tests the account
+page also renders the development-only email panel, whose OWN
+`role="status"` line shows until its outbox lookup answers. Two tests read
+"the" status on the page, so a slow runner read the panel's line instead of
+the confirmation. Both now find their own message and assert it is a
+status. A shared helper, `holdDevelopmentEmailLookup()` in
+`web/src/test/fakeApi.ts`, keeps that lookup pending so the adverse timing
+is certain. Both tests failed with CI's exact error before the fix and pass
+after it. Removing the message's `status` role still fails the test.
+
+Found while verifying: `companyHome.test.tsx` read `document.title`
+straight after the heading appeared, but `usePageTitle` sets it in an
+effect that runs after that render. With the effect delayed one tick it
+failed ("Opening your company"); it now waits for the title. No
+production code changed (`6b5917e`); CI passed on the first attempt.
+
+**Local gate under load.** While a FamFusion dev server kept this 8-core
+Mac at a load average of 17–23, each full local `npm run check` hit a
+different timeout:
+- web `site.test.tsx` (normally 0.85 s);
+- the bcrypt-heavy db `login` / `passwordRecovery` suites;
+- mobile `checkRevision`.
+
+Every stage passed in at least one run; CI, the same gate on a clean
+machine, passed. Timeouts were deliberately not raised.
+
+**Housekeeping.**
+- Codex's disposable PostgreSQL (`/private/tmp/lb-f36-f37-gate`, port
+  55986) was stopped with `pg_ctl` and its folder removed. Its repo
+  snapshot predated the committed F-36/F-37 work and held nothing absent
+  from `main`.
+- The local `lb-timesheet-db` container, stopped earlier with Docker, was
+  started again for the gate; no data was touched.
+
+---
+
 ## 2026-10-10 — F-36 and F-37 closed: failed-logout cleanup; explicit interrupted-save recovery
 
 Owner-approved (D61, D62). Started by a Codex session that implemented most
@@ -61,6 +101,21 @@ was touched.
 
 Not built: offline unlock, submission. Neither the recovery offer nor the
 cleanup message has been visually reviewed on a device.
+
+---
+
+## 2026-10-10 — The idle backup job's schedule disabled
+
+Owner-approved. The `timesheets-backup` Railway service still started at
+03:00 UTC every day and failed at once, because its credentials were never
+set (D59). Through the Railway API (`serviceInstanceUpdate`, this service
+and the production environment only), its `cronSchedule` was set to none:
+before `0 3 * * *` (next run 2026-10-11 03:00 UTC), after none, with no next
+run. No deployment was triggered. The service, the S3 bucket, the IAM user
+and the database role are preserved but inactive; Postgres and
+`timesheets-api` were not touched. STATUS updated in `de23d05`. The SES
+test accounts and suppression records stay until end-to-end testing is
+done (owner).
 
 ---
 
