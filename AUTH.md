@@ -404,10 +404,14 @@ transaction that consumes the token and replaces the hash; an authenticated
 and the refresh boundary all read the Session row on every request: the identity
 token, the tenant token and the refresh secret stop working at once.
 
-**On the device, logout always completes locally.** The server is asked first,
-while the token is still valid, but the local clear happens either way — a
-driver in a yard with no signal must be signed out of the phone immediately. The
-client never claims the server revocation succeeded when it did not.
+**On the device, logout immediately ends local access (D61).** Account scopes
+and in-memory authentication are revoked before native cleanup or network work.
+The captured token is used for server revocation, without claiming it succeeded
+when it did not. A non-secret logout-intent marker blocks restoration while
+credential cleanup is incomplete. The app reports cleanup failure explicitly,
+offers retry, and never labels unresolved persistent cleanup successful logout.
+If both marker persistence and credential cleanup fail, restart protection
+cannot be guaranteed; this is reported. Unsynchronised records are preserved.
 
 ## Route postures (D21)
 

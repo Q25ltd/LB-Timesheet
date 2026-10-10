@@ -1263,11 +1263,12 @@ never counted as saved. Expo's move-with-overwrite deletes the target and then
 renames, on iOS and Android alike, so **one crash window remains**: between
 those two steps. What survives it is the complete, verified next state in the
 temporary file and no live file — the app shows no open day, never a
-half-written one. The temporary file is **never read as the day**, even then,
+half-written one. The temporary file is **never silently read as the day**, even then,
 because nothing on the disk proves that write was ever confirmed to the driver.
 The next write moves any leftover temporary file aside as
 `logisticbay-open-shift.recovery-unfinished-<time>-<id>.json` rather than
-promoting or deleting it. Discard removes the live and temporary files — the
+promoting or deleting it. D62 permits explicit, owner-confirmed recovery only
+when the destination is missing. Discard removes the live and temporary files — the
 day being thrown away — and leaves recovery files alone.
 
 **A FAILED SAVE IS NEVER DESCRIBED AS "NOTHING CHANGED".** Because a failed
@@ -2355,3 +2356,45 @@ previous driver's days.
   exists; the screen needs approval); what happens to quarantined records
   nobody claims (tied to O1); local offline unlock after a cold restart
   (unchanged — a separate approval).
+
+
+### D61 — Failed native cleanup ends access and blocks restoration (2026-10-10)
+
+Owner approval for F-36. Sign-out immediately ends in-memory authentication
+and synchronously revokes the existing account scopes. Before native cleanup,
+a persistent, non-secret logout-intent file is attempted independently of
+SecureStore. Its existence (even corrupt or incomplete) denies restoration;
+it never grants identity or contains an account or credential.
+
+Both native credential and biometric-preference deletions are attempted,
+then read back. The marker is removed last, only after successful cleanup.
+Failure is shown on Sign-in with a retry action; it is never called successful
+logout. Restart retries cleanup without redeeming the retained credential.
+A fresh sign-in must resolve pending cleanup before committing its credential.
+If marker persistence and credential cleanup both fail, memory access still
+ends, but the app explicitly says restart protection cannot be guaranteed.
+Server revocation uses the captured token after local access ends; no network
+answer is required to end local access. All unsynchronised records are kept.
+No offline authentication or new server authentication policy is introduced.
+
+### D62 — Explicit recovery of owned interrupted writes (2026-10-10)
+
+Owner approval for F-37. D37 still forbids silently accepting an unacknowledged
+temporary copy. An authenticated driver's live AccountScope may offer a fully
+validated copy only when it names that same owner and its destination is
+missing. This includes unfinished copies moved aside before a later write.
+Legacy ownership recovery under D60 is unchanged and gains no new UI here.
+
+Recovery requires explicit driver confirmation, bound to the exact offered
+bytes. Not now changes nothing. Recovery rechecks scope, ownership, content
+and destination through the write queue; even an unreadable existing file
+is never overwritten. A verified staging copy is installed without overwrite,
+while the source remains intact until installation succeeds. Accepted source
+bytes are archived, not offered again. Invalid, incomplete and foreign copies
+are not offered or deleted. A valid existing destination wins over any copy.
+
+A recovered record stores recoveredAt and its detail screen identifies it as
+recovered from an unacknowledged save. A recovered completed copy loses any
+previous declaration and requires fresh review. Recovery is not proof the
+original save completed. Copies and archives remain subject to the undecided
+retention policy O1. No submission or offline cold-start authentication.

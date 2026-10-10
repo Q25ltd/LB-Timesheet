@@ -4,6 +4,66 @@
 
 ---
 
+## 2026-10-10 — F-36 and F-37 closed: failed-logout cleanup; explicit interrupted-save recovery
+
+Owner-approved (D61, D62). Started by a Codex session that implemented most
+of both and stopped before the gate; finished, reviewed and verified here.
+
+**F-36 — sign-out whose native cleanup fails.** On `de23d05` a failed
+SecureStore deletion left the app `authenticated`, and a restart restored
+the old session (RED: 7/7 `logoutFailure.test.tsx` cases failed, the
+logout-intent import replaced by its literal file name so the old code
+could run). Now `signOut` ends in-memory access and revokes every account
+scope synchronously, writes a non-secret logout marker, attempts both
+deletions and reads them back, and removes the marker last. While it exists
+no restore redeems the retained credential, and a fresh sign-in must finish
+cleanup first. Failure is shown on Sign-in with a retry; if the marker could
+not be written either, the message says restart protection cannot be
+guaranteed. No local record is touched.
+
+**F-37 — an interrupted save stranded the day.** RED on `de23d05`: after
+unlink-before-rename, `readOpenShift` returned nothing and nothing could
+recover it. Now, D37 intact, Home offers the driver's OWN valid copy only
+while its destination is missing:
+- Confirmation is bound to the exact bytes offered. Not now changes nothing.
+- Scope, owner, content and destination are rechecked in the write queue.
+- An existing record is never overwritten.
+- The source is archived once accepted.
+- The record carries `recoveredAt` and says so on screen.
+- A recovered company day needs a fresh declaration.
+
+**Review fixes on top of Codex's work:**
+- The two secure-store export allowlists didn't include the new read-only
+  presence check, so 2 tests failed.
+- Three silent catches became explicit, documented handlers.
+- The recovery banner had no safe-area inset (it sat under the status bar),
+  no theme and a raw ISO date.
+- The recovered record is now re-read through the store's reader before
+  install.
+- The recovery code had been filed under the F-31 legacy heading.
+- The `signIn` indentation was fixed.
+- Two tests were added for gaps mutation found:
+  - an `unreadable-` copy must not be offered;
+  - an accepted copy must not return as an offer after the recovered day
+    is discarded.
+
+**Mutation testing:** 16 mutants in disposable copies. Codex's 8 were all
+killed; of my 8, 7 were killed and 1 is equivalent (listing without
+`scopedRead` — `accountDirectory()` re-checks the scope).
+
+**Separate-process checks:** `npm run test:restart`, now in the gate — seven
+processes sharing only a disposable disk and a synthetic keychain.
+
+**Gate:** exit 0 — api 242, mobile 1448 + 7 restart checks, web 139, db 288,
+backup 12, builds and the start smoke all passed. The local Docker
+PostgreSQL (`lb-timesheet-db`) had stopped and was started again; no data
+was touched.
+
+Not built: offline unlock, submission. Neither the recovery offer nor the
+cleanup message has been visually reviewed on a device.
+
+---
+
 ## 2026-10-10 — Documents brought up to date
 
 Owner request: every doc reconciled with what is built and live. Documents
