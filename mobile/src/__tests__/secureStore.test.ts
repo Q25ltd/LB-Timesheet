@@ -40,7 +40,7 @@ test("the module exposes NO generic setter — every persisted item is named her
   // the SecureStore read and the server's `/auth/refresh` validation in the
   // way. The refresh secret remains the only CREDENTIAL this module stores.
   expect(Object.keys(secureStoreModule).sort()).toEqual([
-    "clearBiometricOptIn", "clearRefreshToken", "readBiometricOptIn",
+    "biometricPreferencePresent", "clearBiometricOptIn", "clearRefreshToken", "readBiometricOptIn",
     "readRefreshToken", "storeBiometricOptIn", "storeRefreshToken",
   ]);
 });

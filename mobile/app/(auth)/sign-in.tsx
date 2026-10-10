@@ -18,7 +18,7 @@ import { useAuth } from "../../src/auth/AuthContext";
 import type { AuthenticatedAccount } from "../../src/api/account";
 
 export default function SignInRoute() {
-  const { signIn, unlock, biometrics, biometricUnlockEnabled, restoreOutcome } = useAuth();
+  const { signIn, signOut, logoutCleanupError, unlock, biometrics, biometricUnlockEnabled, restoreOutcome } = useAuth();
 
   // "biometric-locked" means a credential IS stored and the gate is what
   // stopped us — so offering to try again is honest. After "expired" the
@@ -28,6 +28,7 @@ export default function SignInRoute() {
 
   return (
     <SignInScreen
+      {...(logoutCleanupError === null ? {} : { logoutCleanup: { message: logoutCleanupError, retry: signOut } })}
       onSignedIn={async (account: AuthenticatedAccount) => {
         await signIn(account);
         // `replace`, not `push`: sign-in is complete and the back gesture

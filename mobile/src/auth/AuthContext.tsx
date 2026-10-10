@@ -37,6 +37,7 @@ import {
   type ReactNode,
 } from "react";
 import { Platform } from "react-native";
+import { finishLogoutCleanup, logoutPending, markLogoutPending, LogoutCleanupError } from "./logoutIntent";
 import {
   clearBiometricOptIn, clearRefreshToken, readBiometricOptIn, readRefreshToken,
   storeBiometricOptIn, storeRefreshToken,
@@ -65,6 +66,8 @@ export type RestoreOutcome =
                         // the credential is KEPT
 
 interface AuthValue {
+  logoutCleanupError: string | null;
+  registerAccessRevoker: (revoke: () => void) => () => void;
   status: AuthStatus;
   account: AuthenticatedState | null;
   /** Exposed for API calls. Never written to storage. */
@@ -97,6 +100,11 @@ const UNAUTHENTICATED_STATUS = 401;
 
 const NO_BIOMETRICS: BiometricCapability = { available: false, label: "biometrics" };
 
+/** F-30: an unconfirmed server revocation never undoes the local sign-out. */
+function serverRevocationUnconfirmed(): undefined {
+  return undefined;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("restoring");
   const [account, setAccount] = useState<AuthenticatedState | null>(null);
@@ -113,28 +121,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * turning a successful restore into a logout.
    */
   const restoring = useRef(false);
+  const generation = useRef(0);
+  const revokers = useRef(new Set<() => void>());
+  const transitions = useRef<Promise<unknown>>(Promise.resolve());
+  const [logoutCleanupError, setLogoutCleanupError] = useState<string | null>(null);
+  const cleanupRequired = useRef(false);
+  const renderedGeneration = generation.current;
+  const registerAccessRevoker = useCallback((revoke: () => void) => {
+    revokers.current.add(revoke);
+    return () => { revokers.current.delete(revoke); };
+  }, []);
+  const endAccess = useCallback(() => {
+    generation.current += 1;
+    for (const revoke of revokers.current) revoke();
+    setIdentityToken(null);
+    setTenantToken(null);
+    setAccount(null);
+    setBiometricUnlockEnabled(false);
+    setStatus("unauthenticated");
+  }, []);
+  const cleanup = useCallback(async () => {
+    try {
+      await finishLogoutCleanup();
+      cleanupRequired.current = false;
+      setLogoutCleanupError(null);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : new LogoutCleanupError(false).message;
+      setLogoutCleanupError(message);
+      throw error;
+    }
+  }, []);
 
   const signIn = useCallback(async (authenticated: AuthenticatedAccount) => {
-    // Order matters in one direction: the durable secret is committed before
-    // the app claims to be signed in, so a crash between the two leaves a
-    // recoverable session rather than a lost one.
-    await storeRefreshToken(authenticated.refreshToken);
-    setIdentityToken(authenticated.identityToken);
-    setTenantToken(authenticated.tenantToken ?? null);
-    setAccount({ user: authenticated.user, memberships: authenticated.memberships });
-    setRestoreOutcome("none");
-    setStatus("authenticated");
-  }, []);
+    endAccess();
+    const attempt = generation.current;
+    const commit = async () => {
+      if (cleanupRequired.current || logoutPending()) await cleanup();
+      if (attempt !== generation.current) throw new Error("Sign-in was interrupted by sign-out");
+      // Order matters in one direction: the durable secret is committed before
+      // the app claims to be signed in, so a crash between the two leaves a
+      // recoverable session rather than a lost one.
+      await storeRefreshToken(authenticated.refreshToken);
+      if (attempt !== generation.current) throw new Error("Sign-in was interrupted by sign-out");
+      setIdentityToken(authenticated.identityToken);
+      setTenantToken(authenticated.tenantToken ?? null);
+      setAccount({ user: authenticated.user, memberships: authenticated.memberships });
+      setRestoreOutcome("none");
+      setStatus("authenticated");
+    };
+    const result = transitions.current.then(commit, commit);
+    transitions.current = result.then(() => undefined, () => undefined);
+    await result;
+  }, [cleanup, endAccess]);
 
   /** Forget everything locally. Used by logout AND by a refused credential. */
   const clearLocalSession = useCallback(async (outcome: RestoreOutcome) => {
+    endAccess();
     await clearRefreshToken();
     setIdentityToken(null);
     setTenantToken(null);
     setAccount(null);
     setRestoreOutcome(outcome);
     setStatus("unauthenticated");
-  }, []);
+  }, [endAccess]);
 
   /**
    * Redeem the stored credential, with the biometric gate in front when the
@@ -144,16 +193,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * server account read → authenticated. Every step can only fail closed, and
    * the only thing that sets `authenticated` is the server's answer.
    */
-  const attemptRestore = useCallback(async (options: { gateOnBiometrics: boolean }): Promise<boolean> => {
+  const performRestore = useCallback(async (options: { gateOnBiometrics: boolean }): Promise<boolean> => {
     if (restoring.current) return false;
+    if (cleanupRequired.current || logoutPending()) {
+      cleanupRequired.current = true;
+      endAccess();
+      try { await cleanup(); } catch { return false; }
+      return false;
+    }
+    const attempt = generation.current;
     restoring.current = true;
     setStatus("restoring");
     try {
       // 1. Is there anything to restore? Checked BEFORE prompting, so a fresh
       //    install never shows a biometric dialog it cannot act on.
       const storedBefore = await readRefreshToken();
+      if (attempt !== generation.current) return false;
       if (storedBefore === null) {
-        await clearLocalSession("none");
+        endAccess();
+        setRestoreOutcome("none");
         return false;
       }
 
@@ -181,13 +239,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 3. Re-read AFTER the gate. The prompt can be on screen for a while,
       //    and another path may have rotated or cleared the secret meanwhile.
       const stored = await readRefreshToken();
+      if (attempt !== generation.current) return false;
       if (stored === null) {
-        await clearLocalSession("none");
+        endAccess();
+        setRestoreOutcome("none");
         return false;
       }
 
       // 4. The SERVER decides. Nothing before this point authenticated anyone.
       const redeemed = await refreshSession(stored);
+      if (attempt !== generation.current) return false;
 
       if (redeemed.kind === "network") {
         // The request never arrived. The credential is almost certainly still
@@ -216,9 +277,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 5. Rotation happened server-side, so the stored secret MUST be
       //    replaced before anything else can use it.
       await storeRefreshToken(redeemed.value.refreshToken);
+      if (attempt !== generation.current) { await cleanup(); return false; }
 
       // 6. Account state, with the token the server just issued.
       const state = await fetchAccount(redeemed.value.identityToken);
+      if (attempt !== generation.current) return false;
       if (state.kind !== "ok") {
         // The credential rotated but the account read failed. The new secret is
         // already stored, so a retry is possible; the app just is not
@@ -240,7 +303,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       restoring.current = false;
     }
-  }, [clearLocalSession]);
+  }, [clearLocalSession, cleanup, endAccess]);
+
+  const attemptRestore = useCallback((options: { gateOnBiometrics: boolean }) => {
+    const run = () => performRestore(options);
+    const result = transitions.current.then(run, run);
+    transitions.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, [performRestore]);
 
   /** App start: read the device's capability and preference, then restore. */
   useEffect(() => {
@@ -254,9 +324,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBiometrics(capability);
       setBiometricUnlockEnabled(optedIn);
       await attemptRestore({ gateOnBiometrics: optedIn });
-    })();
+    })().catch(() => {
+      if (cancelled) return;
+      endAccess();
+      cleanupRequired.current = true;
+      setLogoutCleanupError(new LogoutCleanupError(false).message);
+    });
     return () => { cancelled = true; };
-  }, [attemptRestore]);
+  }, [attemptRestore, endAccess]);
 
   /**
    * The Sign-in screen's biometric action, and the retry after a cancel.
@@ -265,16 +340,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const unlock = useCallback(() => attemptRestore({ gateOnBiometrics: true }), [attemptRestore]);
 
   const signOut = useCallback(async () => {
-    // Server FIRST, while the token is still valid — but the local clear
-    // happens either way. A driver who taps "sign out" in a yard with no
-    // signal must be signed out of the device immediately; pretending the
-    // server revocation succeeded would be a lie, and blocking on it would
-    // leave a signed-in phone in their hand.
-    if (identityToken !== null) await logoutSession(identityToken);
-    await clearBiometricOptIn();
-    setBiometricUnlockEnabled(false);
-    await clearLocalSession("none");
-  }, [identityToken, clearLocalSession]);
+    const token = identityToken;
+    endAccess();
+    setRestoreOutcome("none");
+    cleanupRequired.current = true;
+    try { markLogoutPending(); } catch { /* Cleanup still attempts both native removals. */ }
+    const result = transitions.current.then(cleanup, cleanup);
+    transitions.current = result.then(() => undefined, () => undefined);
+    // The captured token can revoke the server session after local access ends.
+    // Its outcome is deliberately not acted on: local access has already ended,
+    // and an unreachable server leaves the Session to expire (F-30, accepted).
+    if (token !== null) void logoutSession(token).catch(serverRevocationUnconfirmed);
+    await result;
+  }, [identityToken, cleanup, endAccess]);
 
   /**
    * Turn biometric unlock on. Prompts once, so the driver proves the method
@@ -282,19 +360,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * on the next launch is worse than no opt-in.
    */
   const enableBiometricUnlock = useCallback(async (): Promise<boolean> => {
+    const attempt = renderedGeneration;
+    if (attempt !== generation.current) return false;
     const capability = await biometricCapability(Platform.OS === "ios");
     setBiometrics(capability);
     if (!capability.available) return false;
     if (!await authenticateLocally(capability.label)) return false;
-    await storeBiometricOptIn();
-    setBiometricUnlockEnabled(true);
-    return true;
-  }, []);
+    const commit = async () => {
+      if (attempt !== generation.current) return false;
+      await storeBiometricOptIn();
+      if (attempt !== generation.current) return false;
+      setBiometricUnlockEnabled(true);
+      return true;
+    };
+    const result = transitions.current.then(commit, commit);
+    transitions.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, [renderedGeneration]);
 
   const disableBiometricUnlock = useCallback(async () => {
-    await clearBiometricOptIn();
-    setBiometricUnlockEnabled(false);
-  }, []);
+    const attempt = renderedGeneration;
+    const commit = async () => {
+      if (attempt !== generation.current) return;
+      await clearBiometricOptIn();
+      if (attempt === generation.current) setBiometricUnlockEnabled(false);
+    };
+    const result = transitions.current.then(commit, commit);
+    transitions.current = result.then(() => undefined, () => undefined);
+    await result;
+  }, [renderedGeneration]);
 
   /**
    * Ask the server for tenant authority in one company.
@@ -304,15 +398,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * arrives here was authorised by the server, not chosen by this client.
    */
   const chooseCompany = useCallback(async (membershipId: string): Promise<boolean> => {
-    if (identityToken === null) return false;
+    if (identityToken === null || renderedGeneration !== generation.current) return false;
+    const attempt = generation.current;
     const selected = await switchCompany(identityToken, membershipId);
+    if (attempt !== generation.current) return false;
     if (selected.kind !== "ok") return false;
     setTenantToken(selected.value.tenantToken);
     return true;
-  }, [identityToken]);
+  }, [identityToken, renderedGeneration]);
 
   const value = useMemo<AuthValue>(
     () => ({
+      logoutCleanupError,
+      registerAccessRevoker,
       status,
       account,
       identityToken,
@@ -329,7 +427,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       chooseCompany,
     }),
     [
-      status, account, identityToken, tenantToken, restoreOutcome, biometrics,
+      logoutCleanupError, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
       biometricUnlockEnabled, signIn, signOut, unlock, enableBiometricUnlock,
       disableBiometricUnlock, chooseCompany,
     ],

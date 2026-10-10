@@ -68,3 +68,8 @@ export async function readBiometricOptIn(): Promise<boolean> {
 export async function clearBiometricOptIn(): Promise<void> {
   await SecureStore.deleteItemAsync(BIOMETRIC_OPT_IN_KEY);
 }
+
+/** Logout verifies absence, including malformed preference values. */
+export async function biometricPreferencePresent(): Promise<boolean> {
+  return (await SecureStore.getItemAsync(BIOMETRIC_OPT_IN_KEY)) !== null;
+}

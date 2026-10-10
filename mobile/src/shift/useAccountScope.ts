@@ -16,7 +16,7 @@ import { useAuth } from "../auth/AuthContext";
 import { AccountScope } from "./accountScope";
 
 export function useAccountScope(): AccountScope | null {
-  const { account } = useAuth();
+  const { account, registerAccessRevoker } = useAuth();
   const userId = account?.user.id ?? null;
   const [scope, setScope] = useState<AccountScope | null>(null);
 
@@ -34,11 +34,13 @@ export function useAccountScope(): AccountScope | null {
       return undefined;
     }
     setScope(made);
+    const unregister = registerAccessRevoker(() => { made.revoke(); });
     return () => {
+      unregister();
       made.revoke();
       setScope(null);
     };
-  }, [userId]);
+  }, [userId, registerAccessRevoker]);
 
   // Never hand out a scope for an account that is no longer the signed-in one,
   // even for the render before the effect above has caught up.

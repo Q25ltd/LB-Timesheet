@@ -68,6 +68,7 @@ import { signIn } from "../api/account";
 import { validateSignIn, type SignInFieldErrors, type SignInFields } from "./signInValidation";
 
 interface SignInScreenProps {
+  logoutCleanup?: { message: string; retry: () => Promise<void> };
   /** Called with the server's response once sign-in succeeds. */
   onSignedIn: (account: AuthenticatedAccount) => Promise<void> | void;
   /** Navigate to registration. */
@@ -98,7 +99,12 @@ const EMPTY: SignInFields = { email: "", password: "" };
  */
 const CREDENTIALS_REJECTED = "Email address or password is incorrect.";
 
-export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: SignInScreenProps) {
+/** A failed retry updates `logoutCleanup.message`, which stays on screen (D61). */
+function stillShownAbove(): undefined {
+  return undefined;
+}
+
+export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock, logoutCleanup }: SignInScreenProps) {
   const insets = useSafeAreaInsets();
   // The hero is the first thing to go: it is decoration, and the form is not.
   const { keyboardVisible, showHero } = useAuthLayout();
@@ -137,6 +143,10 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
 
   async function submit() {
     if (submitting) return; // a double tap is one sign-in, not two
+    if (logoutCleanup !== undefined) {
+      setFormError("Retry sign-out cleanup before signing in.");
+      return;
+    }
 
     const found = validateSignIn(fields);
     if (Object.values(found).some(message => message !== undefined)) {
@@ -163,7 +173,9 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
       // The screen does not decide what happens next; it hands the response
       // to whoever owns the session. Kept awaited so a storage failure is
       // not silently swallowed while the UI moves on.
-      await onSignedIn(result.value);
+      try { await onSignedIn(result.value); } catch {
+        setFormError("Sign-in could not be completed safely. Retry sign-out cleanup if shown, then try again.");
+      }
       setSubmitting(false);
       return;
     }
@@ -221,6 +233,14 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock }: S
             at the same absolute position as before. Only the lockup moves. */}
         <View style={signInStyles.lockupAtTop}>
           <BrandLockup />
+          {logoutCleanup !== undefined ? (
+            <View accessibilityLiveRegion="assertive">
+              <Text style={typography.error}>{logoutCleanup.message}</Text>
+              <Pressable accessibilityRole="button" onPress={() => { void logoutCleanup.retry().catch(stillShownAbove); }}>
+                <Text>Retry sign-out cleanup</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <View

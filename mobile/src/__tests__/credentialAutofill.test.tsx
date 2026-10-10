@@ -191,7 +191,7 @@ test("the app's OWN storage module cannot store a password — it has no such ex
   const names = Object.keys(secureStoreModule).sort();
 
   expect(names).toEqual([
-    "clearBiometricOptIn", "clearRefreshToken", "readBiometricOptIn",
+    "biometricPreferencePresent", "clearBiometricOptIn", "clearRefreshToken", "readBiometricOptIn",
     "readRefreshToken", "storeBiometricOptIn", "storeRefreshToken",
   ]);
   // Nothing password-shaped, and no generic setter to smuggle one through.

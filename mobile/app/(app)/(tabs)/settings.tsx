@@ -9,6 +9,11 @@ import { router } from "expo-router";
 import { SettingsScreen } from "../../../src/screens/SettingsScreen";
 import { useAuth } from "../../../src/auth/AuthContext";
 
+/** A failed cleanup is shown, with its retry, on Sign-in (D61) — not dropped. */
+function cleanupShownOnSignIn(): undefined {
+  return undefined;
+}
+
 export default function SettingsRoute() {
   const {
     account, signOut, biometrics, biometricUnlockEnabled,
@@ -27,9 +32,9 @@ export default function SettingsRoute() {
       biometricUnlockEnabled={biometricUnlockEnabled}
       onEnableBiometrics={enableBiometricUnlock}
       onDisableBiometrics={disableBiometricUnlock}
-      // Unchanged semantics: the server is asked first while the token is
-      // still valid, and the device is cleared either way.
-      onSignOut={() => { void signOut().then(() => { router.replace("/sign-in"); }); }}
+      // The auth gate redirects immediately. Cleanup errors remain visible
+      // on Sign-in, where they can be retried without restoring the account.
+      onSignOut={() => { void signOut().finally(() => { router.replace("/sign-in"); }).catch(cleanupShownOnSignIn); }}
     />
   );
 }
