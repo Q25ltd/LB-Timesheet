@@ -27,6 +27,10 @@ import type { AccountMembership, AuthenticatedAccount } from "../api/account";
 import { clearOpenShift, readOpenShift } from "../shift/localShift";
 import StartShift from "../../app/(app)/start-shift";
 import { ANY_USE_ID } from "./useIdAt";
+import { scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -128,7 +132,7 @@ async function withValidVehicle(view: View): Promise<void> {
   await type(view, "start-mileage", "184203");
 }
 
-beforeEach(async () => { await clearOpenShift(); });
+beforeEach(async () => { await clearOpenShift(SCOPE); });
 afterEach(() => { jest.restoreAllMocks(); });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -189,7 +193,7 @@ test("the entered time is what gets persisted, not the clock", async () => {
   await press(view, "vehicle-not-yet");
   await press(view, "start-shift-submit");
 
-  const started = await readOpenShift();
+  const started = await readOpenShift(SCOPE);
   const persisted = new Date(String(started?.startedAt));
   expect(persisted.getHours()).toBe(4);
   expect(persisted.getMinutes()).toBe(45);
@@ -281,7 +285,7 @@ test("the plate is trimmed and upper-cased when the shift is created", async () 
   await type(view, "start-mileage", "1000");
   await press(view, "start-shift-submit");
 
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB24 XYZ");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB24 XYZ");
 });
 
 test("an international plate is accepted — no UK format is imposed", async () => {
@@ -292,7 +296,7 @@ test("an international plate is accepted — no UK format is imposed", async () 
   await type(view, "start-mileage", "0");
   await press(view, "start-shift-submit");
 
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("LT-ABC-123");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("LT-ABC-123");
 });
 
 test("a blank or whitespace-only plate blocks the start", async () => {
@@ -329,7 +333,7 @@ test("mileage is never invented — the shift carries exactly what was typed", a
   await withValidVehicle(view);
   await press(view, "start-shift-submit");
 
-  expect((await readOpenShift())?.vehicle?.startMileage).toBe(184203);
+  expect((await readOpenShift(SCOPE))?.vehicle?.startMileage).toBe(184203);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -375,7 +379,7 @@ test("Not yet creates an open shift with NO vehicle", async () => {
   await press(view, "vehicle-not-yet");
   await press(view, "start-shift-submit");
 
-  const started = await readOpenShift();
+  const started = await readOpenShift(SCOPE);
   expect(started?.status).toBe("open");
   expect(started?.vehicle).toBeNull();
 });
@@ -386,7 +390,7 @@ test("Yes creates an open shift carrying exactly the vehicle entered", async () 
   await withValidVehicle(view);
   await press(view, "start-shift-submit");
 
-  const started = await readOpenShift();
+  const started = await readOpenShift(SCOPE);
   // Its use began when the day did, so it carries the shift's own start.
   expect(started?.vehicle).toEqual({
     vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184203, useId: ANY_USE_ID, startedAt: started?.startedAt, checks: [], fills: [],
@@ -403,7 +407,7 @@ test("switching Yes → Not yet leaves NO vehicle behind in the created shift", 
 
   // The driver cannot see those fields any more, so they cannot be agreeing
   // to them. The shift must carry nothing of them.
-  expect((await readOpenShift())?.vehicle).toBeNull();
+  expect((await readOpenShift(SCOPE))?.vehicle).toBeNull();
 });
 
 test("switching Not yet → Yes requires the vehicle details again", async () => {
@@ -421,11 +425,11 @@ test("pressing Start Shift repeatedly creates exactly ONE shift", async () => {
   await press(view, "vehicle-not-yet");
 
   await press(view, "start-shift-submit");
-  const first = await readOpenShift();
+  const first = await readOpenShift(SCOPE);
   await press(view, "start-shift-submit");
   await press(view, "start-shift-submit");
 
-  expect(await readOpenShift()).toEqual(first);
+  expect(await readOpenShift(SCOPE)).toEqual(first);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -489,7 +493,7 @@ test("the shift starts with the network DEAD", async () => {
   await press(view, "vehicle-not-yet");
   await press(view, "start-shift-submit");
 
-  expect((await readOpenShift())?.status).toBe("open");
+  expect((await readOpenShift(SCOPE))?.status).toBe("open");
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
@@ -516,7 +520,7 @@ test("arriving with a shift ALREADY open continues it instead of starting anothe
   const view = await openStartShift();
   await press(view, "vehicle-not-yet");
   await press(view, "start-shift-submit");
-  const started = await readOpenShift();
+  const started = await readOpenShift(SCOPE);
 
   mockRouter.replace.mockClear();
   // Mounted WITHOUT waiting for the form, because the whole point is that the
@@ -527,5 +531,5 @@ test("arriving with a shift ALREADY open continues it instead of starting anothe
   expect(returning.queryByTestId("start-shift-submit")).toBeNull();
   expect(returning.queryByTestId("working-for")).toBeNull();
   // And the open day is untouched.
-  expect(await readOpenShift()).toEqual(started);
+  expect(await readOpenShift(SCOPE)).toEqual(started);
 });

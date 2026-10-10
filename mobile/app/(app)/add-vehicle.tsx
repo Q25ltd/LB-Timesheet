@@ -17,27 +17,33 @@ import { AddVehicleScreen } from "../../src/screens/AddVehicleScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { addVehicleToOpenShift, readOpenShift, type VehicleDetails } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 type Where = "loading" | "no-shift" | "has-vehicle" | "ready";
 
 export default function AddVehicleRoute() {
+  const scope = useAccountScope();
   const [where, setWhere] = useState<Where>("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => {
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => {
       if (cancelled) return;
       if (open === null) setWhere("no-shift");
       else setWhere(open.vehicle === null ? "ready" : "has-vehicle");
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [scope]);
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (where === "loading") return <Restoring />;
   if (where === "no-shift") return <Redirect href="/today" />;
   if (where === "has-vehicle") return <Redirect href="/active-shift" />;
 
-  return <AddVehicleScreen onBack={() => { router.back(); }} onAdd={add} />;
+  return <AddVehicleScreen onBack={() => { router.back(); }} onAdd={vehicle => add(scope, vehicle)} />;
 }
 
 /**
@@ -48,10 +54,10 @@ export default function AddVehicleRoute() {
  * whether this screen was opened from there or reached some other way, and
  * never leaves the form behind the back gesture.
  */
-async function add(vehicle: VehicleDetails): Promise<void> {
+async function add(scope: AccountScope, vehicle: VehicleDetails): Promise<void> {
   try {
     const startedAt = new Date();
-    const shift = await addVehicleToOpenShift({ vehicle, startedAt });
+    const shift = await addVehicleToOpenShift(scope, { vehicle, startedAt });
     // The day was discarded or finished while this form was open.
     if (shift === null) { router.replace("/today"); return; }
     // Add is not change: with a vehicle already there the store keeps it. Say

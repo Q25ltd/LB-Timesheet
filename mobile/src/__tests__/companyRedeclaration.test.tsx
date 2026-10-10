@@ -13,7 +13,7 @@
  *   PERSONAL    an ordinary correction stays an ordinary save.
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, Text } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -47,6 +47,10 @@ import {
 import { TRAILER_TYPE } from "../shift/trailer";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { finishDeclared } from "./declared";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_redeclare_1");
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const mockParams: Record<string, string | undefined> = {};
@@ -111,8 +115,8 @@ async function type(view: View, testID: string, value: string): Promise<void> {
 async function refocus(): Promise<void> {
   await act(async () => { for (const again of [...mockFocus]) again(); await Promise.resolve(); });
 }
-const recordFile = (id: string) => new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`);
-const openBytes = () => new File(Paths.document, OPEN_SHIFT_FILE).textSync();
+const recordFile = (id: string) => new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`);
+const openBytes = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync();
 const alerts = () => jest.mocked(Alert.alert).mock.calls.map(([title, message]) => [title, message]);
 
 function SignedIn({ children }: { children: React.ReactNode }) {
@@ -136,8 +140,8 @@ const detail = (id: string) => { mockParams.id = id; return mount(<TimesheetRout
 const edit = (id: string, review?: string) => { mockParams.id = id; mockParams.review = review; return mount(<EditTimesheetRoute />, ["edit-timesheet-save", "edit-timesheet-final"]); };
 
 beforeEach(async () => {
-  await clearOpenShift();
-  for (const entry of new Directory(Paths.document).list()) {
+  await clearOpenShift(SCOPE);
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File) entry.delete();
   }
   for (const key of Object.keys(mockParams)) mockParams[key] = undefined;
@@ -147,21 +151,21 @@ beforeEach(async () => {
 afterEach(() => { jest.restoreAllMocks(); });
 
 async function open(): Promise<LocalShift> {
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   if (day === null) throw new Error("expected an open day");
   return day;
 }
 
 /** AB12 CDE 05:00–09:00, then XY34 ZZZ in use from 09:00 — no trailer. */
 async function twoVehicles(workingFor: WorkingContext = PERSONAL): Promise<LocalShift> {
-  const shift = await startLocalShift({ workingFor, startedAt: at(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  const shift = await startLocalShift(SCOPE, { workingFor, startedAt: at(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
   return open();
 }
 
 async function finishedDay(workingFor: WorkingContext, times: { startedAt: Date; endedAt: Date } = { startedAt: at(5), endedAt: at(17) }): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor, startedAt: times.startedAt, vehicle: VAN });
-  const done = await finishDeclared({
+  const shift = await startLocalShift(SCOPE, { workingFor, startedAt: times.startedAt, vehicle: VAN });
+  const done = await finishDeclared(SCOPE, {
     shiftId: shift.id, vehicleUseId: (await open()).vehicle?.useId ?? null, trailerUseId: null,
     finalMileage: 5_200, endedAt: times.endedAt, nightOut: false, notes: "",
   });
@@ -229,9 +233,9 @@ test("an end before its start is said as the driver types, and cannot be saved",
 });
 
 test("a trailer use's times are corrected on its own Edit — a standard trailer too", async () => {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: at(6) });
-  await changeTrailer({ shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: null, changedAt: at(10) });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: at(6) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: null, changedAt: at(10) });
   const ended = (await open()).previousTrailers[0];
   Object.assign(mockParams, { usage: ended?.useId });
   const view = await mount(<TrailerUsageRoute />, ["trailer-usage-edit"]);
@@ -259,7 +263,7 @@ test("a use's times corrected from the Review: the Review reads the day again, a
   expect(stateOf(view, "finish-confirm-declaration").checked).toBe(true);
 
   await press(view, "review-vehicle-0-open");
-  await correctVehicleUseTimes({ shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5, 30), endedAt: at(9) });
+  await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5, 30), endedAt: at(9) });
   await refocus();
 
   await waitFor(() => { expect(text(view, "review-vehicle-0-times")).toBe("05:30 – 09:00"); });
@@ -279,7 +283,7 @@ test("the company finish files the declaration: the version the driver saw, by t
   await press(view, "finish-confirm");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/today"); });
-  const stored = await readCompletedShift(opened.id);
+  const stored = await readCompletedShift(SCOPE, opened.id);
   if (stored === null) throw new Error("expected the day");
   expect(stored.declaration).toMatchObject({ version: timesheetVersion(stored), declaredBy: DRIVER.user.id });
   expect(declarationHolds(stored)).toBe(true);
@@ -313,8 +317,8 @@ test.each([
   await press(view, "edit-timesheet-final-declaration");
   await press(view, "edit-timesheet-final");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections).toHaveLength(1); });
-  const stored = await readCompletedShift(done.id);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections).toHaveLength(1); });
+  const stored = await readCompletedShift(SCOPE, done.id);
   if (stored === null) throw new Error("expected the day");
   expect(declarationHolds(stored)).toBe(true);
   if (stored.corrections?.[0]?.workingFor.kind === "company") {
@@ -333,7 +337,7 @@ test("company unsent: nothing changed and the declaration holds — there is not
 
 test("a use changed on a company's timesheet: its page says so, and the Review declares it again — with no correction appended", async () => {
   const done = await finishedDay(NORTHGATE);
-  await recordVehicleFill({
+  await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
     fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
   });
@@ -352,10 +356,10 @@ test("a use changed on a company's timesheet: its page says so, and the Review d
   await press(review, "edit-timesheet-final");
 
   await waitFor(async () => {
-    const stored = await readCompletedShift(done.id);
+    const stored = await readCompletedShift(SCOPE, done.id);
     expect(stored === null ? false : declarationHolds(stored)).toBe(true);
   });
-  expect((await readCompletedShift(done.id))?.corrections).toBeUndefined();
+  expect((await readCompletedShift(SCOPE, done.id))?.corrections).toBeUndefined();
   await review.unmount();
   const again = await detail(done.id);
   expect(again.queryByTestId("timesheet-unconfirmed")).toBeNull();
@@ -384,8 +388,8 @@ test.each([
   await press(review, "edit-timesheet-final-declaration");
   await press(review, "edit-timesheet-final");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.declaration?.declaredBy).toBe(DRIVER.user.id); });
-  const stored = await readCompletedShift(done.id);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.declaration?.declaredBy).toBe(DRIVER.user.id); });
+  const stored = await readCompletedShift(SCOPE, done.id);
   if (stored === null) throw new Error("expected the day");
   expect(stored.declaration?.version).toBe(timesheetVersion(stored));
   expect(stored.corrections).toBeUndefined();
@@ -400,7 +404,7 @@ test.each([
 
 test("Back from a Review opened to declare again leaves the timesheet — nothing saved", async () => {
   const done = await finishedDay(NORTHGATE);
-  await recordVehicleFill({
+  await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
     fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
   });
@@ -423,7 +427,7 @@ test("declaring a company's timesheet again does not ask about a finish ahead of
   await press(view, "edit-timesheet-final-declaration");
   await press(view, "edit-timesheet-final");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections).toHaveLength(1); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections).toHaveLength(1); });
   expect(alerts().filter(([title]) => title === "Finish time is ahead")).toEqual([]);
 });
 
@@ -439,14 +443,14 @@ test("a Personal timesheet's ordinary correction is an ordinary save — no Revi
   expect(view.getByText("Save correction")).toBeTruthy();
   await press(view, "edit-timesheet-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections).toHaveLength(1); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections).toHaveLength(1); });
   expect(view.queryByTestId("edit-timesheet-final")).toBeNull();
-  expect((await readCompletedShift(done.id))?.declaration).toBeUndefined();
+  expect((await readCompletedShift(SCOPE, done.id))?.declaration).toBeUndefined();
 });
 
 test("a use changed on a Personal timesheet asks for nothing", async () => {
   const done = await finishedDay(PERSONAL);
-  await recordVehicleFill({
+  await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
     fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
   });

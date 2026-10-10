@@ -29,8 +29,11 @@ import {
 import { useTimesMessage, type UseTimes } from "../../src/screens/UseTimesEditor";
 import { leaveStale, missingHref, readScreenDay, withTimesheet, withVia } from "../../src/navigation/useScreenDay";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function VehicleUsageRoute() {
+  const scope = useAccountScope();
   const { usage, usageState, timesheet, via } = useLocalSearchParams<{ usage?: string; usageState?: string; timesheet?: string; via?: string }>();
   // Ended unless named otherwise: the vehicle IN USE is opened from the Finish Review (D41).
   const state: UsageState = usageState === USAGE_STATE.inUse ? USAGE_STATE.inUse : USAGE_STATE.ended;
@@ -40,11 +43,14 @@ export default function VehicleUsageRoute() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+      if (scope === null) return undefined;
+      void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, [timesheet]),
+    }, [scope, timesheet]),
   );
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
 
@@ -65,9 +71,9 @@ export default function VehicleUsageRoute() {
       onFills={type => {
         router.push({ pathname: "/vehicle-fill", params: withVia(withTimesheet({ type, usage: use.useId, usageState: state }, timesheet), via) });
       }}
-      onSaveEndMileage={endMileage => saveEndMileage(shift.id, use.useId, endMileage, setShift, timesheet)}
-      onSaveTimes={times => saveTimes({ shiftId: shift.id, useId: use.useId, usageState: state, ...times }, setShift, timesheet)}
-      onSaveStartMileage={startMileage => saveStartMileage({ shiftId: shift.id, vehicleUseId: use.useId, usageState: state, startMileage }, setShift, timesheet)}
+      onSaveEndMileage={endMileage => saveEndMileage(scope, shift.id, use.useId, endMileage, setShift, timesheet)}
+      onSaveTimes={times => saveTimes(scope, { shiftId: shift.id, useId: use.useId, usageState: state, ...times }, setShift, timesheet)}
+      onSaveStartMileage={startMileage => saveStartMileage(scope, { shiftId: shift.id, vehicleUseId: use.useId, usageState: state, startMileage }, setShift, timesheet)}
       onCorrectPlate={() => {
         router.push({ pathname: "/correct-name", params: withVia(withTimesheet({ asset: "vehicle", usage: use.useId, usageState: state }, timesheet), via) });
       }}
@@ -75,7 +81,7 @@ export default function VehicleUsageRoute() {
   );
 }
 
-async function saveEndMileage(
+async function saveEndMileage(scope: AccountScope, 
   shiftId: string,
   vehicleUseId: string,
   endMileage: number,
@@ -83,7 +89,7 @@ async function saveEndMileage(
   timesheet: string | undefined,
 ): Promise<void> {
   try {
-    const day = await correctEndMileage({ shiftId, vehicleUseId, endMileage });
+    const day = await correctEndMileage(scope, { shiftId, vehicleUseId, endMileage });
     if (day === null) {
       // The day was discarded beneath this screen, or the use is gone.
       Alert.alert("Nothing was saved", timesheet === undefined ? "That vehicle use is no longer part of the open shift." : "That vehicle use is no longer part of this timesheet.");
@@ -97,13 +103,13 @@ async function saveEndMileage(
   }
 }
 
-async function saveStartMileage(
+async function saveStartMileage(scope: AccountScope, 
   input: { shiftId: string; vehicleUseId: string; usageState: UsageState; startMileage: number },
   show: (shift: LocalShift) => void,
   timesheet: string | undefined,
 ): Promise<void> {
   try {
-    const day = await correctStartMileage(input);
+    const day = await correctStartMileage(scope, input);
     if (day === null) {
       Alert.alert("Nothing was saved", "That vehicle is no longer the one this was opened for.");
       leaveStale(timesheet);
@@ -116,13 +122,13 @@ async function saveStartMileage(
   }
 }
 
-async function saveTimes(
+async function saveTimes(scope: AccountScope, 
   input: { shiftId: string; useId: string; usageState: UsageState } & UseTimes,
   show: (shift: LocalShift) => void,
   timesheet: string | undefined,
 ): Promise<void> {
   try {
-    const day = await correctVehicleUseTimes(input);
+    const day = await correctVehicleUseTimes(scope, input);
     if (day === null) {
       Alert.alert("Nothing was saved", "That vehicle is no longer the one this was opened for.");
       leaveStale(timesheet);

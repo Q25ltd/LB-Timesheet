@@ -9,7 +9,7 @@
  *   FINISH      a finished day is on Home as the driver lands there
  */
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, Text } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -44,6 +44,14 @@ import { CHECK_RESULT, type CheckAnswer } from "../shift/vehicleCheck";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
 import { finishDeclared } from "./declared";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_hist_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const mockParams: { id?: string } = {};
@@ -110,8 +118,8 @@ async function refocus(): Promise<void> {
 
 /** A day with no vehicle, started and finished through the real store. */
 async function finished(startedAt: Date, endedAt: Date, options: { workingFor?: WorkingContext; nightOut?: boolean; notes?: string } = {}): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor: options.workingFor ?? PERSONAL, startedAt, vehicle: null });
-  const done = await finishDeclared({
+  const shift = await startLocalShift(SCOPE, { workingFor: options.workingFor ?? PERSONAL, startedAt, vehicle: null });
+  const done = await finishDeclared(SCOPE, {
     shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null,
     endedAt, nightOut: options.nightOut ?? false, notes: options.notes ?? "",
   });
@@ -153,8 +161,8 @@ async function detail(id: string): Promise<View> {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
-  for (const entry of new Directory(Paths.document).list()) {
+  await clearOpenShift(SCOPE);
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File && entry.uri.includes(COMPLETED_SHIFT_FILE_PREFIX)) entry.delete();
   }
   delete mockParams.id;
@@ -195,7 +203,7 @@ test("Home shows the latest THREE, newest first — the Timesheets tab has the r
 });
 
 test("Home never lists the OPEN day", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
 
   const view = await home();
 
@@ -288,7 +296,7 @@ test("the list shows nothing that was not recorded: no status, no 'submitted', n
 
 /** Damage a finished day's record on disk, as a failing storage might. */
 function damage(shift: CompletedShift): void {
-  new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${shift.id}.json`).write("{ damaged");
+  new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${shift.id}.json`).write("{ damaged");
 }
 
 test("Timesheets says how many saved timesheets could not be read — and still lists every readable one", async () => {
@@ -336,28 +344,28 @@ const answers = (keys: readonly { key: string; defaultResult: CheckAnswer["resul
 
 /** A full day: two uses of the same unit around a rigid, a trailer twice and a fridge trailer. */
 async function busyDay(): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor: NORTHGATE, startedAt: day(18, 22), vehicle: UNIT });
+  const shift = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: day(18, 22), vehicle: UNIT });
   const unitItems = checklistItems(checklistFor("class1"));
   const tyre = unitItems[0]?.key;
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, checkId: "vc",
     startedAt: day(18, 22, 5), answers: answers(unitItems, tyre), completedAt: day(18, 22, 20), completedBy: DRIVER.user.id,
   });
-  await recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: day(18, 23), litres: 312.5, note: "Tilbury" });
-  await recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: day(19, 1), litres: null, note: "" });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: day(18, 22, 30) });
+  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: day(18, 23), litres: 312.5, note: "Tilbury" });
+  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: day(19, 1), litres: null, note: "" });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: day(18, 22, 30) });
   const trailerItems = checklistItems(trailerChecklistFor(TRAILER_TYPE.standard));
-  await completeTrailerCheck({
+  await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(day(18, 22, 30).toISOString()), usageState: USAGE_STATE.inUse, checkId: "tc",
     startedAt: day(18, 22, 35), answers: answers(trailerItems, trailerItems[0]?.key), completedAt: day(18, 22, 45), completedBy: DRIVER.user.id,
   });
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(day(18, 22, 30).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: day(19, 2) });
-  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(day(19, 2).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: day(19, 3), litres: 40, note: "" });
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(day(19, 2).toISOString()), next: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, changedAt: day(19, 4) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(day(18, 22).toISOString()), endMileage: 100_180, next: { ...UNIT, vehicleClass: "class1", numberPlate: "CD56 EFG", startMileage: 5_000 }, changedAt: day(19, 4, 30) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(day(19, 4, 30).toISOString()), endMileage: 5_040, next: { ...UNIT, startMileage: 100_180 }, changedAt: day(19, 5) });
-  await saveVehicleCheckDraft({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse, checkId: "draft", startedAt: day(19, 5, 5), answers: [{ key: "horn", result: CHECK_RESULT.notApplicable, note: "" }] });
-  const done = await finishDeclared({
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(day(18, 22, 30).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: day(19, 2) });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(day(19, 2).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: day(19, 3), litres: 40, note: "" });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(day(19, 2).toISOString()), next: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, changedAt: day(19, 4) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(day(18, 22).toISOString()), endMileage: 100_180, next: { ...UNIT, vehicleClass: "class1", numberPlate: "CD56 EFG", startMileage: 5_000 }, changedAt: day(19, 4, 30) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(day(19, 4, 30).toISOString()), endMileage: 5_040, next: { ...UNIT, startMileage: 100_180 }, changedAt: day(19, 5) });
+  await saveVehicleCheckDraft(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse, checkId: "draft", startedAt: day(19, 5, 5), answers: [{ key: "horn", result: CHECK_RESULT.notApplicable, note: "" }] });
+  const done = await finishDeclared(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: trailerUseAt(day(19, 4).toISOString()),
     finalMileage: 100_300, endedAt: day(19, 9, 30), nightOut: true, notes: "Waited 2h at Tilbury — gate queue",
   });
@@ -427,12 +435,12 @@ test("CHECKS: completed with its defect on the right use; a draft and a missing 
 });
 
 test("a CORRECTED check says so and shows what it says NOW — the corrected-away defect is gone from view", async () => {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: RIGID });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: RIGID });
   const items = checklistItems(checklistFor("class2"));
   const use = { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse };
-  await completeVehicleCheck({ ...use, checkId: "c", startedAt: day(19, 5, 5), answers: answers(items, items[0]?.key), completedAt: day(19, 5, 20), completedBy: DRIVER.user.id });
-  await reviseVehicleCheck({ shiftId: shift.id, useId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse, checkId: "c", revisionId: "r1", answers: answers(items), revisedAt: day(19, 6), revisedBy: DRIVER.user.id });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: null, finalMileage: 220_060, endedAt: day(19, 13), nightOut: false, notes: "" });
+  await completeVehicleCheck(SCOPE, { ...use, checkId: "c", startedAt: day(19, 5, 5), answers: answers(items, items[0]?.key), completedAt: day(19, 5, 20), completedBy: DRIVER.user.id });
+  await reviseVehicleCheck(SCOPE, { shiftId: shift.id, useId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse, checkId: "c", revisionId: "r1", answers: answers(items), revisedAt: day(19, 6), revisedBy: DRIVER.user.id });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: null, finalMileage: 220_060, endedAt: day(19, 13), nightOut: false, notes: "" });
 
   const view = await detail(done?.id ?? "");
 
@@ -455,8 +463,8 @@ test("a day with NO vehicle says so; Night Out No; no notes line", async () => {
 });
 
 test("a VAN day and a MULTI-DAY day read correctly", async () => {
-  const van = await startLocalShift({ workingFor: PERSONAL, startedAt: day(16, 6), vehicle: { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 40_000 } });
-  const done = await finishDeclared({ shiftId: van.id, vehicleUseId: vehicleUseAt(day(16, 6).toISOString()), trailerUseId: null, finalMileage: 40_900, endedAt: day(18, 18), nightOut: true, notes: "" });
+  const van = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(16, 6), vehicle: { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 40_000 } });
+  const done = await finishDeclared(SCOPE, { shiftId: van.id, vehicleUseId: vehicleUseAt(day(16, 6).toISOString()), trailerUseId: null, finalMileage: 40_900, endedAt: day(18, 18), nightOut: true, notes: "" });
 
   const view = await detail(done?.id ?? "");
 
@@ -482,7 +490,7 @@ test("an id no readable day has is said plainly — nothing else is shown in its
 test("Finish Shift goes Home, and Home — coming into view — lists the finished day; the open day is gone", async () => {
   const homeView = await home();
   expect(homeView.getByTestId("recent-timesheets-empty")).toBeTruthy();
-  await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
   jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   // The gate renders Finish only for the signed-in driver, who declares the day (D42).
   const finish = await render(<SafeAreaProvider initialMetrics={METRICS}><AuthProvider><SignedIn><FinishShiftRoute /></SignedIn></AuthProvider></SafeAreaProvider>);
@@ -499,13 +507,13 @@ test("Finish Shift goes Home, and Home — coming into view — lists the finish
   await refocus();
 
   await waitFor(() => { expect(text(homeView, "recent-timesheet-0-date")).toBe("Sat 19 Sep 2026"); });
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("a FAILED Finish shows no timesheet anywhere", async () => {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: null });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: null });
   jest.spyOn(File.prototype, "write").mockImplementation(() => { throw new Error("disk full"); });
-  await expect(finishDeclared({ shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: day(19, 17), nightOut: false, notes: "" }))
+  await expect(finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: day(19, 17), nightOut: false, notes: "" }))
     .rejects.toThrow(Error);
   jest.restoreAllMocks();
 
@@ -519,24 +527,24 @@ test("a FAILED Finish shows no timesheet anywhere", async () => {
 // ── Draft checks: what was entered, never certified (owner correction) ─────
 
 test("a DRAFT vehicle check and a DRAFT trailer check show only the rows the driver changed — as draft, never as a certificate", async () => {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
   const unitItems = checklistItems(checklistFor("class1"));
   const [tyreRow, secondRow] = unitItems;
   if (tyreRow === undefined || secondRow === undefined) throw new Error("expected checklist rows");
   // One defect and one row set to N/A (or OK, whichever is NOT its default); every other row untouched.
   const secondOverride = secondRow.defaultResult === CHECK_RESULT.notApplicable ? CHECK_RESULT.ok : CHECK_RESULT.notApplicable;
-  await saveVehicleCheckDraft({
+  await saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), usageState: USAGE_STATE.inUse, checkId: "vd", startedAt: day(19, 5, 5),
     answers: [{ key: tyreRow.key, result: CHECK_RESULT.defect, note: "Cut in sidewall" }, { key: secondRow.key, result: secondOverride, note: "" }],
   });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: day(19, 6) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: day(19, 6) });
   const [trailerRow] = checklistItems(trailerChecklistFor(TRAILER_TYPE.standard));
   if (trailerRow === undefined) throw new Error("expected a trailer row");
-  await saveTrailerCheckDraft({
+  await saveTrailerCheckDraft(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(day(19, 6).toISOString()), usageState: USAGE_STATE.inUse, checkId: "td", startedAt: day(19, 6, 5),
     answers: [{ key: trailerRow.key, result: CHECK_RESULT.defect, note: "Landing leg bent" }],
   });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: trailerUseAt(day(19, 6).toISOString()), finalMileage: 100_050, endedAt: day(19, 12), nightOut: false, notes: "" });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: trailerUseAt(day(19, 6).toISOString()), finalMileage: 100_050, endedAt: day(19, 12), nightOut: false, notes: "" });
 
   const view = await detail(done?.id ?? "");
 
@@ -558,8 +566,8 @@ test("a DRAFT vehicle check and a DRAFT trailer check show only the rows the dri
 });
 
 test("a check never started shows no draft rows at all", async () => {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: null, finalMileage: 100_050, endedAt: day(19, 12), nightOut: false, notes: "" });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(19, 5), vehicle: UNIT });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(19, 5).toISOString()), trailerUseId: null, finalMileage: 100_050, endedAt: day(19, 12), nightOut: false, notes: "" });
 
   const view = await detail(done?.id ?? "");
 

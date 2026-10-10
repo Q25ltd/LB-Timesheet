@@ -9,7 +9,7 @@
  * (D33), and every write naming the exact use it was begun for.
  */
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert } from "react-native";
 import { ActiveShiftScreen } from "../screens/ActiveShiftScreen";
@@ -36,6 +36,14 @@ import {
 import { TRAILER_TYPE, type EndedTrailer, type LocalTrailer, type TrailerDetails } from "../shift/trailer";
 import { checklistItems, trailerChecklistFor } from "../shift/checklists";
 import { trailerUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { trailer?: string; usageState?: string } = {};
@@ -70,7 +78,7 @@ type View = Awaited<ReturnType<typeof render>>;
 
 const wrap = (node: React.ReactElement): Promise<View> =>
   render(<SafeAreaProvider initialMetrics={METRICS}>{node}</SafeAreaProvider>);
-const bytes = () => new File(Paths.document, OPEN_SHIFT_FILE).textSync();
+const bytes = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync();
 const text = (view: View, testID: string) => String(view.getByTestId(testID).props.children);
 
 async function press(view: View, testID: string): Promise<void> {
@@ -89,7 +97,7 @@ function isExpanded(view: View, testID: string): boolean {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   delete params.trailer;
   delete params.usageState;
   for (const fn of Object.values(mockRouter)) fn.mockClear();
@@ -112,6 +120,7 @@ function trailerOf(details: TrailerDetails, startedAt = at(5, 35), litres: (numb
 }
 function day(over: Partial<LocalShift> = {}): LocalShift {
   return {
+    ownerUserId: SCOPE.userId,
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: { kind: "personal" },
     startedAt: STARTED_AT.toISOString(),
@@ -391,7 +400,7 @@ test("with NO vehicle there is no trailer section at all", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function dayWith(vehicle: VehicleDetails | null = UNIT): Promise<LocalShift> {
-  return startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
+  return startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
 }
 async function mount(node: React.ReactElement): Promise<View> {
   const view = await wrap(node);
@@ -412,7 +421,7 @@ test("Add Trailer asks the number and the type — nothing else — and stores O
     await Promise.all([fireEvent.press(add), fireEvent.press(add), fireEvent.press(add)]);
   });
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.trailer).toMatchObject({ trailerNumber: "TR1234", trailerType: "refrigerated", reeferDiesel: [] });
   expect(stored?.previousTrailers).toEqual([]);
   expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift");
@@ -448,13 +457,13 @@ test.each([["a van", VAN], ["no vehicle", null]] as const)("Add Trailer is not a
 
 async function withTrailer(trailer: TrailerDetails = FRIDGE, hour = 5): Promise<LocalShift> {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer, startedAt: at(hour, 35) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer, startedAt: at(hour, 35) });
   return shift;
 }
 
 test("a DIFFERENT trailer: the one in use ends, the new one begins — the vehicle is untouched", async () => {
   await withTrailer(FRIDGE);
-  const vehicle = JSON.stringify((await readOpenShift())?.vehicle);
+  const vehicle = JSON.stringify((await readOpenShift(SCOPE))?.vehicle);
   const view = await mount(<ChangeTrailerRoute />);
 
   expect(text(view, "ending-trailer")).toBe("TR1234");
@@ -463,7 +472,7 @@ test("a DIFFERENT trailer: the one in use ends, the new one begins — the vehic
   await press(view, "trailer-type-standard");
   await press(view, "change-trailer-confirm");
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.previousTrailers).toMatchObject([{ trailerNumber: "TR1234" }]);
   expect(stored?.trailer).toMatchObject({ trailerNumber: "TR5678", trailerType: "standard", reeferDiesel: [] });
   expect(stored?.previousTrailers[0]?.endedAt).toBe(stored?.trailer?.startedAt);
@@ -472,7 +481,7 @@ test("a DIFFERENT trailer: the one in use ends, the new one begins — the vehic
 
 test("Change Trailer offers ONLY a different trailer or No trailer — no trailer used earlier is listed", async () => {
   const shift = await withTrailer(FRIDGE);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: BOX, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: BOX, changedAt: at(9) });
 
   const view = await mount(<ChangeTrailerRoute />);
 
@@ -487,13 +496,13 @@ test("Change Trailer offers ONLY a different trailer or No trailer — no traile
 test("typing a trailer used EARLIER is a NEW use — new start, no fridge diesel, no Trailer Check inherited", async () => {
   const shift = await withTrailer(FRIDGE);
   const morning = at(5, 35).toISOString();
-  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), litres: 50, note: "" });
-  await completeTrailerCheck({
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), litres: 50, note: "" });
+  await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, checkId: "morning-check", startedAt: at(5, 40),
     answers: checklistItems(trailerChecklistFor(TRAILER_TYPE.refrigerated)).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: at(5, 50), completedBy: "user_1",
   });
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(9) });
   const view = await mount(<ChangeTrailerRoute />);
 
   await press(view, "use-different-trailer");
@@ -501,7 +510,7 @@ test("typing a trailer used EARLIER is a NEW use — new start, no fridge diesel
   await press(view, "trailer-type-refrigerated");
   await press(view, "change-trailer-confirm");
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.trailer?.trailerNumber).toBe("TR1234");
   expect(stored?.trailer?.startedAt).not.toBe(morning);
   expect(stored?.trailer?.reeferDiesel).toEqual([]);
@@ -512,7 +521,7 @@ test("typing a trailer used EARLIER is a NEW use — new start, no fridge diesel
 
 test("NO TRAILER ends the trailer and leaves the shift and the vehicle as they were", async () => {
   await withTrailer(FRIDGE);
-  const vehicle = JSON.stringify((await readOpenShift())?.vehicle);
+  const vehicle = JSON.stringify((await readOpenShift(SCOPE))?.vehicle);
   const view = await mount(<ChangeTrailerRoute />);
 
   await press(view, "use-no-trailer");
@@ -521,7 +530,7 @@ test("NO TRAILER ends the trailer and leaves the shift and the vehicle as they w
     await Promise.all([fireEvent.press(confirm), fireEvent.press(confirm)]);
   });
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.trailer).toBeNull();
   expect(stored?.status).toBe("open");
   expect(stored?.previousTrailers).toHaveLength(1);
@@ -546,7 +555,7 @@ test("backing out of Change Trailer writes nothing", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function openDiesel(): Promise<View> {
-  params.trailer = (await readOpenShift())?.trailer?.useId ?? "";
+  params.trailer = (await readOpenShift(SCOPE))?.trailer?.useId ?? "";
   params.usageState = USAGE_STATE.inUse;
   return mount(<TrailerDieselRoute />);
 }
@@ -571,7 +580,7 @@ test("a KNOWN amount with a time and a note lands on the trailer use — and now
   await type(view, "fill-note", "Depot tank");
   await press(view, "fill-save");
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.trailer?.reeferDiesel).toMatchObject([{ litres: 62.5, note: "Depot tank" }]);
   const when = new Date(stored?.trailer?.reeferDiesel[0]?.recordedAt ?? "");
   expect([when.getHours(), when.getMinutes()]).toEqual([7, 20]);
@@ -588,7 +597,7 @@ test("an UNKNOWN amount is stored with no litres, and a double tap stores one", 
     await Promise.all([fireEvent.press(save), fireEvent.press(save), fireEvent.press(save)]);
   });
 
-  expect((await readOpenShift())?.trailer?.reeferDiesel).toMatchObject([{ litres: null }]);
+  expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toMatchObject([{ litres: null }]);
 });
 
 test("STALE: the trailer was changed while the form was open — nothing is saved anywhere, and the driver is told", async () => {
@@ -599,12 +608,12 @@ test("STALE: the trailer was changed while the form was open — nothing is save
   await type(view, "litres", "70");
 
   // Behind the form, TR1234 is swapped for ANOTHER refrigerated TR1234 use.
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: FRIDGE, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
   await press(view, "fill-save");
 
   expect(bytes()).toBe(before);
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.trailer?.reeferDiesel).toEqual([]);
   expect(stored?.previousTrailers[0]?.reeferDiesel).toEqual([]);
   expect(alert).toHaveBeenCalled();
@@ -612,11 +621,11 @@ test("STALE: the trailer was changed while the form was open — nothing is save
 });
 
 test.each([
-  ["a STANDARD trailer", async (): Promise<string> => { await withTrailer(BOX); return (await readOpenShift())?.trailer?.startedAt ?? ""; }],
+  ["a STANDARD trailer", async (): Promise<string> => { await withTrailer(BOX); return (await readOpenShift(SCOPE))?.trailer?.startedAt ?? ""; }],
   ["a trailer number", async (): Promise<string> => { await withTrailer(FRIDGE); return "TR1234"; }],
   ["a use that has ended", async (): Promise<string> => {
     const shift = await withTrailer(FRIDGE);
-    await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
     return at(5, 35).toISOString();
   }],
 ] as const)("Fridge Diesel is not a screen for %s", async (_what, name) => {
@@ -656,11 +665,11 @@ test("Change Vehicle to a NEW van with a trailer in use: blocked, told why, and 
 
 test("Change Vehicle BACK to a van used earlier, with a trailer in use: blocked the same way", async () => {
   const shift = await dayWith(VAN);
-  const open = await readOpenShift();
-  await endVehicleUse({ shiftId: shift.id, endingUseId: open?.vehicle?.useId ?? "", endMileage: 9_100, endedAt: at(6) });
+  const open = await readOpenShift(SCOPE);
+  await endVehicleUse(SCOPE, { shiftId: shift.id, endingUseId: open?.vehicle?.useId ?? "", endMileage: 9_100, endedAt: at(6) });
   // A unit is taken, then a trailer behind it.
-  await addVehicleToOpenShift({ vehicle: UNIT, startedAt: at(7) });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: FRIDGE, startedAt: at(7, 30) });
+  await addVehicleToOpenShift(SCOPE, { vehicle: UNIT, startedAt: at(7) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: FRIDGE, startedAt: at(7, 30) });
   const before = bytes();
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100100");
@@ -692,7 +701,7 @@ test("Change Vehicle to NO VEHICLE with a trailer in use: blocked, told to hand 
 
 test("after No trailer, Change Vehicle to No vehicle goes through", async () => {
   const shift = await withTrailer(FRIDGE);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: null, changedAt: at(9) });
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100100");
   await press(view, "change-continue");
@@ -701,7 +710,7 @@ test("after No trailer, Change Vehicle to No vehicle goes through", async () => 
   expect(view.queryByTestId("no-vehicle-trailer-block")).toBeNull();
   await press(view, "no-vehicle-confirm");
 
-  const stored = await readOpenShift();
+  const stored = await readOpenShift(SCOPE);
   expect(stored?.vehicle).toBeNull();
   expect(stored?.trailer).toBeNull();
 });

@@ -16,17 +16,23 @@ import { Restoring } from "../../src/components/Restoring";
 import { saveFailureMessage } from "../../src/screens/format";
 import { backToDay, leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
 import { USAGE_STATE, correctNumberPlate, correctTrailerNumber, type LocalShift, type UsageState } from "../../src/shift/localShift";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function CorrectNameRoute() {
+  const scope = useAccountScope();
   const { asset, usage, usageState, timesheet, via } = useLocalSearchParams<{ asset?: string; usage?: string; usageState?: string; timesheet?: string; via?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, [timesheet]);
+  }, [scope, timesheet]);
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
   const kind = asset === "vehicle" || asset === "trailer" ? asset : null;
@@ -39,7 +45,7 @@ export default function CorrectNameRoute() {
       asset={kind}
       current={current}
       onLeave={() => { router.back(); }}
-      onSave={value => save(kind, { shiftId: shift.id, useId: usage, usageState: state, value }, timesheet, via)}
+      onSave={value => save(scope, kind, { shiftId: shift.id, useId: usage, usageState: state, value }, timesheet, via)}
     />
   );
 }
@@ -55,6 +61,7 @@ function nameOf(shift: LocalShift, asset: "vehicle" | "trailer", usage: string, 
 }
 
 async function save(
+  scope: AccountScope,
   asset: "vehicle" | "trailer",
   input: { shiftId: string; useId: string; usageState: UsageState; value: string },
   timesheet: string | undefined,
@@ -62,7 +69,7 @@ async function save(
 ): Promise<void> {
   try {
     const correct = asset === "vehicle" ? correctNumberPlate : correctTrailerNumber;
-    const day = await correct(input);
+    const day = await correct(scope, input);
     if (day === null) {
       Alert.alert("Nothing was saved", asset === "vehicle" ? "That vehicle is no longer the one this was opened for." : "That trailer is no longer the one this was opened for.");
       leaveStale(timesheet);

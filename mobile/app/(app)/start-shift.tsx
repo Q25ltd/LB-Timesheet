@@ -18,23 +18,28 @@ import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
 import { readOpenShift, startLocalShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
 
 export default function StartShiftRoute() {
+  const scope = useAccountScope();
   const { account } = useAuth();
   const [checkedForOpenShift, setChecked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => {
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => {
       if (cancelled) return;
       if (open !== null) router.replace("/active-shift");
       else setChecked(true);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [scope]);
 
   // The gate renders this route only when the provider is `authenticated`, and
   // `account` is set in the same update as that status.
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (account === null) return null;
   // Hold until we know whether a day is already open, so the form is never
   // shown to someone who is mid-shift.
@@ -51,7 +56,7 @@ export default function StartShiftRoute() {
         // be behind the back gesture once the shift is running. It CAN fail on
         // the phone's own storage — an unreadable earlier day that could not
         // be moved aside, or a failed save (D37) — and the driver is told.
-        void startLocalShift(input).then(
+        void startLocalShift(scope, input).then(
           () => { router.replace("/active-shift"); },
           (error: unknown) => { Alert.alert("Couldn't start the shift", saveFailureMessage(error)); },
         );

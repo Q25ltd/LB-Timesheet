@@ -9,7 +9,7 @@
  * completed, and that what cannot be edited is not offered.
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Pressable, Text, TextInput } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -39,6 +39,14 @@ import {
 import { TRAILER_TYPE, type EndedTrailer, type TrailerDetails } from "../shift/trailer";
 import { CHECK_RESULT, checkStateOf, type CheckAnswer } from "../shift/vehicleCheck";
 import { trailerUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_usage_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { usage?: string; trailer?: string; usageState?: string } = {};
@@ -76,7 +84,7 @@ const DRIVER: AuthenticatedAccount = {
 };
 
 type View = Awaited<ReturnType<typeof render>>;
-const bytes = () => new File(Paths.document, OPEN_SHIFT_FILE).textSync();
+const bytes = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync();
 const text = (view: View, testID: string) => String(view.getByTestId(testID).props.children);
 async function press(view: View, testID: string): Promise<void> {
   await act(async () => { await fireEvent.press(view.getByTestId(testID)); });
@@ -86,7 +94,7 @@ async function type(view: View, testID: string, value: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   for (const key of ["usage", "trailer", "usageState"] as const) delete params[key];
   for (const fn of Object.values(mockRouter)) fn.mockClear();
 });
@@ -101,10 +109,10 @@ afterEach(() => {
  * only by when they ran.
  */
 async function trailerDay(): Promise<{ shift: LocalShift; first: string; box: string; second: string; current: string }> {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const change = (from: Date, next: TrailerDetails, when: Date) =>
-    changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(from.toISOString()), next, changedAt: when });
+    changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(from.toISOString()), next, changedAt: when });
   await change(at(5, 30), BOX, at(10, 5));
   await change(at(10, 5), TR23, at(10, 13));
   await change(at(10, 13), { trailerNumber: "JGG", trailerType: TRAILER_TYPE.standard }, at(11));
@@ -115,7 +123,7 @@ async function trailerDay(): Promise<{ shift: LocalShift; first: string; box: st
 }
 
 const ended = async (startedAt: string): Promise<EndedTrailer | undefined> =>
-  (await readOpenShift())?.previousTrailers.find(use => use.startedAt === startedAt);
+  (await readOpenShift(SCOPE))?.previousTrailers.find(use => use.startedAt === startedAt);
 const answers = (): CheckAnswer[] =>
   checklistItems(trailerChecklistFor(TRAILER_TYPE.refrigerated)).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" }));
 
@@ -124,7 +132,7 @@ const textInputs = (view: View): string[] =>
   [...JSON.stringify(view.toJSON()).matchAll(/"type":"TextInput","props":\{[^}]*?"testID":"([^"]+)"/g)].map(match => match[1] ?? "");
 
 async function dieselOn(shift: LocalShift, trailerStartedAt: string, usageState: UsageState, over: { fillId?: string; litres?: number | null } = {}) {
-  return recordReeferDiesel({
+  return recordReeferDiesel(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(trailerStartedAt), usageState, fillId: over.fillId ?? newLocalId(),
     recordedAt: at(10, 0), litres: over.litres === undefined ? 50 : over.litres, note: "",
   });
@@ -136,11 +144,11 @@ async function dieselOn(shift: LocalShift, trailerStartedAt: string, usageState:
 
 test("historical fridge diesel lands on EXACTLY the ended use named — the other TR23 and the trailer in use are untouched", async () => {
   const { shift, first, second } = await trailerDay();
-  const before = await readOpenShift();
+  const before = await readOpenShift(SCOPE);
 
   await dieselOn(shift, second, USAGE_STATE.ended, { litres: 300 });
 
-  const after = await readOpenShift();
+  const after = await readOpenShift(SCOPE);
   expect((await ended(second))?.reeferDiesel.map(fill => fill.litres)).toEqual([300]);
   expect(JSON.stringify(await ended(first))).toBe(JSON.stringify(before?.previousTrailers.find(use => use.startedAt === first)));
   expect(JSON.stringify(after?.trailer)).toBe(JSON.stringify(before?.trailer));
@@ -155,7 +163,7 @@ test("an ended use's diesel can be added, corrected, set UNKNOWN (null, never 0)
   expect((await ended(first))?.reeferDiesel).toMatchObject([{ id, litres: null }]);
   expect(bytes()).toContain('"litres":null');
 
-  await removeReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: id });
+  await removeReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: id });
   expect((await ended(first))?.reeferDiesel).toEqual([]);
 });
 
@@ -179,7 +187,7 @@ test.each([
   const before = bytes();
 
   const diesel = await dieselOn(days.shift, target, state);
-  const check = await completeTrailerCheck({
+  const check = await completeTrailerCheck(SCOPE, {
     shiftId: days.shift.id, trailerUseId: trailerUseAt(target), usageState: state, checkId: newLocalId(),
     startedAt: new Date(), answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
@@ -191,11 +199,11 @@ test.each([
 test("ADVERSARIAL: a day saved with two trailer uses sharing one start is refused whole — nothing is ever written to it", async () => {
   const { first } = await trailerDay();
   const doubled = JSON.parse(bytes()) as { previousTrailers: unknown[] };
-  new File(Paths.document, OPEN_SHIFT_FILE).write(JSON.stringify({ ...doubled, previousTrailers: [...doubled.previousTrailers, doubled.previousTrailers[0]] }));
+  new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).write(JSON.stringify({ ...doubled, previousTrailers: [...doubled.previousTrailers, doubled.previousTrailers[0]] }));
   const before = bytes();
 
-  expect(await readOpenShift()).toBeNull();
-  const result = await recordReeferDiesel({
+  expect(await readOpenShift(SCOPE)).toBeNull();
+  const result = await recordReeferDiesel(SCOPE, {
     shiftId: "any", trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(), recordedAt: at(10), litres: 5, note: "",
   });
   expect(result).toBeNull();
@@ -206,22 +214,22 @@ test("a forgotten check completed on ENDED usage A completes A only — B, the o
   const { shift, first, second } = await trailerDay();
   const b = JSON.stringify(await ended(second));
 
-  await completeTrailerCheck({
+  await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(),
     startedAt: new Date(), answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
 
   expect(checkStateOf((await ended(first))?.checks ?? [])).toBe("completed");
   expect(JSON.stringify(await ended(second))).toBe(b);
-  expect((await readOpenShift())?.trailer?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.trailer?.checks).toEqual([]);
 });
 
 test("the CURRENT trailer's protection is unchanged: a check begun in use cannot save once the trailer has ended", async () => {
   const { shift, current } = await trailerDay();
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(current), next: null, changedAt: at(12) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(current), next: null, changedAt: at(12) });
   const before = bytes();
 
-  const stale = await saveTrailerCheckDraft({
+  const stale = await saveTrailerCheckDraft(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(current), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(11, 5),
     answers: [{ key: "doors", result: CHECK_RESULT.defect, note: "x" }],
   });
@@ -320,7 +328,7 @@ test("the Fridge Diesel form for an ENDED use names it by number AND hours, and 
 
   expect((await ended(second))?.reeferDiesel).toMatchObject([{ litres: null }]);
   expect((await ended(first))?.reeferDiesel).toEqual([]);
-  expect((await readOpenShift())?.trailer?.reeferDiesel).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toEqual([]);
 });
 
 test("an existing ended entry is corrected and removed on its form, keeping its id", async () => {
@@ -403,7 +411,7 @@ test("an existing DRAFT on the ended use is resumed — the same check, its answ
   if (target === undefined) throw new Error("expected the first TR23 use");
   target.checks = [{ id: draftId, checklist: list.id, checklistVersion: list.version, startedAt: at(5, 40).toISOString(), status: "draft", completedAt: null, completedBy: null,
     items: [{ key: "doors", label: "Doors & fastenings", result: "fail", note: "Seal torn" }] }];
-  new File(Paths.document, OPEN_SHIFT_FILE).write(JSON.stringify(day));
+  new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).write(JSON.stringify(day));
 
   const view = await openEndedCheck(first);
   expect(String(view.getByTestId("check-note-doors").props.value)).toBe("Seal torn");
@@ -436,13 +444,13 @@ test("a forgotten check completed AFTER the trailer ended is dated when it was a
 
 test("once completed, the historical check is read-only and cannot be completed again", async () => {
   const { shift, first } = await trailerDay();
-  await completeTrailerCheck({
+  await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: "forgotten", startedAt: new Date(),
     answers: answers(), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
   const before = bytes();
 
-  const again = await completeTrailerCheck({
+  const again = await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
     answers: answers(), completedAt: new Date(), completedBy: "someone_else",
   });
@@ -458,7 +466,7 @@ test("once completed, the historical check is read-only and cannot be completed 
 
 test("after completion the detail shows it completed, and Active Shift marks ONLY that row", async () => {
   const { shift, first, second } = await trailerDay();
-  await completeTrailerCheck({
+  await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
     answers: answers().map(answer => (answer.key === "doors" ? { ...answer, result: CHECK_RESULT.defect, note: "Seal torn" } : answer)),
     completedAt: new Date(), completedBy: DRIVER.user.id,

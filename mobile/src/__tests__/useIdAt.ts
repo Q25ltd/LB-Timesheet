@@ -10,15 +10,25 @@
  * one use there. A use written without a `useId` (a
  * legacy fixture) resolves to its legacy identity; an instant naming no use
  * resolves to the legacy identity it would have, which names nothing stored.
+ *
+ * F-31: records live in their account's directory. A test file acts for one
+ * driver, so this looks in every account directory present.
  */
 import { Directory, File, Paths } from "expo-file-system";
+import { ACCOUNTS_DIRECTORY } from "../shift/accountScope";
 import { COMPLETED_SHIFT_FILE_PREFIX, OPEN_SHIFT_FILE } from "../shift/localShift";
 import { legacyUseId, type UseKind } from "../shift/useIdentity";
 
+/** Every account directory on the device. */
+function accountDirectories(): Directory[] {
+  const accounts = new Directory(Paths.document, ACCOUNTS_DIRECTORY);
+  if (!accounts.exists) return [];
+  return accounts.list().filter((entry): entry is Directory => entry instanceof Directory);
+}
+
 function storedDays(names: readonly string[]): Record<string, unknown>[] {
   const days: Record<string, unknown>[] = [];
-  for (const name of names) {
-    const file = new File(Paths.document, name);
+  for (const file of accountDirectories().flatMap(directory => names.map(name => new File(directory, name)))) {
     if (!file.exists) continue;
     try {
       const parsed: unknown = JSON.parse(file.textSync());
@@ -54,7 +64,7 @@ function idsAt(names: readonly string[], kind: UseKind, startedAt: string): Set<
 /** The open day first — the day a test is working on — then the finished days. */
 function useIdAt(kind: UseKind, startedAt: string): string {
   const open = idsAt([OPEN_SHIFT_FILE], kind, startedAt);
-  const finished = new Directory(Paths.document).list().map(entry => entry.name).filter(name => name.startsWith(COMPLETED_SHIFT_FILE_PREFIX));
+  const finished = accountDirectories().flatMap(directory => directory.list().map(entry => entry.name)).filter(name => name.startsWith(COMPLETED_SHIFT_FILE_PREFIX));
   const ids = open.size > 0 ? open : idsAt(finished, kind, startedAt);
   if (ids.size > 1) throw new Error(`useIdAt: ${String(ids.size)} ${kind} uses started at ${startedAt} — name the use by its useId`);
   return [...ids][0] ?? legacyUseId(kind, startedAt);

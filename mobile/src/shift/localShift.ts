@@ -71,6 +71,7 @@
  * constraint on the next one.
  */
 import { Directory, File, Paths } from "expo-file-system";
+import { AccountScope, AccountScopeError, assertLiveScope, accountDirectory } from "./accountScope";
 import { USE_ENDED_BY, asUseEndedBy, type UseEndedBy } from "./useEnd";
 import { readUseId } from "./useIdentity";
 import { checklistFor, checklistItems, trailerChecklistFor, type Checklist } from "./checklists";
@@ -277,6 +278,13 @@ export const LOCAL_SHIFT_STATUS = { open: "open", completed: "completed" } as co
 
 export interface LocalShift {
   /**
+   * The account this day belongs to — the server-confirmed `user.id` of the
+   * driver who started it (F-31). Written once, when the day starts, and
+   * checked against the account's scope on every read and every write: a day
+   * naming anyone else is never served or written over.
+   */
+  ownerUserId: string;
+  /**
    * This device's identity for the day.
    *
    * UUID-shaped so it can become the server's `clientEventId` when submission
@@ -323,11 +331,20 @@ export interface StartLocalShiftInput {
   vehicle: VehicleDetails | null;
 }
 
-/** Exported so a test can assert the record reaches a real file. */
+/**
+ * The open day's file name — inside the account's own directory,
+ * `accounts/<user.id>/` (F-31), never in the shared document directory.
+ * Exported so a test can assert the record reaches a real file.
+ */
 export const OPEN_SHIFT_FILE = "logisticbay-open-shift.json";
 
-function openShiftFile(): File {
-  return new File(Paths.document, OPEN_SHIFT_FILE);
+function openShiftFile(scope: AccountScope): File {
+  return new File(accountDirectory(scope), OPEN_SHIFT_FILE);
+}
+
+/** The interrupted-write copy of THIS account's day — see `persist`. */
+function openShiftTempFile(scope: AccountScope): File {
+  return new File(accountDirectory(scope), OPEN_SHIFT_TEMP_FILE);
 }
 
 /**
@@ -349,8 +366,10 @@ export const RECOVERY_FILE_PREFIX = "logisticbay-open-shift.recovery-";
  * file has. Throws — and leaves the file exactly where it was — if that cannot
  * be done: the caller must then write nothing over it.
  */
-function preserveForRecovery(file: File, reason: "unreadable" | "unfinished"): void {
-  const recovery = new File(Paths.document, `${RECOVERY_FILE_PREFIX}${reason}-${Date.now()}-${newLocalId()}.json`);
+function preserveForRecovery(scope: AccountScope, file: File, reason: "unreadable" | "unfinished"): void {
+  // Kept in the account the file belonged to — never anywhere another
+  // account's scope can reach.
+  const recovery = new File(accountDirectory(scope), `${RECOVERY_FILE_PREFIX}${reason}-${Date.now()}-${newLocalId()}.json`);
   // Never overwrite: a taken name fails here rather than destroying the
   // earlier recovery file, and the move below would refuse it too.
   if (recovery.exists) throw new Error("Refusing to overwrite a recovery file");
@@ -362,8 +381,8 @@ function preserveForRecovery(file: File, reason: "unreadable" | "unfinished"): v
  * failed or short write is removed — the live file is untouched, so an
  * incomplete copy is worth nothing — and rethrown.
  */
-function writeVerified(serialised: string): File {
-  const written = new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+function writeVerified(scope: AccountScope, serialised: string): File {
+  const written = openShiftTempFile(scope);
   try {
     written.create({ overwrite: true });
     written.write(serialised);
@@ -405,13 +424,15 @@ function writeVerified(serialised: string): File {
  * the reader would refuse is refused before the disk is touched, with a plain
  * error: then nothing has changed.
  */
-function persist(next: LocalShift): LocalShift {
+function persist(scope: AccountScope, next: LocalShift): LocalShift {
+  // Only ever this account's own day, in this account's own directory.
+  if (next.ownerUserId !== scope.userId) throw new AccountScopeError("Refusing to store another account's day");
   const serialised = JSON.stringify(next);
   if (asLocalShift(JSON.parse(serialised)) === null) {
     throw new Error("Refusing to store a day the reader would refuse");
   }
 
-  storeSafely(serialised, openShiftFile(), { overwrite: true });
+  storeSafely(scope, serialised, openShiftFile(scope), { overwrite: true });
   return next;
 }
 
@@ -420,12 +441,12 @@ function persist(next: LocalShift): LocalShift {
  * day, or a finished day's record (`finishOpenShift`), which never overwrites.
  * Every failure is a `SafeSaveFailedError`.
  */
-function storeSafely(serialised: string, target: File, options: { overwrite: boolean }): void {
+function storeSafely(scope: AccountScope, serialised: string, target: File, options: { overwrite: boolean }): void {
   try {
-    const temp = new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+    const temp = openShiftTempFile(scope);
     // Left by an interrupted write: kept, never promoted, never overwritten.
-    if (temp.exists) preserveForRecovery(temp, "unfinished");
-    writeVerified(serialised).moveSync(target, options);
+    if (temp.exists) preserveForRecovery(scope, temp, "unfinished");
+    writeVerified(scope, serialised).moveSync(target, options);
   } catch (error: unknown) {
     throw new SafeSaveFailedError(error);
   }
@@ -452,6 +473,26 @@ export function newLocalId(): string {
  * or a vehicle would be worse than admitting we do not know.
  */
 function asLocalShift(value: unknown): LocalShift | null {
+  const owner = ownerOf(value);
+  if (owner === null) return null;
+  const day = asLocalShiftContent(value);
+  return day === null ? null : { ownerUserId: owner, ...day };
+}
+
+/**
+ * The record's owner, or `null` when it names none that could be an account:
+ * a record with no valid owner is never served as anyone's (F-31). Only a
+ * record written before accounts existed lacks the field, and those are
+ * quarantined, never read as a day (`quarantineLegacyRecords`).
+ */
+function ownerOf(value: unknown): string | null {
+  if (typeof value !== "object" || value === null) return null;
+  const owner = (value as Record<string, unknown>)["ownerUserId"];
+  return typeof owner === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(owner) ? owner : null;
+}
+
+/** Everything about an open day except whose it is. */
+function asLocalShiftContent(value: unknown): Omit<LocalShift, "ownerUserId"> | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
 
@@ -650,17 +691,24 @@ function readChecks(value: unknown, vehicleClass: VehicleClass): VehicleCheck[] 
   return readChecksFor(value, checklistFor(vehicleClass));
 }
 
-/** The shift this device has open, or null. Never throws. */
-export async function readOpenShift(): Promise<LocalShift | null> {
-  const file = openShiftFile();
+/**
+ * The day THIS ACCOUNT has open, or null. Rejects only for a scope that is
+ * not live (`AccountScopeError`) — otherwise never throws.
+ */
+export async function readOpenShift(scope: AccountScope): Promise<LocalShift | null> {
+  quarantineLegacyRecords();
+  const file = openShiftFile(scope);
   if (!file.exists) return null;
 
   try {
-    const shift = asLocalShift(JSON.parse(await file.text()));
+    const read = asLocalShift(JSON.parse(await file.text()));
+    // Another account's day is not this account's open day, wherever it is
+    // found (F-31): never served, and never the base of a write.
+    const shift = read !== null && read.ownerUserId === scope.userId ? read : null;
     // Already filed as finished: the leftover of a finish that could not
     // remove the open file (`finishOpenShift`). Not open, and never finished
     // twice.
-    if (shift !== null && readCompletedSync(shift.id) !== null) return null;
+    if (shift !== null && readCompletedSync(scope, shift.id) !== null) return null;
     return shift;
   } catch {
     // Unreadable. Reported as "no open shift" — the safe direction, since the
@@ -686,8 +734,15 @@ export async function readOpenShift(): Promise<LocalShift | null> {
  */
 let writing: Promise<unknown> = Promise.resolve();
 
-function queued<T>(work: () => Promise<T>): Promise<T> {
-  const result = writing.then(work, work);
+function queued<T>(scope: AccountScope, work: () => Promise<T>): Promise<T> {
+  // Checked when the work RUNS, not when it was asked for: a driver who
+  // signed out while this waited behind another write must not complete it.
+  const run = (): Promise<T> => {
+    assertLiveScope(scope);
+    quarantineLegacyRecords();
+    return work();
+  };
+  const result = writing.then(run, run);
   writing = result.then(() => undefined, () => undefined);
   return result;
 }
@@ -697,21 +752,23 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
  *
  * Never rejects for want of a network, because it never uses one.
  */
-export function startLocalShift(input: StartLocalShiftInput): Promise<LocalShift> {
-  return queued(() => createIfNoneOpen(input));
+export function startLocalShift(scope: AccountScope, input: StartLocalShiftInput): Promise<LocalShift> {
+  return queued(scope, () => createIfNoneOpen(scope, input));
 }
 
-async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift> {
+async function createIfNoneOpen(scope: AccountScope, input: StartLocalShiftInput): Promise<LocalShift> {
   // Refused before anything is read or written: the same rule every vehicle
   // write applies, so Start Shift cannot store a day the reader would refuse.
   const vehicle = input.vehicle === null ? null : checkedVehicle(input.vehicle, "Refusing to store an invalid vehicle");
   if (Number.isNaN(input.startedAt.getTime())) throw new Error("Refusing a shift with an invalid start");
 
-  const alreadyOpen = await readOpenShift();
+  const alreadyOpen = await readOpenShift(scope);
   if (alreadyOpen !== null) return alreadyOpen;
 
   const startedAt = input.startedAt.toISOString();
   const shift: LocalShift = {
+    // The account starting the day owns it, for good (F-31).
+    ownerUserId: scope.userId,
     id:         newLocalId(),
     workingFor: input.workingFor,
     startedAt,
@@ -727,14 +784,17 @@ async function createIfNoneOpen(input: StartLocalShiftInput): Promise<LocalShift
   // A day file is there but cannot be read — an older build, a damaged write.
   // It is never written over: its exact bytes are moved aside first, and if
   // that fails this throws and no new day is started.
-  const live = openShiftFile();
+  const live = openShiftFile(scope);
   if (live.exists) {
     // A finished day's leftover holds nothing its completed record does not.
-    if (isFinishedLeftover(live)) live.delete();
-    else preserveForRecovery(live, "unreadable");
+    if (isFinishedLeftover(scope, live)) live.delete();
+    // Another account's day in this account's place (F-31): out of every
+    // account's reach, never adopted, never written over.
+    else if (isForeign(scope, live)) moveToQuarantine(live, FOREIGN_PREFIX);
+    else preserveForRecovery(scope, live, "unreadable");
   }
 
-  return persist(shift);
+  return persist(scope, shift);
 }
 
 export interface AddVehicleInput {
@@ -767,15 +827,15 @@ export interface AddVehicleInput {
  * treats a malformed vehicle as no open shift at all, so writing one would
  * make the driver's day disappear.
  */
-export function addVehicleToOpenShift(input: AddVehicleInput): Promise<LocalShift | null> {
-  return queued(() => addIfNoVehicle(input));
+export function addVehicleToOpenShift(scope: AccountScope, input: AddVehicleInput): Promise<LocalShift | null> {
+  return queued(scope, () => addIfNoVehicle(scope, input));
 }
 
-async function addIfNoVehicle({ vehicle: entered, startedAt }: AddVehicleInput): Promise<LocalShift | null> {
+async function addIfNoVehicle(scope: AccountScope, { vehicle: entered, startedAt }: AddVehicleInput): Promise<LocalShift | null> {
   const vehicle = checkedVehicle(entered, "Refusing to store an invalid vehicle");
   if (Number.isNaN(startedAt.getTime())) throw new Error("Refusing to store an invalid vehicle");
 
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null) return null;
   if (open.vehicle !== null) return open;
 
@@ -790,7 +850,7 @@ async function addIfNoVehicle({ vehicle: entered, startedAt }: AddVehicleInput):
   }
 
   const updated: LocalShift = { ...open, vehicle: { ...vehicle, useId: newLocalId(), startedAt: at, checks: [], fills: [] } };
-  return persist(updated);
+  return persist(scope, updated);
 }
 
 export interface ChangeVehicleInput {
@@ -837,17 +897,17 @@ export interface ChangeVehicleInput {
  * mileage, an invalid next vehicle, a next use that would share a start with
  * another, and a van while a trailer is in use (`TrailerStillInUseError`).
  */
-export function changeVehicle(input: ChangeVehicleInput): Promise<LocalShift | null> {
-  return queued(() => changeIfCurrent(input));
+export function changeVehicle(scope: AccountScope, input: ChangeVehicleInput): Promise<LocalShift | null> {
+  return queued(scope, () => changeIfCurrent(scope, input));
 }
 
-async function changeIfCurrent({ shiftId, endingUseId, endMileage, next: entered, changedAt }: ChangeVehicleInput): Promise<LocalShift | null> {
+async function changeIfCurrent(scope: AccountScope, { shiftId, endingUseId, endMileage, next: entered, changedAt }: ChangeVehicleInput): Promise<LocalShift | null> {
   const next = checkedVehicle(entered, "Refusing an invalid vehicle change");
   if (!Number.isSafeInteger(endMileage) || endMileage < 0 || Number.isNaN(changedAt.getTime())) {
     throw new Error("Refusing an invalid vehicle change");
   }
 
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null || open.id !== shiftId) return null;
   const current = open.vehicle;
   // Already changed — by an earlier press — or nothing to change from.
@@ -867,7 +927,7 @@ async function changeIfCurrent({ shiftId, endingUseId, endMileage, next: entered
     vehicle: { ...next, useId: newLocalId(), startedAt: at, checks: [], fills: [] },
     previousVehicles: [...open.previousVehicles, ended],
   };
-  return persist(updated);
+  return persist(scope, updated);
 }
 
 export interface EndVehicleUseInput {
@@ -913,16 +973,16 @@ export interface EndVehicleUseInput {
  * is in use (`TrailerStillInUseError`): no vehicle would leave it with nothing
  * to tow it (D34). The driver hands the trailer back first.
  */
-export function endVehicleUse(input: EndVehicleUseInput): Promise<LocalShift | null> {
-  return queued(() => endIfCurrent(input));
+export function endVehicleUse(scope: AccountScope, input: EndVehicleUseInput): Promise<LocalShift | null> {
+  return queued(scope, () => endIfCurrent(scope, input));
 }
 
-async function endIfCurrent({ shiftId, endingUseId, endMileage, endedAt }: EndVehicleUseInput): Promise<LocalShift | null> {
+async function endIfCurrent(scope: AccountScope, { shiftId, endingUseId, endMileage, endedAt }: EndVehicleUseInput): Promise<LocalShift | null> {
   if (!Number.isSafeInteger(endMileage) || endMileage < 0 || Number.isNaN(endedAt.getTime())) {
     throw new Error("Refusing an invalid end of a vehicle use");
   }
 
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null || open.id !== shiftId) return null;
   const current = open.vehicle;
   // Already ended — by an earlier press — or nothing to end.
@@ -936,7 +996,7 @@ async function endIfCurrent({ shiftId, endingUseId, endMileage, endedAt }: EndVe
 
   const ended: EndedVehicle = { ...current, endMileage, endedAt: at };
   const updated: LocalShift = { ...open, vehicle: null, previousVehicles: [...open.previousVehicles, ended] };
-  return persist(updated);
+  return persist(scope, updated);
 }
 
 export interface VehicleCheckWrite {
@@ -974,8 +1034,8 @@ export interface VehicleCheckWrite {
  * And while this vehicle use already has a check, a second one is not started
  * beside it — repeat checks are a later, deliberate feature.
  */
-export function saveVehicleCheckDraft(input: VehicleCheckWrite): Promise<VehicleCheck | null> {
-  return queued(() => writeCheck(input, null));
+export function saveVehicleCheckDraft(scope: AccountScope, input: VehicleCheckWrite): Promise<VehicleCheck | null> {
+  return queued(scope, () => writeCheck(scope, input, null));
 }
 
 /**
@@ -992,8 +1052,8 @@ export function saveVehicleCheckDraft(input: VehicleCheckWrite): Promise<Vehicle
  * that is already complete returns it unchanged: a double press cannot make a
  * second completed check or move the completion time.
  */
-export function completeVehicleCheck(input: CompleteVehicleCheckInput): Promise<VehicleCheck | null> {
-  return queued(() => writeCheck(input, input));
+export function completeVehicleCheck(scope: AccountScope, input: CompleteVehicleCheckInput): Promise<VehicleCheck | null> {
+  return queued(scope, () => writeCheck(scope, input, input));
 }
 
 export interface CompleteVehicleCheckInput extends VehicleCheckWrite {
@@ -1003,8 +1063,8 @@ export interface CompleteVehicleCheckInput extends VehicleCheckWrite {
   completedBy: string;
 }
 
-async function writeCheck(input: VehicleCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
-  const open = await readDayOfUses(input.shiftId);
+async function writeCheck(scope: AccountScope, input: VehicleCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
+  const open = await readDayOfUses(scope, input.shiftId);
   if (open === null) return null;
   // Exactly the use named, in the state named — never by plate (`locateUsage`).
   const target = locateUsage(open, input.vehicleUseId, input.usageState);
@@ -1012,7 +1072,7 @@ async function writeCheck(input: VehicleCheckWrite, certification: Certification
   const result = nextChecks(target.use.checks, checklistFor(target.use.vehicleClass), input, certification);
   if (result.checks === null) return result.check;
 
-  writeVehicleUse(open, target, { checks: result.checks });
+  writeVehicleUse(scope, open, target, { checks: result.checks });
   return result.check;
 }
 
@@ -1157,22 +1217,22 @@ export interface RecordVehicleFillInput {
  * over-long note, and any `litres` that is not a real positive reading. An
  * UNKNOWN quantity is `null`, never 0: zero is a measurement.
  */
-export function recordVehicleFill(input: RecordVehicleFillInput): Promise<LocalShift | null> {
-  return queued(() => writeFill(input));
+export function recordVehicleFill(scope: AccountScope, input: RecordVehicleFillInput): Promise<LocalShift | null> {
+  return queued(scope, () => writeFill(scope, input));
 }
 
-async function writeFill({ shiftId, vehicleUseId, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
+async function writeFill(scope: AccountScope, { shiftId, vehicleUseId, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
   if (fillId === "") throw new Error("Refusing a fill with no id");
   if (!FILL_TYPES.some(entry => entry.id === type)) throw new Error("Refusing a fill of an unknown type");
   const described = checkedFillNote({ fillId, recordedAt, litres, note });
 
-  const open = await readDayOfUses(shiftId);
+  const open = await readDayOfUses(scope, shiftId);
   if (open === null) return null;
   const target = locateUsage(open, vehicleUseId, usageState);
   if (target === null) return null;
 
   const fill: VehicleFill = { id: fillId, type, recordedAt: recordedAt.toISOString(), litres, note: described };
-  return writeFills(open, target, withFill(target.use.fills, fill));
+  return writeFills(scope, open, target, withFill(target.use.fills, fill));
 }
 
 /**
@@ -1200,16 +1260,16 @@ function locateUsage(open: LocalShift, useId: string, state: UsageState): { use:
  * The day with one use's fills replaced, and NOTHING else touched — an ended
  * use keeps its class, plate, times, mileages and checks exactly as they are.
  */
-function writeFills(
+function writeFills(scope: AccountScope, 
   open: LocalShift,
   target: { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number },
   fills: VehicleFill[],
 ): LocalShift {
-  return writeVehicleUse(open, target, { fills });
+  return writeVehicleUse(scope, open, target, { fills });
 }
 
 /** The day with one vehicle use's fills, checks or plate replaced, and NOTHING else touched. */
-function writeVehicleUse(
+function writeVehicleUse(scope: AccountScope, 
   open: LocalShift,
   target: { use: LocalVehicle; ended: false } | { use: EndedVehicle; ended: true; index: number },
   patch: Partial<Pick<LocalVehicle, "fills" | "checks" | "numberPlate" | "startMileage">>,
@@ -1217,7 +1277,7 @@ function writeVehicleUse(
   const updated: LocalShift = target.ended
     ? { ...open, previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, ...patch } : use)) }
     : { ...open, vehicle: { ...target.use, ...patch } };
-  return saveDay(open, updated);
+  return saveDay(scope, open, updated);
 }
 
 export interface RemoveVehicleFillInput {
@@ -1238,18 +1298,18 @@ export interface RemoveVehicleFillInput {
  * with it, and a `vehicleUseId` naming no use — or a use no longer in the
  * expected state — removes nothing anywhere.
  */
-export function removeVehicleFill(input: RemoveVehicleFillInput): Promise<LocalShift | null> {
-  return queued(() => deleteFill(input));
+export function removeVehicleFill(scope: AccountScope, input: RemoveVehicleFillInput): Promise<LocalShift | null> {
+  return queued(scope, () => deleteFill(scope, input));
 }
 
-async function deleteFill({ shiftId, vehicleUseId, usageState, fillId }: RemoveVehicleFillInput): Promise<LocalShift | null> {
-  const open = await readDayOfUses(shiftId);
+async function deleteFill(scope: AccountScope, { shiftId, vehicleUseId, usageState, fillId }: RemoveVehicleFillInput): Promise<LocalShift | null> {
+  const open = await readDayOfUses(scope, shiftId);
   if (open === null) return null;
   const target = locateUsage(open, vehicleUseId, usageState);
   if (target === null) return null;
   if (!target.use.fills.some(stored => stored.id === fillId)) return open;
 
-  return writeFills(open, target, target.use.fills.filter(stored => stored.id !== fillId));
+  return writeFills(scope, open, target, target.use.fills.filter(stored => stored.id !== fillId));
 }
 
 export interface CorrectEndMileageInput {
@@ -1276,14 +1336,14 @@ export interface CorrectEndMileageInput {
  * REFUSES — rejects, writing nothing — a reading that is not a whole number,
  * or one below the use's start mileage. Equal to it is a use that stood still.
  */
-export function correctEndMileage(input: CorrectEndMileageInput): Promise<LocalShift | null> {
-  return queued(() => rewriteEndMileage(input));
+export function correctEndMileage(scope: AccountScope, input: CorrectEndMileageInput): Promise<LocalShift | null> {
+  return queued(scope, () => rewriteEndMileage(scope, input));
 }
 
-async function rewriteEndMileage({ shiftId, vehicleUseId, endMileage }: CorrectEndMileageInput): Promise<LocalShift | null> {
+async function rewriteEndMileage(scope: AccountScope, { shiftId, vehicleUseId, endMileage }: CorrectEndMileageInput): Promise<LocalShift | null> {
   if (!Number.isSafeInteger(endMileage) || endMileage < 0) throw new Error("Refusing an invalid end mileage");
 
-  const open = await readDayOfUses(shiftId);
+  const open = await readDayOfUses(scope, shiftId);
   if (open === null) return null;
   const target = locateUsage(open, vehicleUseId, USAGE_STATE.ended);
   if (target === null || !target.ended) return null;
@@ -1293,7 +1353,7 @@ async function rewriteEndMileage({ shiftId, vehicleUseId, endMileage }: CorrectE
     ...open,
     previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? { ...use, endMileage } : use)),
   };
-  return saveDay(open, updated);
+  return saveDay(scope, open, updated);
 }
 
 /** A trailer as entered, normalised — or a refusal. */
@@ -1324,15 +1384,15 @@ export interface AddTrailerInput {
  * Resolves to the day as it now stands, or `null` when that day is not the
  * one open.
  */
-export function addTrailerToOpenShift(input: AddTrailerInput): Promise<LocalShift | null> {
-  return queued(() => addIfNoTrailer(input));
+export function addTrailerToOpenShift(scope: AccountScope, input: AddTrailerInput): Promise<LocalShift | null> {
+  return queued(scope, () => addIfNoTrailer(scope, input));
 }
 
-async function addIfNoTrailer({ shiftId, trailer, startedAt }: AddTrailerInput): Promise<LocalShift | null> {
+async function addIfNoTrailer(scope: AccountScope, { shiftId, trailer, startedAt }: AddTrailerInput): Promise<LocalShift | null> {
   const details = checkedTrailer(trailer);
   if (Number.isNaN(startedAt.getTime())) throw new Error("Refusing to store an invalid trailer");
 
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null || open.id !== shiftId) return null;
   if (open.trailer !== null) return open;
   if (open.vehicle === null || !towsTrailers(open.vehicle.vehicleClass)) {
@@ -1344,7 +1404,7 @@ async function addIfNoTrailer({ shiftId, trailer, startedAt }: AddTrailerInput):
   }
 
   const updated: LocalShift = { ...open, trailer: { ...details, useId: newLocalId(), startedAt: at, reeferDiesel: [], checks: [] } };
-  return persist(updated);
+  return persist(scope, updated);
 }
 
 export interface ChangeTrailerInput {
@@ -1373,15 +1433,15 @@ export interface ChangeTrailerInput {
  * still the one named by `endingUseId`; otherwise the day is returned
  * unchanged. Resolves to `null` when that day is not the one open.
  */
-export function changeTrailer(input: ChangeTrailerInput): Promise<LocalShift | null> {
-  return queued(() => changeTrailerIfCurrent(input));
+export function changeTrailer(scope: AccountScope, input: ChangeTrailerInput): Promise<LocalShift | null> {
+  return queued(scope, () => changeTrailerIfCurrent(scope, input));
 }
 
-async function changeTrailerIfCurrent({ shiftId, endingUseId, next, changedAt }: ChangeTrailerInput): Promise<LocalShift | null> {
+async function changeTrailerIfCurrent(scope: AccountScope, { shiftId, endingUseId, next, changedAt }: ChangeTrailerInput): Promise<LocalShift | null> {
   const details = next === null ? null : checkedTrailer(next);
   if (Number.isNaN(changedAt.getTime())) throw new Error("Refusing an invalid trailer change");
 
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null || open.id !== shiftId) return null;
   const current = open.trailer;
   if (current?.useId !== endingUseId) return open;
@@ -1401,7 +1461,7 @@ async function changeTrailerIfCurrent({ shiftId, endingUseId, next, changedAt }:
     trailer: details === null ? null : { ...details, useId: newLocalId(), startedAt: at, reeferDiesel: [], checks: [] },
     previousTrailers: [...open.previousTrailers, ended],
   };
-  return persist(updated);
+  return persist(scope, updated);
 }
 
 export interface TrailerCheckWrite {
@@ -1440,8 +1500,8 @@ export interface CompleteTrailerCheckInput extends TrailerCheckWrite {
  * use or another use of the same number. `null`, writing nothing, otherwise.
  * The vehicle and its checks are never touched.
  */
-export function saveTrailerCheckDraft(input: TrailerCheckWrite): Promise<VehicleCheck | null> {
-  return queued(() => writeTrailerCheck(input, null));
+export function saveTrailerCheckDraft(scope: AccountScope, input: TrailerCheckWrite): Promise<VehicleCheck | null> {
+  return queued(scope, () => writeTrailerCheck(scope, input, null));
 }
 
 /**
@@ -1451,18 +1511,18 @@ export function saveTrailerCheckDraft(input: TrailerCheckWrite): Promise<Vehicle
  * use `completedAt` is still the moment the driver completes it — the caller
  * passes the device clock, never the use's own times: a check is not backdated.
  */
-export function completeTrailerCheck(input: CompleteTrailerCheckInput): Promise<VehicleCheck | null> {
-  return queued(() => writeTrailerCheck(input, input));
+export function completeTrailerCheck(scope: AccountScope, input: CompleteTrailerCheckInput): Promise<VehicleCheck | null> {
+  return queued(scope, () => writeTrailerCheck(scope, input, input));
 }
 
-async function writeTrailerCheck(input: TrailerCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
-  const open = await readDayOfUses(input.shiftId);
+async function writeTrailerCheck(scope: AccountScope, input: TrailerCheckWrite, certification: Certification | null): Promise<VehicleCheck | null> {
+  const open = await readDayOfUses(scope, input.shiftId);
   const target = locateTrailer(open, input.shiftId, input.trailerUseId, input.usageState);
   if (open === null || target === null) return null;
   const result = nextChecks(target.use.checks, trailerChecklistFor(target.use.trailerType), input, certification);
   if (result.checks === null) return result.check;
 
-  writeTrailerUse(open, target, { checks: result.checks });
+  writeTrailerUse(scope, open, target, { checks: result.checks });
   return result.check;
 }
 
@@ -1484,11 +1544,11 @@ function locateTrailer(open: LocalShift | null, shiftId: string, useId: string, 
 }
 
 /** The day with one trailer use's checks, fridge diesel or number replaced, and NOTHING else touched. */
-function writeTrailerUse(open: LocalShift, target: TrailerTarget, patch: Partial<Pick<LocalTrailer, "checks" | "reeferDiesel" | "trailerNumber">>): LocalShift {
+function writeTrailerUse(scope: AccountScope, open: LocalShift, target: TrailerTarget, patch: Partial<Pick<LocalTrailer, "checks" | "reeferDiesel" | "trailerNumber">>): LocalShift {
   const updated: LocalShift = target.ended
     ? { ...open, previousTrailers: open.previousTrailers.map((use, index) => (index === target.index ? { ...use, ...patch } : use)) }
     : { ...open, trailer: { ...target.use, ...patch } };
-  return saveDay(open, updated);
+  return saveDay(scope, open, updated);
 }
 
 /** A correction of a COMPLETED walkaround check — a vehicle's or a trailer's. */
@@ -1513,14 +1573,14 @@ export interface CheckRevisionWrite {
 /**
  * Correct a completed Vehicle / Unit Check (D36). See `reviseCheck`.
  */
-export function reviseVehicleCheck(input: CheckRevisionWrite): Promise<VehicleCheck | null> {
-  return queued(async () => {
-    const open = await readDayOfUses(input.shiftId);
+export function reviseVehicleCheck(scope: AccountScope, input: CheckRevisionWrite): Promise<VehicleCheck | null> {
+  return queued(scope, async () => {
+    const open = await readDayOfUses(scope, input.shiftId);
     if (open === null) return null;
     const target = locateUsage(open, input.useId, input.usageState);
     if (target === null) return null;
     const result = reviseCheck(target.use.checks, checklistFor(target.use.vehicleClass), input);
-    if (result.checks !== null) writeVehicleUse(open, target, { checks: result.checks });
+    if (result.checks !== null) writeVehicleUse(scope, open, target, { checks: result.checks });
     return result.check;
   });
 }
@@ -1528,13 +1588,13 @@ export function reviseVehicleCheck(input: CheckRevisionWrite): Promise<VehicleCh
 /**
  * Correct a completed Trailer Check (D36). See `reviseCheck`.
  */
-export function reviseTrailerCheck(input: CheckRevisionWrite): Promise<VehicleCheck | null> {
-  return queued(async () => {
-    const open = await readDayOfUses(input.shiftId);
+export function reviseTrailerCheck(scope: AccountScope, input: CheckRevisionWrite): Promise<VehicleCheck | null> {
+  return queued(scope, async () => {
+    const open = await readDayOfUses(scope, input.shiftId);
     const target = locateTrailer(open, input.shiftId, input.useId, input.usageState);
     if (open === null || target === null) return null;
     const result = reviseCheck(target.use.checks, trailerChecklistFor(target.use.trailerType), input);
-    if (result.checks !== null) writeTrailerUse(open, target, { checks: result.checks });
+    if (result.checks !== null) writeTrailerUse(scope, open, target, { checks: result.checks });
     return result.check;
   });
 }
@@ -1616,19 +1676,19 @@ export interface RecordReeferDieselInput {
  *
  * REFUSES — rejects, writing nothing — what any fill refuses (`checkedFillNote`).
  */
-export function recordReeferDiesel(input: RecordReeferDieselInput): Promise<LocalShift | null> {
-  return queued(() => writeReeferDiesel(input));
+export function recordReeferDiesel(scope: AccountScope, input: RecordReeferDieselInput): Promise<LocalShift | null> {
+  return queued(scope, () => writeReeferDiesel(scope, input));
 }
 
-async function writeReeferDiesel({ shiftId, trailerUseId, usageState, fillId, recordedAt, litres, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
+async function writeReeferDiesel(scope: AccountScope, { shiftId, trailerUseId, usageState, fillId, recordedAt, litres, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
   const described = checkedFillNote({ fillId, recordedAt, litres, note });
 
-  const open = await readDayOfUses(shiftId);
+  const open = await readDayOfUses(scope, shiftId);
   const target = reefer(locateTrailer(open, shiftId, trailerUseId, usageState));
   if (open === null || target === null) return null;
 
   const fill: FillRecord = { id: fillId, recordedAt: recordedAt.toISOString(), litres, note: described };
-  return writeTrailerUse(open, target, { reeferDiesel: withFill(target.use.reeferDiesel, fill) });
+  return writeTrailerUse(scope, open, target, { reeferDiesel: withFill(target.use.reeferDiesel, fill) });
 }
 
 export interface RemoveReeferDieselInput {
@@ -1640,13 +1700,13 @@ export interface RemoveReeferDieselInput {
 }
 
 /** Remove one fridge-diesel entry from the refrigerated trailer use named — only that one. */
-export function removeReeferDiesel(input: RemoveReeferDieselInput): Promise<LocalShift | null> {
-  return queued(async () => {
-    const open = await readDayOfUses(input.shiftId);
+export function removeReeferDiesel(scope: AccountScope, input: RemoveReeferDieselInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
+    const open = await readDayOfUses(scope, input.shiftId);
     const target = reefer(locateTrailer(open, input.shiftId, input.trailerUseId, input.usageState));
     if (open === null || target === null) return null;
     if (!target.use.reeferDiesel.some(stored => stored.id === input.fillId)) return open;
-    return writeTrailerUse(open, target, { reeferDiesel: target.use.reeferDiesel.filter(stored => stored.id !== input.fillId) });
+    return writeTrailerUse(scope, open, target, { reeferDiesel: target.use.reeferDiesel.filter(stored => stored.id !== input.fillId) });
   });
 }
 
@@ -1680,16 +1740,16 @@ export interface CorrectUseNameInput {
  * an empty plate. Replaces the value, like a fill correction: an unsent day
  * is the driver's own record (D40).
  */
-export function correctNumberPlate({ shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
-  return queued(async () => {
+export function correctNumberPlate(scope: AccountScope, { shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
     const numberPlate = normalisePlate(value);
     if (numberPlate === "") throw new Error("Refusing an empty number plate");
-    const open = await readDayOfUses(shiftId);
+    const open = await readDayOfUses(scope, shiftId);
     if (open === null) return null;
     const target = locateUsage(open, useId, usageState);
     if (target === null) return null;
     if (target.use.numberPlate === numberPlate) return open;
-    return writeVehicleUse(open, target, { numberPlate });
+    return writeVehicleUse(scope, open, target, { numberPlate });
   });
 }
 
@@ -1698,15 +1758,15 @@ export function correctNumberPlate({ shiftId, useId, usageState, value }: Correc
  * the number changes, never its type, identity, times, fridge diesel or
  * checks, and never another use of the same number.
  */
-export function correctTrailerNumber({ shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
-  return queued(async () => {
+export function correctTrailerNumber(scope: AccountScope, { shiftId, useId, usageState, value }: CorrectUseNameInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
     const trailerNumber = normaliseTrailerNumber(value);
     if (trailerNumber === "") throw new Error("Refusing an empty trailer number");
-    const open = await readDayOfUses(shiftId);
+    const open = await readDayOfUses(scope, shiftId);
     const target = locateTrailer(open, shiftId, useId, usageState);
     if (open === null || target === null) return null;
     if (target.use.trailerNumber === trailerNumber) return open;
-    return writeTrailerUse(open, target, { trailerNumber });
+    return writeTrailerUse(scope, open, target, { trailerNumber });
   });
 }
 
@@ -1730,16 +1790,16 @@ export interface CorrectStartMileageInput {
  * (refused, never adjusted). Resolves to the day, or `null` — writing
  * nothing — when that use is not found in the state named.
  */
-export function correctStartMileage({ shiftId, vehicleUseId, usageState, startMileage }: CorrectStartMileageInput): Promise<LocalShift | null> {
-  return queued(async () => {
+export function correctStartMileage(scope: AccountScope, { shiftId, vehicleUseId, usageState, startMileage }: CorrectStartMileageInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
     if (!Number.isSafeInteger(startMileage) || startMileage < 0) throw new Error("Refusing an invalid start mileage");
-    const open = await readDayOfUses(shiftId);
+    const open = await readDayOfUses(scope, shiftId);
     if (open === null) return null;
     const target = locateUsage(open, vehicleUseId, usageState);
     if (target === null) return null;
     if (target.ended && target.use.endMileage < startMileage) throw new Error("Refusing a start mileage above the end mileage");
     if (target.use.startMileage === startMileage) return open;
-    return writeVehicleUse(open, target, { startMileage });
+    return writeVehicleUse(scope, open, target, { startMileage });
   });
 }
 
@@ -1792,9 +1852,9 @@ export class UseTimesError extends Error {
  * ends at the finish (D40). Its identity, plate, class, mileage, fills and
  * checks never change here.
  */
-export function correctVehicleUseTimes(input: CorrectUseTimesInput): Promise<LocalShift | null> {
-  return queued(async () => {
-    const open = await readDayOfUses(input.shiftId);
+export function correctVehicleUseTimes(scope: AccountScope, input: CorrectUseTimesInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
+    const open = await readDayOfUses(scope, input.shiftId);
     if (open === null) return null;
     const target = locateUsage(open, input.useId, input.usageState);
     if (target === null) return null;
@@ -1804,14 +1864,14 @@ export function correctVehicleUseTimes(input: CorrectUseTimesInput): Promise<Loc
       ? { ...open, previousVehicles: open.previousVehicles.map((use, index) => (index === target.index ? next as EndedVehicle : use)) }
       : { ...open, vehicle: next };
     throwIfUnheld(open, updated, "vehicle", input.useId);
-    return saveDay(open, updated);
+    return saveDay(scope, open, updated);
   });
 }
 
 /** Correct when ONE trailer use started and ended — the same rules as a vehicle's. */
-export function correctTrailerUseTimes(input: CorrectUseTimesInput): Promise<LocalShift | null> {
-  return queued(async () => {
-    const open = await readDayOfUses(input.shiftId);
+export function correctTrailerUseTimes(scope: AccountScope, input: CorrectUseTimesInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
+    const open = await readDayOfUses(scope, input.shiftId);
     const target = locateTrailer(open, input.shiftId, input.useId, input.usageState);
     if (open === null || target === null) return null;
     const next = retimed(target.use, input);
@@ -1820,7 +1880,7 @@ export function correctTrailerUseTimes(input: CorrectUseTimesInput): Promise<Loc
       ? { ...open, previousTrailers: open.previousTrailers.map((use, index) => (index === target.index ? next as EndedTrailer : use)) }
       : { ...open, trailer: next };
     throwIfUnheld(open, updated, "trailer", input.useId);
-    return saveDay(open, updated);
+    return saveDay(scope, open, updated);
   });
 }
 
@@ -1916,12 +1976,12 @@ export interface CorrectOpenShiftInput {
  * nothing: a shift may start before its first use (D42). Resolves to the
  * day, or `null` when it is not the open one.
  */
-export function correctOpenShift({ shiftId, workingFor: entered, startedAt }: CorrectOpenShiftInput): Promise<LocalShift | null> {
-  return queued(async () => {
+export function correctOpenShift(scope: AccountScope, { shiftId, workingFor: entered, startedAt }: CorrectOpenShiftInput): Promise<LocalShift | null> {
+  return queued(scope, async () => {
     const workingFor = asWorkingContext(entered);
     if (workingFor === null) throw new Error("Refusing an unknown working context");
     if (Number.isNaN(startedAt.getTime())) throw new Error("Refusing an invalid start");
-    const open = await readOpenShift();
+    const open = await readOpenShift(scope);
     if (open === null || open.id !== shiftId) return null;
     const at = startedAt.toISOString();
     const uses = [
@@ -1933,7 +1993,7 @@ export function correctOpenShift({ shiftId, workingFor: entered, startedAt }: Co
     const first = uses.filter(use => Date.parse(use.startedAt) < Date.parse(at)).sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))[0];
     if (first !== undefined) throw new TimesheetBoundsError({ kind: "start-after-use", name: first.name, at: first.startedAt });
     if (open.startedAt === at && JSON.stringify(open.workingFor) === JSON.stringify(workingFor)) return open;
-    return persist({ ...open, workingFor, startedAt: at });
+    return persist(scope, { ...open, workingFor, startedAt: at });
   });
 }
 
@@ -1961,6 +2021,8 @@ export const SHIFT_NOTES_MAX_LENGTH = 500;
  * lists, the same shapes, the same meaning as on the open day.
  */
 export interface CompletedShift {
+  /** The account this day belongs to, carried from the open day (F-31). */
+  ownerUserId: string;
   id: string;
   workingFor: WorkingContext;
   startedAt: string;
@@ -2079,7 +2141,7 @@ export interface ShiftCorrection extends ShiftFacts {
  * ended (`endedBy: "finish"`) ends at the day's current finish; every other
  * use exactly as stored. The stored uses are never rewritten by a correction.
  */
-export function effectiveUses(shift: CompletedShift): Pick<CompletedShift, "previousVehicles" | "previousTrailers"> {
+export function effectiveUses(shift: Omit<CompletedShift, "ownerUserId">): Pick<CompletedShift, "previousVehicles" | "previousTrailers"> {
   const finish = effectiveFacts(shift).endedAt;
   return {
     previousVehicles: shift.previousVehicles.map(use => (use.endedBy === USE_ENDED_BY.finish ? { ...use, endedAt: finish } : use)),
@@ -2088,7 +2150,7 @@ export function effectiveUses(shift: CompletedShift): Pick<CompletedShift, "prev
 }
 
 /** What a finished day says NOW: its latest correction, or the day as finished. */
-export function effectiveFacts(shift: CompletedShift): ShiftFacts {
+export function effectiveFacts(shift: Omit<CompletedShift, "ownerUserId">): ShiftFacts {
   const latest = shift.corrections?.[shift.corrections.length - 1];
   const source: ShiftFacts = latest ?? shift;
   return { workingFor: source.workingFor, startedAt: source.startedAt, endedAt: source.endedAt, nightOut: source.nightOut, notes: source.notes };
@@ -2191,6 +2253,7 @@ export function completedFrom(open: LocalShift, { finalMileage, endedAt, nightOu
   }
 
   return {
+    ownerUserId:      open.ownerUserId,
     id:               open.id,
     workingFor:       open.workingFor,
     startedAt:        open.startedAt,
@@ -2238,13 +2301,13 @@ function declaredAs(day: CompletedShift, declared: Declared | null): CompletedSh
  * then cannot be removed, the day is still finished: the reader hides an
  * open file whose day is filed, and the next Start Shift removes it.
  */
-export function finishOpenShift(input: FinishShiftInput): Promise<CompletedShift | null> {
-  return queued(() => finishIfCurrent(input));
+export function finishOpenShift(scope: AccountScope, input: FinishShiftInput): Promise<CompletedShift | null> {
+  return queued(scope, () => finishIfCurrent(scope, input));
 }
 
-async function finishIfCurrent(input: FinishShiftInput): Promise<CompletedShift | null> {
-  const open = await readOpenShift();
-  if (open === null || open.id !== input.shiftId) return readCompletedShift(input.shiftId);
+async function finishIfCurrent(scope: AccountScope, input: FinishShiftInput): Promise<CompletedShift | null> {
+  const open = await readOpenShift(scope);
+  if (open === null || open.id !== input.shiftId) return readCompletedShift(scope, input.shiftId);
   if ((open.vehicle?.useId ?? null) !== input.vehicleUseId) return null;
   if ((open.trailer?.useId ?? null) !== input.trailerUseId) return null;
 
@@ -2252,15 +2315,15 @@ async function finishIfCurrent(input: FinishShiftInput): Promise<CompletedShift 
   if (completed === null) return null;
   const serialised = JSON.stringify(completed);
   if (asCompletedShift(JSON.parse(serialised)) === null) throw new Error("Refusing to file a day the reader would refuse");
-  const target = completedShiftFile(completed.id);
+  const target = completedShiftFile(scope, completed.id);
   if (target === null) throw new Error("Refusing to file a day under an id that cannot name a file");
   // Something already there is not a readable record of this day — the
   // reader would have hidden the open day otherwise. Kept, never overwritten.
-  if (target.exists) preserveForRecovery(target, "unreadable");
+  if (target.exists) preserveForRecovery(scope, target, "unreadable");
 
-  storeSafely(serialised, target, { overwrite: false });
+  storeSafely(scope, serialised, target, { overwrite: false });
   try {
-    openShiftFile().delete();
+    openShiftFile(scope).delete();
   } catch {
     // Filed and readable, so the day IS finished: saying otherwise would be
     // the untrue report. The leftover is hidden by `readOpenShift` and removed
@@ -2270,16 +2333,30 @@ async function finishIfCurrent(input: FinishShiftInput): Promise<CompletedShift 
 }
 
 /** The finished day with this id, or `null`. Never throws. */
-export function readCompletedShift(id: string): Promise<CompletedShift | null> {
-  return Promise.resolve(readCompletedSync(id));
+export function readCompletedShift(scope: AccountScope, id: string): Promise<CompletedShift | null> {
+  return scopedRead(scope, () => readCompletedSync(scope, id));
 }
 
-function readCompletedSync(id: string): CompletedShift | null {
-  const file = completedShiftFile(id);
+/**
+ * A read outside the write queue, for one account: refused — as a rejection,
+ * never a silent empty answer — when the scope is not live (F-31).
+ */
+function scopedRead<T>(scope: AccountScope, read: () => T): Promise<T> {
+  try {
+    assertLiveScope(scope);
+    quarantineLegacyRecords();
+    return Promise.resolve(read());
+  } catch (error: unknown) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+function readCompletedSync(scope: AccountScope, id: string): CompletedShift | null {
+  const file = completedShiftFile(scope, id);
   if (file === null || !file.exists) return null;
   try {
     const shift = asCompletedShift(JSON.parse(file.textSync()));
-    return shift?.id === id ? shift : null;
+    return shift?.id === id && shift.ownerUserId === scope.userId ? shift : null;
   } catch {
     return null;
   }
@@ -2298,14 +2375,18 @@ function readCompletedSync(id: string): CompletedShift | null {
  * Newest first by the day itself — its start, then its finish — with the id
  * as the last word, so the order is stable and never the order of the files.
  */
-export function listCompletedShifts(): Promise<CompletedShiftListing> {
+export function listCompletedShifts(scope: AccountScope): Promise<CompletedShiftListing> {
+  return scopedRead(scope, () => listCompletedSync(scope));
+}
+
+function listCompletedSync(scope: AccountScope): CompletedShiftListing {
   const shifts: CompletedShift[] = [];
   let unreadable = 0;
-  for (const entry of new Directory(Paths.document).list()) {
+  for (const entry of accountDirectory(scope).list()) {
     if (!(entry instanceof File)) continue;
     const id = completedShiftIdFrom(entry.uri);
     if (id === null) continue;
-    const shift = readCompletedSync(id);
+    const shift = readCompletedSync(scope, id);
     if (shift === null) unreadable += 1;
     else shifts.push(shift);
   }
@@ -2317,7 +2398,7 @@ export function listCompletedShifts(): Promise<CompletedShiftListing> {
       || Date.parse(right.endedAt) - Date.parse(left.endedAt)
       || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   });
-  return Promise.resolve({ timesheets: shifts, unreadable });
+  return { timesheets: shifts, unreadable };
 }
 
 export interface CompletedShiftListing {
@@ -2336,15 +2417,15 @@ function completedShiftIdFrom(uri: string): string | null {
 }
 
 /** A day's record file — or `null` for an id that is not safe to name a file with. */
-function completedShiftFile(id: string): File | null {
-  return /^[0-9A-Za-z-]+$/.test(id) ? new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`) : null;
+function completedShiftFile(scope: AccountScope, id: string): File | null {
+  return /^[0-9A-Za-z-]+$/.test(id) ? new File(accountDirectory(scope), `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`) : null;
 }
 
 /** An open-day file whose day already has a readable completed record. */
-function isFinishedLeftover(file: File): boolean {
+function isFinishedLeftover(scope: AccountScope, file: File): boolean {
   try {
     const shift = asLocalShift(JSON.parse(file.textSync()));
-    return shift !== null && readCompletedSync(shift.id) !== null;
+    return shift !== null && shift.ownerUserId === scope.userId && readCompletedSync(scope, shift.id) !== null;
   } catch {
     return false;
   }
@@ -2359,6 +2440,14 @@ function isInstant(value: unknown): value is string {
  * an open day's uses, and nothing in the day ending after the day does.
  */
 function asCompletedShift(value: unknown): CompletedShift | null {
+  const owner = ownerOf(value);
+  if (owner === null) return null;
+  const day = asCompletedShiftContent(value);
+  return day === null ? null : { ...day, ownerUserId: owner };
+}
+
+/** Everything about a finished day except whose it is. */
+function asCompletedShiftContent(value: unknown): Omit<CompletedShift, "ownerUserId"> | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
   const { id, startedAt, endedAt, createdAt, status, workingFor, nightOut, notes } = record;
@@ -2382,7 +2471,7 @@ function asCompletedShift(value: unknown): CompletedShift | null {
   // A use the finish ended ended AT that finish — anything else was not written by it.
   if ([...vehicles, ...trailers.previousTrailers].some(use => use.endedBy === USE_ENDED_BY.finish && use.endedAt !== endedAt)) return null;
 
-  const read: CompletedShift = {
+  const read: Omit<CompletedShift, "ownerUserId"> = {
     id, workingFor: context, startedAt, endedAt, nightOut, notes,
     previousVehicles: vehicles, previousTrailers: trailers.previousTrailers,
     status: LOCAL_SHIFT_STATUS.completed, createdAt,
@@ -2484,12 +2573,12 @@ export function boundsProblem(day: Pick<CompletedShift, "previousVehicles" | "pr
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Store a finished day's record through the verified write, after the reader has accepted it. */
-function saveCompleted(shift: CompletedShift, options: { overwrite: boolean }): void {
+function saveCompleted(scope: AccountScope, shift: CompletedShift, options: { overwrite: boolean }): void {
   const serialised = JSON.stringify(shift);
   if (asCompletedShift(JSON.parse(serialised)) === null) throw new Error("Refusing to file a day the reader would refuse");
-  const target = completedShiftFile(shift.id);
+  const target = completedShiftFile(scope, shift.id);
   if (target === null) throw new Error("Refusing to file a day under an id that cannot name a file");
-  storeSafely(serialised, target, options);
+  storeSafely(scope, serialised, target, options);
 }
 
 /**
@@ -2552,9 +2641,9 @@ export interface CorrectCompletedShiftInput {
  * (`TimesheetBoundsError`), over-long notes, and a correction with no id or
  * no driver. Fills, checks and mileages are never touched here.
  */
-export function correctCompletedShift(input: CorrectCompletedShiftInput): Promise<CompletedShift | null> {
-  return queued(() => {
-    const day = readCompletedSync(input.shiftId);
+export function correctCompletedShift(scope: AccountScope, input: CorrectCompletedShiftInput): Promise<CompletedShift | null> {
+  return queued(scope, () => {
+    const day = readCompletedSync(scope, input.shiftId);
     if (day === null) return Promise.resolve(null);
     if ((day.corrections ?? []).some(correction => correction.id === input.correctionId)) return Promise.resolve(day);
     const latest = day.corrections?.[day.corrections.length - 1];
@@ -2591,7 +2680,7 @@ export function correctCompletedShift(input: CorrectCompletedShiftInput): Promis
     };
     const declared = declaredAs(corrected, input.declared);
     if (declared === null) return Promise.resolve(null);
-    saveCompleted(declared, { overwrite: true });
+    saveCompleted(scope, declared, { overwrite: true });
     return Promise.resolve(declared);
   });
 }
@@ -2622,13 +2711,13 @@ export class DeleteUncertainError extends Error {
  * unless the record is provably gone; when that cannot be known, it is a
  * `DeleteUncertainError`.
  */
-export function deleteCompletedShift(id: string): Promise<boolean> {
-  return queued(() => {
-    const target = completedShiftFile(id);
-    if (target === null || readCompletedSync(id) === null) return Promise.resolve(false);
+export function deleteCompletedShift(scope: AccountScope, id: string): Promise<boolean> {
+  return queued(scope, () => {
+    const target = completedShiftFile(scope, id);
+    if (target === null || readCompletedSync(scope, id) === null) return Promise.resolve(false);
 
-    const live = openShiftFile();
-    if (live.exists && isFinishedLeftover(live)) {
+    const live = openShiftFile(scope);
+    if (live.exists && isFinishedLeftover(scope, live)) {
       const leftover = asLocalShift(JSON.parse(live.textSync()));
       if (leftover?.id === id) live.delete();
     }
@@ -2660,6 +2749,7 @@ function viewOfFinished(done: CompletedShift): LocalShift {
   const facts = effectiveFacts(done);
   const uses = effectiveUses(done);
   const view: LocalShift = {
+    ownerUserId: done.ownerUserId,
     id: done.id,
     workingFor: facts.workingFor,
     startedAt: facts.startedAt,
@@ -2692,19 +2782,21 @@ function distinct(values: readonly string[]): boolean {
 }
 
 /** A finished day's uses, for the use screens: `null` when no readable day has the id. */
-export function readFinishedDayOfUses(id: string): Promise<LocalShift | null> {
-  const done = readCompletedSync(id);
-  return Promise.resolve(done === null ? null : viewOfFinished(done));
+export function readFinishedDayOfUses(scope: AccountScope, id: string): Promise<LocalShift | null> {
+  return scopedRead(scope, () => {
+    const done = readCompletedSync(scope, id);
+    return done === null ? null : viewOfFinished(done);
+  });
 }
 
 /**
  * The day a use write names: the open day, or — when it is not the open one —
  * a finished day's uses (`viewOfFinished`). Either is found only by its id.
  */
-async function readDayOfUses(shiftId: string): Promise<LocalShift | null> {
-  const open = await readOpenShift();
+async function readDayOfUses(scope: AccountScope, shiftId: string): Promise<LocalShift | null> {
+  const open = await readOpenShift(scope);
   if (open !== null && open.id === shiftId) return open;
-  const done = readCompletedSync(shiftId);
+  const done = readCompletedSync(scope, shiftId);
   return done === null ? null : viewOfFinished(done);
 }
 
@@ -2712,9 +2804,9 @@ async function readDayOfUses(shiftId: string): Promise<LocalShift | null> {
  * Save a use write: the open day through `persist`, a finished day through
  * its own record — only its uses change, never its facts or corrections.
  */
-function saveDay(day: LocalShift, updated: LocalShift): LocalShift {
+function saveDay(scope: AccountScope, day: LocalShift, updated: LocalShift): LocalShift {
   const done = finishedBehind.get(day);
-  if (done === undefined) return persist(updated);
+  if (done === undefined) return persist(scope, updated);
   if (updated.vehicle !== null || updated.trailer !== null) throw new Error("Refusing to put a use back in use on a finished day");
   // The view shows ends as the day says them now; the record keeps a use the
   // finish ended at the end it was finished with (`effectiveUses`), so that
@@ -2725,7 +2817,7 @@ function saveDay(day: LocalShift, updated: LocalShift): LocalShift {
     previousVehicles: withStoredEnds(updated.previousVehicles, done.previousVehicles),
     previousTrailers: withStoredEnds(updated.previousTrailers, done.previousTrailers),
   };
-  saveCompleted(next, { overwrite: true });
+  saveCompleted(scope, next, { overwrite: true });
   return viewOfFinished(next);
 }
 
@@ -2753,16 +2845,16 @@ export class DiscardIncompleteError extends Error {
  * is a `DiscardIncompleteError`. Nothing is put back: what is on the disk is
  * what the next read reports.
  */
-export function clearOpenShift(): Promise<void> {
+export function clearOpenShift(scope: AccountScope): Promise<void> {
   // Through the same queue as every write: a write already in flight finishes
   // first, and cannot then re-create the file after it was deleted — a
   // discarded day never comes back (hardening audit, 2026-09-28).
   // The day's unfinished next state goes with it, so a discarded day is not
   // later kept as recovery. Recovery files are left alone: they are not the
   // day being discarded.
-  return queued(() => {
+  return queued(scope, () => {
     let removedAny = false;
-    for (const file of [openShiftFile(), new File(Paths.document, OPEN_SHIFT_TEMP_FILE)]) {
+    for (const file of [openShiftFile(scope), openShiftTempFile(scope)]) {
       let deleting = false;
       try {
         if (file.exists) {
@@ -2786,4 +2878,183 @@ function stillThere(file: File): boolean {
   } catch {
     return false;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Records written before accounts existed (F-31)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Where records that belong to NO account are kept: under the document
+ * directory, outside `accounts/`, so no account's scope reaches them and no
+ * screen reads them. Nothing here is ever deleted.
+ */
+export const LEGACY_QUARANTINE_DIRECTORY = "quarantine";
+
+/** A quarantined record written before accounts existed, still unclaimed. */
+const LEGACY_PREFIX = "legacy-";
+/** A record found inside an account's directory naming another owner. */
+const FOREIGN_PREFIX = "foreign-";
+/** A legacy record recovered into an account — its original bytes, kept. */
+const RECOVERED_PREFIX = "recovered-";
+
+function quarantineDirectory(): Directory {
+  const directory = new Directory(Paths.document, LEGACY_QUARANTINE_DIRECTORY);
+  directory.create({ intermediates: true, idempotent: true });
+  return directory;
+}
+
+/** Is this a file name the app ever gave a day's record, in any form? */
+function isDayRecordName(name: string): boolean {
+  return name === OPEN_SHIFT_FILE
+    || name === OPEN_SHIFT_TEMP_FILE
+    || (name.startsWith(RECOVERY_FILE_PREFIX) && name.endsWith(".json"))
+    || (name.startsWith(COMPLETED_SHIFT_FILE_PREFIX) && name.endsWith(".json"));
+}
+
+/** A record that names an owner — someone other than this account. */
+function isForeign(scope: AccountScope, file: File): boolean {
+  try {
+    const owner = ownerOf(JSON.parse(file.textSync()));
+    return owner !== null && owner !== scope.userId;
+  } catch {
+    return false;
+  }
+}
+
+/** Move a file into quarantine, byte for byte, under a name no other file has. */
+function moveToQuarantine(file: File, prefix: string): void {
+  const target = new File(quarantineDirectory(), `${prefix}${Date.now()}-${newLocalId()}-${file.name}`);
+  if (target.exists) throw new Error("Refusing to overwrite a quarantined record");
+  file.moveSync(target, { overwrite: false });
+}
+
+/**
+ * Move every day record still in the SHARED document directory — written by
+ * a build before F-31, when records named no account — into quarantine.
+ * They are never given to whoever signs in: nothing on the disk says whose
+ * they are. Idempotent; run before every storage operation.
+ */
+export function quarantineLegacyRecords(): void {
+  const root = new Directory(Paths.document);
+  if (!root.exists) return;
+  for (const entry of root.list()) {
+    if (entry instanceof File && isDayRecordName(entry.name)) moveToQuarantine(entry, LEGACY_PREFIX);
+  }
+}
+
+/** A quarantined legacy record the signed-in account can conclusively claim. */
+export interface RecoverableLegacyRecord {
+  /** Names the quarantined file; pass it back to `recoverLegacyRecord`. */
+  key: string;
+  kind: "open" | "completed";
+  shiftId: string;
+  workingFor: WorkingContext;
+  startedAt: string;
+}
+
+/** What `recoverLegacyRecord` requires: the driver said yes, explicitly. */
+export interface LegacyRecoveryConfirmation {
+  confirmedByDriver: true;
+}
+
+type Claim =
+  | { kind: "open"; day: Omit<LocalShift, "ownerUserId"> }
+  | { kind: "completed"; day: Omit<CompletedShift, "ownerUserId"> };
+
+/**
+ * The claim the signed-in account has on one quarantined file, or `null`.
+ *
+ * CONCLUSIVE ONLY: a record written before accounts existed names no owner,
+ * but a company day names the MEMBERSHIP it was worked under, and a
+ * membership belongs to exactly one account. So the record is attributable
+ * when EVERY company context it holds — the original and every correction —
+ * is a membership the signed-in account holds now, as the server reported.
+ * A Personal context names no one: the record stays quarantined. So does
+ * anything unreadable, an interrupted write's copy, a recovery file, or a
+ * record that already names an owner.
+ */
+function claimOn(file: File, memberships: readonly { membershipId: string }[]): Claim | null {
+  if (!file.name.startsWith(LEGACY_PREFIX)) return null;
+  const original = file.name.replace(/^legacy-\d+-[0-9a-f-]+-/, "");
+  const isOpen = original === OPEN_SHIFT_FILE;
+  const isCompleted = original.startsWith(COMPLETED_SHIFT_FILE_PREFIX);
+  if (!isOpen && !isCompleted) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(file.textSync());
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || "ownerUserId" in parsed) return null;
+
+  const held = new Set(memberships.map(membership => membership.membershipId));
+  const attributable = (contexts: WorkingContext[]): boolean =>
+    contexts.length > 0 && contexts.every(context => context.kind === "company" && held.has(context.membershipId));
+
+  if (isOpen) {
+    const day = asLocalShiftContent(parsed);
+    return day !== null && attributable([day.workingFor]) ? { kind: "open", day } : null;
+  }
+  const day = asCompletedShiftContent(parsed);
+  if (day === null || original !== `${COMPLETED_SHIFT_FILE_PREFIX}${day.id}.json`) return null;
+  const contexts = [day.workingFor, ...(day.corrections ?? []).map(correction => correction.workingFor)];
+  return attributable(contexts) ? { kind: "completed", day } : null;
+}
+
+/** The quarantined legacy records this account can conclusively claim. */
+export async function findRecoverableLegacyRecords(
+  scope: AccountScope,
+  memberships: readonly { membershipId: string }[],
+): Promise<RecoverableLegacyRecord[]> {
+  assertLiveScope(scope);
+  quarantineLegacyRecords();
+  const found: RecoverableLegacyRecord[] = [];
+  for (const entry of quarantineDirectory().list()) {
+    if (!(entry instanceof File)) continue;
+    const claim = claimOn(entry, memberships);
+    if (claim === null) continue;
+    found.push({ key: entry.name, kind: claim.kind, shiftId: claim.day.id, workingFor: claim.day.workingFor, startedAt: claim.day.startedAt });
+  }
+  return Promise.resolve(found);
+}
+
+/**
+ * Recover one quarantined legacy record into THIS account, after the driver
+ * explicitly confirmed it is theirs. Refused — leaving everything exactly
+ * where it is — unless the claim is conclusive (`claimOn`) and the record
+ * would not replace anything: a legacy open day never displaces the
+ * account's open day, and a finished day never overwrites one with its id.
+ * The quarantined bytes are kept, renamed as recovered.
+ */
+export function recoverLegacyRecord(
+  scope: AccountScope,
+  memberships: readonly { membershipId: string }[],
+  key: string,
+  confirmation: LegacyRecoveryConfirmation,
+): Promise<"recovered" | "refused"> {
+  if (confirmation.confirmedByDriver !== true) {
+    return Promise.reject(new Error("Refusing to recover a record the driver has not confirmed"));
+  }
+  return queued(scope, () => {
+    if (!/^[A-Za-z0-9._-]+$/.test(key)) return Promise.resolve("refused" as const);
+    const file = new File(quarantineDirectory(), key);
+    if (!file.exists) return Promise.resolve("refused" as const);
+    const claim = claimOn(file, memberships);
+    if (claim === null) return Promise.resolve("refused" as const);
+
+    if (claim.kind === "open") {
+      if (openShiftFile(scope).exists || openShiftTempFile(scope).exists) return Promise.resolve("refused" as const);
+      persist(scope, { ownerUserId: scope.userId, ...claim.day });
+    } else {
+      const target = completedShiftFile(scope, claim.day.id);
+      if (target === null || target.exists) return Promise.resolve("refused" as const);
+      const serialised = JSON.stringify({ ...claim.day, ownerUserId: scope.userId });
+      if (asCompletedShift(JSON.parse(serialised)) === null) return Promise.resolve("refused" as const);
+      storeSafely(scope, serialised, target, { overwrite: false });
+    }
+    file.moveSync(new File(quarantineDirectory(), `${RECOVERED_PREFIX}${scope.userId}-${key}`), { overwrite: false });
+    return Promise.resolve("recovered" as const);
+  });
 }

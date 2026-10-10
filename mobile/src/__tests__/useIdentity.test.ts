@@ -12,7 +12,7 @@
  *   DECLARATION a company's timesheet is stored with the version the driver
  *               declared; any later change means it must be declared again.
  */
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import {
   COMPLETED_SHIFT_FILE_PREFIX,
   OPEN_SHIFT_FILE,
@@ -51,6 +51,10 @@ import { TRAILER_TYPE } from "../shift/trailer";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { USE_ENDED_BY } from "../shift/useEnd";
 import { DECLARED_BY, correctDeclared, correctedVersion, declaredFinish, finishDeclared } from "./declared";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
 const iso = (hours: number, minutes = 0) => at(hours, minutes).toISOString();
@@ -62,45 +66,45 @@ const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 AAA", star
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 const RF77 = { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated };
 
-const openFile = () => new File(Paths.document, OPEN_SHIFT_FILE);
+const openFile = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
 const openBytes = () => openFile().textSync();
-const recordFile = (id: string) => new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`);
+const recordFile = (id: string) => new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`);
 const recordBytes = (id: string) => recordFile(id).textSync();
 const rawOpen = (): Record<string, unknown> => JSON.parse(openBytes()) as Record<string, unknown>;
 
 beforeEach(async () => {
-  await clearOpenShift();
-  for (const entry of new Directory(Paths.document).list()) {
+  await clearOpenShift(SCOPE);
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File) entry.delete();
   }
 });
 afterEach(() => { jest.restoreAllMocks(); });
 
 async function open(): Promise<LocalShift> {
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   if (day === null) throw new Error("expected an open day");
   return day;
 }
 
 /** AB12 CDE 05:00–09:00 → XY34 ZZZ 09:00– (in use); TR23 06:00–12:00 → RF77 12:00– (in use). */
 async function changedDay(workingFor: WorkingContext = PERSONAL): Promise<LocalShift> {
-  const shift = await startLocalShift({ workingFor, startedAt: at(5), vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(6) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
-  await changeTrailer({ shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: RF77, changedAt: at(12) });
+  const shift = await startLocalShift(SCOPE, { workingFor, startedAt: at(5), vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: RF77, changedAt: at(12) });
   return open();
 }
 
 /** AB12 CDE 05:00–09:00 → XY34 ZZZ 09:00– (in use); no trailer to tow. */
 async function vehicleDay(): Promise<LocalShift> {
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
   return open();
 }
 
 async function finished(workingFor: WorkingContext = PERSONAL): Promise<CompletedShift> {
   const day = await changedDay(workingFor);
-  const done = await finishDeclared({
+  const done = await finishDeclared(SCOPE, {
     shiftId: day.id, vehicleUseId: day.vehicle?.useId ?? null, trailerUseId: day.trailer?.useId ?? null,
     finalMileage: 220_200, endedAt: at(17), nightOut: false, notes: "",
   });
@@ -133,15 +137,15 @@ describe("a use's identity", () => {
   });
 
   test("the SAME plate taken twice is two uses with two ids — a write to the second never reaches the first", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-    await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
-    await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(11) });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+    await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: RIGID, changedAt: at(9) });
+    await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(11) });
     const day = await open();
     const [first] = day.previousVehicles;
     expect(first?.numberPlate).toBe(day.vehicle?.numberPlate);
     expect(first?.useId).not.toBe(day.vehicle?.useId);
 
-    await recordVehicleFill({
+    await recordVehicleFill(SCOPE, {
       shiftId: shift.id, vehicleUseId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse,
       fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 50, note: "",
     });
@@ -152,14 +156,14 @@ describe("a use's identity", () => {
   });
 
   test("the SAME trailer number taken twice is two uses with two ids", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-    await addTrailerToOpenShift({ shiftId: shift.id, trailer: RF77, startedAt: at(6) });
-    await changeTrailer({ shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: TR23, changedAt: at(8) });
-    await changeTrailer({ shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: RF77, changedAt: at(10) });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+    await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: RF77, startedAt: at(6) });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: TR23, changedAt: at(8) });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: RF77, changedAt: at(10) });
     const day = await open();
     const [first] = day.previousTrailers;
 
-    await recordReeferDiesel({ shiftId: shift.id, trailerUseId: day.trailer?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: "d1", recordedAt: at(11), litres: 40, note: "" });
+    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: day.trailer?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: "d1", recordedAt: at(11), litres: 40, note: "" });
 
     expect(first?.trailerNumber).toBe(day.trailer?.trailerNumber);
     expect(first?.useId).not.toBe(day.trailer?.useId);
@@ -172,8 +176,8 @@ describe("a use's identity", () => {
     const vehicleId = day.previousVehicles[0]?.useId ?? "";
     const trailerId = day.previousTrailers[0]?.useId ?? "";
 
-    await correctNumberPlate({ shiftId: day.id, useId: vehicleId, usageState: USAGE_STATE.ended, value: "AB12 CDF" });
-    await correctTrailerNumber({ shiftId: day.id, useId: trailerId, usageState: USAGE_STATE.ended, value: "TR24" });
+    await correctNumberPlate(SCOPE, { shiftId: day.id, useId: vehicleId, usageState: USAGE_STATE.ended, value: "AB12 CDF" });
+    await correctTrailerNumber(SCOPE, { shiftId: day.id, useId: trailerId, usageState: USAGE_STATE.ended, value: "TR24" });
 
     const after = await open();
     expect(after.previousVehicles[0]).toMatchObject({ useId: vehicleId, numberPlate: "AB12 CDF" });
@@ -185,9 +189,9 @@ describe("a use's identity", () => {
     const current = day.vehicle;
     if (current === null) throw new Error("expected a vehicle");
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: current.useId, usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: current.useId, usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null });
     // The id still names it; its old start names nothing.
-    await recordVehicleFill({
+    await recordVehicleFill(SCOPE, {
       shiftId: day.id, vehicleUseId: current.useId, usageState: USAGE_STATE.inUse,
       fillId: "f1", type: FILL_TYPE.adblue, recordedAt: at(10), litres: null, note: "",
     });
@@ -202,7 +206,7 @@ describe("a use's identity", () => {
     const ids = [...day.previousVehicles, day.vehicle].map(use => use?.useId);
     const trailerIds = [...day.previousTrailers, day.trailer].map(use => use?.useId);
 
-    const done = await finishDeclared({
+    const done = await finishDeclared(SCOPE, {
       shiftId: day.id, vehicleUseId: day.vehicle?.useId ?? null, trailerUseId: day.trailer?.useId ?? null,
       finalMileage: 220_200, endedAt: at(17), nightOut: false, notes: "",
     });
@@ -216,7 +220,7 @@ describe("a use's identity", () => {
     for (const bad of ["", "x".repeat(65), 42]) {
       const raw = rawOpen();
       openFile().write(JSON.stringify({ ...raw, vehicle: { ...(raw["vehicle"] as Record<string, unknown>), useId: bad } }));
-      expect(await readOpenShift()).toBeNull();
+      expect(await readOpenShift(SCOPE)).toBeNull();
     }
     expect(day.id).not.toBe("");
   });
@@ -228,13 +232,14 @@ describe("a use's identity", () => {
     const current = raw["vehicle"] as Record<string, unknown>;
     openFile().write(JSON.stringify({ ...raw, vehicle: { ...current, useId: first?.["useId"] } }));
 
-    expect(await readOpenShift()).toBeNull();
+    expect(await readOpenShift(SCOPE)).toBeNull();
   });
 });
 
 describe("a use stored before ids existed", () => {
   function storeLegacyDay(): string {
     const document = {
+      ownerUserId: SCOPE.userId,
       id: "11111111-2222-4333-8444-555555555555", workingFor: PERSONAL, startedAt: iso(5),
       vehicle: { ...RIGID, startedAt: iso(9), checks: [], fills: [] },
       previousVehicles: [{ ...UNIT, startedAt: iso(5), checks: [], fills: [], endMileage: 100_100, endedAt: iso(9) }],
@@ -265,11 +270,11 @@ describe("a use stored before ids existed", () => {
     const day = await open();
     const legacy = day.previousVehicles[0]?.useId ?? "";
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: legacy, usageState: USAGE_STATE.ended, startedAt: at(5, 15), endedAt: at(9) });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: legacy, usageState: USAGE_STATE.ended, startedAt: at(5, 15), endedAt: at(9) });
     // The start the id was derived from has moved; the id has not — and every other use's id is written out too.
     expect((rawOpen()["previousVehicles"] as unknown[])[0]).toMatchObject({ useId: legacy, startedAt: iso(5, 15) });
     expect(rawOpen()["vehicle"]).toMatchObject({ useId: `legacy-vehicle-${iso(9)}` });
-    await recordVehicleFill({ shiftId: day.id, vehicleUseId: legacy, usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 5, note: "" });
+    await recordVehicleFill(SCOPE, { shiftId: day.id, vehicleUseId: legacy, usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 5, note: "" });
 
     expect((await open()).previousVehicles[0]).toMatchObject({ useId: legacy, startedAt: iso(5, 15), fills: [expect.objectContaining({ id: "f" })] });
   });
@@ -285,7 +290,7 @@ describe("correcting a vehicle use's times", () => {
     const target = day.previousVehicles[0];
     if (target === undefined) throw new Error("expected an ended use");
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: target.useId, usageState: USAGE_STATE.ended, startedAt: at(5, 10), endedAt: at(8, 45) });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: target.useId, usageState: USAGE_STATE.ended, startedAt: at(5, 10), endedAt: at(8, 45) });
 
     const after = await open();
     expect(after.previousVehicles[0]).toEqual({ ...target, startedAt: iso(5, 10), endedAt: iso(8, 45) });
@@ -296,7 +301,7 @@ describe("correcting a vehicle use's times", () => {
     const day = await changedDay();
     const before = openBytes();
 
-    await expect(correctVehicleUseTimes({ shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9), endedAt: at(10) }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9), endedAt: at(10) }))
       .rejects.toThrow("Refusing an end for a use still in use");
     expect(openBytes()).toBe(before);
   });
@@ -309,7 +314,7 @@ describe("correcting a vehicle use's times", () => {
     const day = await changedDay();
     const before = openBytes();
 
-    const refused = correctVehicleUseTimes({ shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, ...times });
+    const refused = correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, ...times });
 
     await expect(refused).rejects.toBeInstanceOf(UseTimesError);
     await expect(refused).rejects.toMatchObject({ problem: { kind } });
@@ -320,7 +325,7 @@ describe("correcting a vehicle use's times", () => {
     const day = await changedDay();
     const before = openBytes();
 
-    await expect(correctVehicleUseTimes({ shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(9), endedAt: at(9) }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(9), endedAt: at(9) }))
       .rejects.toMatchObject({ problem: { kind: "overlaps" } });
     expect(openBytes()).toBe(before);
   });
@@ -328,7 +333,7 @@ describe("correcting a vehicle use's times", () => {
   test("a change leaves the gap it makes: A's end earlier never moves B's start (D32)", async () => {
     const day = await vehicleDay();
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(8, 30) });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(8, 30) });
 
     const after = await open();
     expect(after.previousVehicles[0]?.endedAt).toBe(iso(8, 30));
@@ -340,17 +345,17 @@ describe("correcting a vehicle use's times", () => {
     const before = openBytes();
 
     // TR23 06:00–12:00 is towed by AB12 until 09:00 and by XY34 from 09:00: a gap would strand it.
-    await expect(correctVehicleUseTimes({ shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null }))
       .rejects.toMatchObject({ problem: { kind: "trailer-untowed", name: "trailer TR23" } });
     expect(openBytes()).toBe(before);
   });
 
   test("with no trailer at stake, B's start later is corrected alone — A's end stays", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-    await changeVehicle({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: VAN, changedAt: at(9) });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+    await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 100_100, next: VAN, changedAt: at(9) });
     const day = await open();
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 30), endedAt: null });
 
     const after = await open();
     expect(after.previousVehicles[0]?.endedAt).toBe(iso(9));
@@ -358,18 +363,18 @@ describe("correcting a vehicle use's times", () => {
   });
 
   test("No Vehicle, then a vehicle added later: the gap is real, and either side is corrected without moving the other", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: VAN });
-    await endVehicleUse({ shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 5_100, endedAt: at(9) });
-    await addVehicleToOpenShift({ vehicle: UNIT, startedAt: at(11) });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: VAN });
+    await endVehicleUse(SCOPE, { shiftId: shift.id, endingUseId: (await open()).vehicle?.useId ?? "", endMileage: 5_100, endedAt: at(9) });
+    await addVehicleToOpenShift(SCOPE, { vehicle: UNIT, startedAt: at(11) });
     const day = await open();
 
-    await correctVehicleUseTimes({ shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(10) });
-    await correctVehicleUseTimes({ shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(10, 30), endedAt: null });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(10) });
+    await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(10, 30), endedAt: null });
 
     const after = await open();
     expect(after.previousVehicles[0]).toMatchObject({ startedAt: iso(5), endedAt: iso(10) });
     expect(after.vehicle).toMatchObject({ startedAt: iso(10, 30) });
-    await expect(correctVehicleUseTimes({ shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 59), endedAt: null }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, startedAt: at(9, 59), endedAt: null }))
       .rejects.toMatchObject({ problem: { kind: "overlaps" } });
   });
 
@@ -384,7 +389,7 @@ describe("correcting a vehicle use's times", () => {
       [ended?.numberPlate ?? "", USAGE_STATE.ended],
       ["", USAGE_STATE.ended],
     ] as const) {
-      expect(await correctVehicleUseTimes({ shiftId: day.id, useId, usageState: state, startedAt: at(5, 5), endedAt: state === USAGE_STATE.inUse ? null : at(8) })).toBeNull();
+      expect(await correctVehicleUseTimes(SCOPE, { shiftId: day.id, useId, usageState: state, startedAt: at(5, 5), endedAt: state === USAGE_STATE.inUse ? null : at(8) })).toBeNull();
     }
     expect(openBytes()).toBe(before);
   });
@@ -396,7 +401,7 @@ describe("correcting a trailer use's times", () => {
     const target = day.previousTrailers[0];
     if (target === undefined) throw new Error("expected an ended trailer");
 
-    await correctTrailerUseTimes({ shiftId: day.id, useId: target.useId, usageState: USAGE_STATE.ended, startedAt: at(6, 15), endedAt: at(11, 30) });
+    await correctTrailerUseTimes(SCOPE, { shiftId: day.id, useId: target.useId, usageState: USAGE_STATE.ended, startedAt: at(6, 15), endedAt: at(11, 30) });
 
     const after = await open();
     expect(after.previousTrailers[0]).toEqual({ ...target, startedAt: iso(6, 15), endedAt: iso(11, 30) });
@@ -408,20 +413,20 @@ describe("correcting a trailer use's times", () => {
     const id = day.previousTrailers[0]?.useId ?? "";
     const before = openBytes();
 
-    await expect(correctTrailerUseTimes({ shiftId: day.id, useId: id, usageState: USAGE_STATE.ended, startedAt: at(6), endedAt: at(12, 1) }))
+    await expect(correctTrailerUseTimes(SCOPE, { shiftId: day.id, useId: id, usageState: USAGE_STATE.ended, startedAt: at(6), endedAt: at(12, 1) }))
       .rejects.toMatchObject({ problem: { kind: "overlaps", name: "trailer RF77" } });
-    await expect(correctTrailerUseTimes({ shiftId: day.id, useId: id, usageState: USAGE_STATE.ended, startedAt: at(4, 30), endedAt: at(12) }))
+    await expect(correctTrailerUseTimes(SCOPE, { shiftId: day.id, useId: id, usageState: USAGE_STATE.ended, startedAt: at(4, 30), endedAt: at(12) }))
       .rejects.toMatchObject({ problem: { kind: "before-shift-start" } });
     expect(openBytes()).toBe(before);
   });
 
   test("No Trailer: the trailer handed back keeps its own end, corrected alone", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
-    await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(6) });
-    await changeTrailer({ shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: null, changedAt: at(10) });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
+    await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(6) });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: (await open()).trailer?.useId ?? "", next: null, changedAt: at(10) });
     const day = await open();
 
-    await correctTrailerUseTimes({ shiftId: day.id, useId: day.previousTrailers[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(6), endedAt: at(9, 45) });
+    await correctTrailerUseTimes(SCOPE, { shiftId: day.id, useId: day.previousTrailers[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(6), endedAt: at(9, 45) });
 
     expect((await open()).previousTrailers[0]).toMatchObject({ startedAt: iso(6), endedAt: iso(9, 45) });
     expect((await open()).trailer).toBeNull();
@@ -432,7 +437,7 @@ describe("the shift and its first use", () => {
   test("a shift may start before its first use: correcting the start EARLIER moves no use", async () => {
     const day = await changedDay();
 
-    await correctOpenShift({ shiftId: day.id, workingFor: PERSONAL, startedAt: at(4, 30) });
+    await correctOpenShift(SCOPE, { shiftId: day.id, workingFor: PERSONAL, startedAt: at(4, 30) });
 
     const after = await open();
     expect(after.startedAt).toBe(iso(4, 30));
@@ -444,15 +449,15 @@ describe("the shift and its first use", () => {
     const day = await changedDay();
     const before = openBytes();
 
-    await expect(correctOpenShift({ shiftId: day.id, workingFor: PERSONAL, startedAt: at(5, 30) })).rejects.toBeInstanceOf(TimesheetBoundsError);
+    await expect(correctOpenShift(SCOPE, { shiftId: day.id, workingFor: PERSONAL, startedAt: at(5, 30) })).rejects.toBeInstanceOf(TimesheetBoundsError);
     expect(openBytes()).toBe(before);
   });
 
   test("the first vehicle's start may then be corrected later than the shift's", async () => {
-    const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: at(5), vehicle: VAN });
+    const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: VAN });
     const id = (await open()).vehicle?.useId ?? "";
 
-    await correctVehicleUseTimes({ shiftId: shift.id, useId: id, usageState: USAGE_STATE.inUse, startedAt: at(5, 20), endedAt: null });
+    await correctVehicleUseTimes(SCOPE, { shiftId: shift.id, useId: id, usageState: USAGE_STATE.inUse, startedAt: at(5, 20), endedAt: null });
 
     const after = await open();
     expect(after.startedAt).toBe(iso(5));
@@ -466,13 +471,13 @@ describe("a finished day's use times", () => {
     const closed = done.previousTrailers[1];
     expect(closed?.endedBy).toBe(USE_ENDED_BY.finish);
 
-    await correctTrailerUseTimes({ shiftId: done.id, useId: closed?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(12), endedAt: at(16, 30) });
+    await correctTrailerUseTimes(SCOPE, { shiftId: done.id, useId: closed?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(12), endedAt: at(16, 30) });
 
-    const stored = await readCompletedShift(done.id);
+    const stored = await readCompletedShift(SCOPE, done.id);
     expect(stored?.previousTrailers[1]).toEqual({ ...closed, endedAt: iso(16, 30), endedBy: undefined });
     expect(Object.keys(stored?.previousTrailers[1] ?? {})).not.toContain("endedBy");
     // A later finish correction no longer moves it; the vehicle the finish ended still follows.
-    const later = await correctDeclared({
+    const later = await correctDeclared(SCOPE, {
       shiftId: done.id, basedOn: null, correctionId: "c1", workingFor: PERSONAL, startedAt: at(5), endedAt: at(17, 30),
       nightOut: false, notes: "", correctedAt: at(18), correctedBy: DECLARED_BY,
     });
@@ -486,16 +491,16 @@ describe("a finished day's use times", () => {
     const done = await finished();
     const closed = done.previousTrailers[1];
 
-    await correctTrailerUseTimes({ shiftId: done.id, useId: closed?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(12, 5), endedAt: at(17) });
+    await correctTrailerUseTimes(SCOPE, { shiftId: done.id, useId: closed?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(12, 5), endedAt: at(17) });
 
-    expect((await readCompletedShift(done.id))?.previousTrailers[1]).toEqual({ ...closed, startedAt: iso(12, 5) });
+    expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[1]).toEqual({ ...closed, startedAt: iso(12, 5) });
   });
 
   test("a vehicle the finish ended cannot have its end corrected so as to strand the trailer it towed", async () => {
     const done = await finished();
     const before = recordBytes(done.id);
 
-    await expect(correctVehicleUseTimes({ shiftId: done.id, useId: done.previousVehicles[1]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(9), endedAt: at(16, 30) }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: done.id, useId: done.previousVehicles[1]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(9), endedAt: at(16, 30) }))
       .rejects.toMatchObject({ problem: { kind: "trailer-untowed", name: "trailer RF77" } });
     expect(recordBytes(done.id)).toBe(before);
   });
@@ -504,7 +509,7 @@ describe("a finished day's use times", () => {
     const done = await finished();
     const before = recordBytes(done.id);
 
-    await expect(correctVehicleUseTimes({ shiftId: done.id, useId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(17, 1) }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: done.id, useId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5), endedAt: at(17, 1) }))
       .rejects.toMatchObject({ problem: { kind: "after-shift-finish" } });
     expect(recordBytes(done.id)).toBe(before);
   });
@@ -526,7 +531,7 @@ describe("a company's declaration", () => {
     const day = await changedDay(NORTHGATE);
     const before = openBytes();
 
-    await expect(finishOpenShift({
+    await expect(finishOpenShift(SCOPE, {
       shiftId: day.id, vehicleUseId: day.vehicle?.useId ?? null, trailerUseId: day.trailer?.useId ?? null,
       finalMileage: 220_200, endedAt: at(17), nightOut: false, notes: "", declared: null,
     })).rejects.toThrow("without its declaration");
@@ -536,14 +541,14 @@ describe("a company's declaration", () => {
 
   test("a declaration of a version the store would NOT file files nothing", async () => {
     const day = await changedDay(NORTHGATE);
-    const finish = await declaredFinish({
+    const finish = await declaredFinish(SCOPE, {
       shiftId: day.id, vehicleUseId: day.vehicle?.useId ?? null, trailerUseId: day.trailer?.useId ?? null,
       finalMileage: 220_200, endedAt: at(17), nightOut: false, notes: "",
     });
 
-    expect(await finishOpenShift({ ...finish, notes: "typed after the review" })).toBeNull();
+    expect(await finishOpenShift(SCOPE, { ...finish, notes: "typed after the review" })).toBeNull();
     expect(recordFile(day.id).exists).toBe(false);
-    expect(await readOpenShift()).not.toBeNull();
+    expect(await readOpenShift(SCOPE)).not.toBeNull();
   });
 
   test("a Personal day carries none, whatever is sent", async () => {
@@ -555,12 +560,12 @@ describe("a company's declaration", () => {
   test("a use's fill, mileage, check or time changed on a company's day: the declaration no longer holds", async () => {
     const done = await finished(NORTHGATE);
 
-    await recordVehicleFill({
+    await recordVehicleFill(SCOPE, {
       shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
       fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
     });
 
-    const changed = await readCompletedShift(done.id);
+    const changed = await readCompletedShift(SCOPE, done.id);
     if (changed === null) throw new Error("expected the day");
     expect(changed.declaration).toEqual(done.declaration);
     expect(declarationHolds(changed)).toBe(false);
@@ -568,11 +573,11 @@ describe("a company's declaration", () => {
 
   test("declared again with nothing changed: the declaration is renewed and NO correction is appended", async () => {
     const done = await finished(NORTHGATE);
-    await correctVehicleUseTimes({ shiftId: done.id, useId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5, 5), endedAt: at(9) });
-    const changed = await readCompletedShift(done.id);
+    await correctVehicleUseTimes(SCOPE, { shiftId: done.id, useId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended, startedAt: at(5, 5), endedAt: at(9) });
+    const changed = await readCompletedShift(SCOPE, done.id);
     if (changed === null) throw new Error("expected the day");
 
-    const redeclared = await correctDeclared({
+    const redeclared = await correctDeclared(SCOPE, {
       shiftId: done.id, basedOn: null, correctionId: "r1", workingFor: NORTHGATE, startedAt: at(5), endedAt: at(17),
       nightOut: false, notes: "", correctedAt: at(18), correctedBy: DECLARED_BY,
     });
@@ -592,7 +597,7 @@ describe("a company's declaration", () => {
     const done = await finished(NORTHGATE);
     const before = recordBytes(done.id);
 
-    await expect(correctCompletedShift({
+    await expect(correctCompletedShift(SCOPE, {
       shiftId: done.id, basedOn: null, correctionId: "c1", workingFor: NORTHGATE, startedAt: at(5), endedAt: at(17),
       nightOut: false, notes: "", correctedAt: at(18), correctedBy: DECLARED_BY, ...change, declared: null,
     })).rejects.toThrow("without its declaration");
@@ -602,7 +607,7 @@ describe("a company's declaration", () => {
   test("a company's day made Personal, declared, drops the declaration — a Personal day carries none", async () => {
     const done = await finished(NORTHGATE);
 
-    const personal = await correctDeclared({
+    const personal = await correctDeclared(SCOPE, {
       shiftId: done.id, basedOn: null, correctionId: "c1", workingFor: PERSONAL, startedAt: at(5), endedAt: at(17),
       nightOut: false, notes: "", correctedAt: at(18), correctedBy: DECLARED_BY,
     });
@@ -615,10 +620,10 @@ describe("a company's declaration", () => {
     const done = await finished(PERSONAL);
     const base = { shiftId: done.id, basedOn: null, startedAt: at(5), endedAt: at(17), nightOut: false, correctedAt: at(18), correctedBy: DECLARED_BY };
 
-    const noted = await correctCompletedShift({ ...base, correctionId: "c1", workingFor: PERSONAL, notes: "Quiet day", declared: null });
+    const noted = await correctCompletedShift(SCOPE, { ...base, correctionId: "c1", workingFor: PERSONAL, notes: "Quiet day", declared: null });
     expect(noted?.corrections).toHaveLength(1);
     const before = recordBytes(done.id);
-    await expect(correctCompletedShift({ ...base, basedOn: "c1", correctionId: "c2", workingFor: NORTHGATE, notes: "Quiet day", declared: null }))
+    await expect(correctCompletedShift(SCOPE, { ...base, basedOn: "c1", correctionId: "c2", workingFor: NORTHGATE, notes: "Quiet day", declared: null }))
       .rejects.toThrow("without its declaration");
     expect(recordBytes(done.id)).toBe(before);
   });
@@ -632,7 +637,7 @@ describe("a company's declaration", () => {
     };
     const shown = correctedVersion(done, { ...input, notes: "What the review showed" });
 
-    expect(await correctCompletedShift({ ...input, declared: { at: at(18), by: DECLARED_BY, version: shown } })).toBeNull();
+    expect(await correctCompletedShift(SCOPE, { ...input, declared: { at: at(18), by: DECLARED_BY, version: shown } })).toBeNull();
     expect(recordBytes(done.id)).toBe(before);
   });
 
@@ -640,12 +645,12 @@ describe("a company's declaration", () => {
     const done = await finished(NORTHGATE);
     expect(declarationState(done)).toBe("confirmed");
 
-    await recordVehicleFill({
+    await recordVehicleFill(SCOPE, {
       shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
       fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
     });
 
-    const changed = await readCompletedShift(done.id);
+    const changed = await readCompletedShift(SCOPE, done.id);
     if (changed === null) throw new Error("expected the day");
     expect(declarationState(changed)).toBe("changed");
   });
@@ -668,7 +673,7 @@ describe("a company's timesheet with no valid declaration", () => {
   test("NONE recorded — a day finished before declarations were stored — reads, needs confirmation, and is not rewritten", async () => {
     const { done, bytes } = await storedWith(undefined);
 
-    const read = await readCompletedShift(done.id);
+    const read = await readCompletedShift(SCOPE, done.id);
 
     expect(read).not.toBeNull();
     expect(read?.declaration).toBeUndefined();
@@ -689,31 +694,31 @@ describe("a company's timesheet with no valid declaration", () => {
   ])("DAMAGED — %s — the day still reads, the declaration is not trusted in any part, nothing is made up, and reading writes nothing", async (_why, damage) => {
     const probe = await finished(NORTHGATE);
     const valid = { ...(probe.declaration ?? {}) } as Record<string, unknown>;
-    await clearOpenShift();
+    await clearOpenShift(SCOPE);
     recordFile(probe.id).delete();
     const { done, bytes } = await storedWith(damage(valid));
 
-    const read = await readCompletedShift(done.id);
+    const read = await readCompletedShift(SCOPE, done.id);
 
     expect(read).not.toBeNull();
     expect(read?.declaration).toBeUndefined();
     expect(read === null ? null : declarationState(read)).toBe("unconfirmed");
     expect(recordBytes(done.id)).toBe(bytes);
     // Listed as the driver's timesheet — not set aside as unreadable.
-    const listed = await listCompletedShifts();
+    const listed = await listCompletedShifts(SCOPE);
     expect(listed.timesheets.map(day => day.id)).toEqual([done.id]);
     expect(listed.unreadable).toBe(0);
   });
 
   test("damaged declaration or not, a damaged FACT still fails closed", async () => {
     const { done } = await storedWith({ version: "", declaredAt: "yesterday", declaredBy: "" }, { nightOut: "yes" });
-    expect(await readCompletedShift(done.id)).toBeNull();
-    await clearOpenShift();
+    expect(await readCompletedShift(SCOPE, done.id)).toBeNull();
+    await clearOpenShift(SCOPE);
     recordFile(done.id).delete();
     const withValid = await finished(NORTHGATE);
     const raw = JSON.parse(recordBytes(withValid.id)) as Record<string, unknown>;
     recordFile(withValid.id).write(JSON.stringify({ ...raw, endedAt: "not a time" }));
-    expect(await readCompletedShift(withValid.id)).toBeNull();
+    expect(await readCompletedShift(SCOPE, withValid.id)).toBeNull();
   });
 
   test("a Personal day with a damaged declaration needs none", async () => {
@@ -721,7 +726,7 @@ describe("a company's timesheet with no valid declaration", () => {
     const raw = JSON.parse(recordBytes(done.id)) as Record<string, unknown>;
     recordFile(done.id).write(JSON.stringify({ ...raw, declaration: { version: "" } }));
 
-    const read = await readCompletedShift(done.id);
+    const read = await readCompletedShift(SCOPE, done.id);
     expect(read === null ? null : declarationState(read)).toBe("not-required");
   });
 
@@ -729,10 +734,10 @@ describe("a company's timesheet with no valid declaration", () => {
     "%s: Review and Confirm records a VALID declaration of the current version — and changes no fact, no use, no correction",
     async (_why, declaration) => {
       const { done } = await storedWith(declaration);
-      const before = await readCompletedShift(done.id);
+      const before = await readCompletedShift(SCOPE, done.id);
       if (before === null) throw new Error("expected the day");
 
-      const confirmed = await correctDeclared({
+      const confirmed = await correctDeclared(SCOPE, {
         shiftId: done.id, basedOn: null, correctionId: "r1", workingFor: NORTHGATE, startedAt: at(5), endedAt: at(17),
         nightOut: false, notes: "", correctedAt: at(18), correctedBy: DECLARED_BY,
       });
@@ -755,6 +760,7 @@ describe("a day that already holds a trailer without a towing vehicle", () => {
   /** TR23 06:00–10:00 towed only 06:00–07:00 (AB12 05:00–07:00, XY34 from 08:00); RF77 in use from 11:00. */
   function storeGapDay(): string {
     const document = {
+      ownerUserId: SCOPE.userId,
       id: "11111111-2222-4333-8444-555555555555", workingFor: PERSONAL, startedAt: iso(5),
       vehicle: { ...RIGID, useId: "v-xy34", startedAt: iso(8), checks: [], fills: [] },
       previousVehicles: [{ ...UNIT, useId: "v-ab12", startedAt: iso(5), checks: [], fills: [], endMileage: 100_100, endedAt: iso(7) }],
@@ -770,7 +776,7 @@ describe("a day that already holds a trailer without a towing vehicle", () => {
   test("stays readable, exactly as stored — the stronger rule does not reach back", async () => {
     const bytes = storeGapDay();
 
-    const day = await readOpenShift();
+    const day = await readOpenShift(SCOPE);
 
     expect(day?.previousTrailers[0]).toMatchObject({ useId: "t-tr23", startedAt: iso(6), endedAt: iso(10) });
     expect(openBytes()).toBe(bytes);
@@ -779,7 +785,7 @@ describe("a day that already holds a trailer without a towing vehicle", () => {
   test("a correction that leaves the OLD gap as it was is allowed", async () => {
     storeGapDay();
 
-    await correctVehicleUseTimes({ shiftId: "11111111-2222-4333-8444-555555555555", useId: "v-xy34", usageState: USAGE_STATE.inUse, startedAt: at(8, 10), endedAt: null });
+    await correctVehicleUseTimes(SCOPE, { shiftId: "11111111-2222-4333-8444-555555555555", useId: "v-xy34", usageState: USAGE_STATE.inUse, startedAt: at(8, 10), endedAt: null });
 
     expect((await open()).vehicle?.startedAt).toBe(iso(8, 10));
   });
@@ -787,7 +793,7 @@ describe("a day that already holds a trailer without a towing vehicle", () => {
   test("a correction that would make a NEW gap is refused, writing nothing", async () => {
     const bytes = storeGapDay();
 
-    await expect(correctVehicleUseTimes({ shiftId: "11111111-2222-4333-8444-555555555555", useId: "v-xy34", usageState: USAGE_STATE.inUse, startedAt: at(11, 30), endedAt: null }))
+    await expect(correctVehicleUseTimes(SCOPE, { shiftId: "11111111-2222-4333-8444-555555555555", useId: "v-xy34", usageState: USAGE_STATE.inUse, startedAt: at(11, 30), endedAt: null }))
       .rejects.toMatchObject({ problem: { kind: "trailer-untowed", name: "trailer RF77" } });
     expect(openBytes()).toBe(bytes);
   });
@@ -799,11 +805,11 @@ describe("a day that already holds a trailer without a towing vehicle", () => {
 
 test("a use's time ahead of the device clock is not refused for that alone", async () => {
   const now = new Date();
-  const shift = await startLocalShift({ workingFor: PERSONAL, startedAt: now, vehicle: VAN });
+  const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: now, vehicle: VAN });
   const id = (await open()).vehicle?.useId ?? "";
   const ahead = new Date(now.getTime() + 2 * 3_600_000);
 
-  await correctVehicleUseTimes({ shiftId: shift.id, useId: id, usageState: USAGE_STATE.inUse, startedAt: ahead, endedAt: null });
+  await correctVehicleUseTimes(SCOPE, { shiftId: shift.id, useId: id, usageState: USAGE_STATE.inUse, startedAt: ahead, endedAt: null });
 
   expect((await open()).vehicle?.startedAt).toBe(ahead.toISOString());
 });

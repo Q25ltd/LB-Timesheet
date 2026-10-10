@@ -34,17 +34,23 @@ import {
 } from "../../src/shift/localShift";
 import { usedThisShift } from "../../src/shift/usedVehicles";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function ChangeVehicleRoute() {
+  const scope = useAccountScope();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []);
+  }, [scope]);
 
   // Reading the phone's own shift file — not signing anyone in.
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href="/today" />;
   if (shift.vehicle === null) return <Redirect href="/active-shift" />;
@@ -56,7 +62,7 @@ export default function ChangeVehicleRoute() {
       candidates={usedThisShift(shift)}
       trailerInUse={shift.trailer?.trailerNumber ?? null}
       onLeave={() => { router.back(); }}
-      onConfirm={change => confirm(shift, current, change)}
+      onConfirm={change => confirm(scope, shift, current, change)}
     />
   );
 }
@@ -69,19 +75,19 @@ export default function ChangeVehicleRoute() {
  * moment only ends one: nothing begins, and a vehicle added later starts its
  * own use then (`endVehicleUse`).
  */
-async function confirm(shift: LocalShift, current: LocalVehicle, change: VehicleChange): Promise<void> {
+async function confirm(scope: AccountScope, shift: LocalShift, current: LocalVehicle, change: VehicleChange): Promise<void> {
   const noun = current.vehicleClass === "class1" ? "unit" : "vehicle";
   const next = change.next;
   const at = new Date();
   try {
     const day = next === null
-      ? await endVehicleUse({
+      ? await endVehicleUse(scope, {
           shiftId: shift.id,
           endingUseId: current.useId,
           endMileage: change.endMileage,
           endedAt: at,
         })
-      : await changeVehicle({
+      : await changeVehicle(scope, {
           shiftId: shift.id,
           endingUseId: current.useId,
           endMileage: change.endMileage,

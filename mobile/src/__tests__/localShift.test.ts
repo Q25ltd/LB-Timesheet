@@ -22,10 +22,14 @@
  * gives a genuine create/write/read round trip — a module rebuilt from scratch
  * reads back what an earlier one wrote, which is what an app restart is.
  */
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { addVehicleToOpenShift, clearOpenShift, readOpenShift, startLocalShift, OPEN_SHIFT_FILE } from "../shift/localShift";
 import type { VehicleDetails, WorkingContext } from "../shift/localShift";
 import { ANY_USE_ID } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const PERSONAL: WorkingContext = { kind: "personal" };
 const NORTHGATE: WorkingContext = {
@@ -41,40 +45,40 @@ const LORRY: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB24 XYZ",
 const STARTED_AT = new Date(2026, 8, 13, 5, 45);
 
 function storedFile(): File {
-  return new File(Paths.document, OPEN_SHIFT_FILE);
+  return new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
 }
 
-beforeEach(async () => { await clearOpenShift(); });
+beforeEach(async () => { await clearOpenShift(SCOPE); });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Starting a day
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("no shift is open on a fresh device", async () => {
-  await expect(readOpenShift()).resolves.toBeNull();
+  await expect(readOpenShift(SCOPE)).resolves.toBeNull();
 });
 
 test("starting a shift persists it, and it reads back identically", async () => {
-  const started = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const started = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
-  const recovered = await readOpenShift();
+  const recovered = await readOpenShift(SCOPE);
   expect(recovered).toEqual(started);
   expect(recovered?.status).toBe("open");
   expect(recovered?.startedAt).toBe(STARTED_AT.toISOString());
 });
 
 test("a shift started with NO vehicle persists no vehicle at all", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
-  const recovered = await readOpenShift();
+  const recovered = await readOpenShift(SCOPE);
   // Not an empty object, not a placeholder plate, not a zero mileage: null.
   expect(recovered?.vehicle).toBeNull();
 });
 
 test("a shift started WITH a vehicle persists exactly what the driver entered", async () => {
-  await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
+  await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
 
-  const recovered = await readOpenShift();
+  const recovered = await readOpenShift(SCOPE);
   // A vehicle given at Start Shift began its use when the day did — the SAME
   // instant as the shift's declared start, not a second clock reading.
   expect(recovered?.vehicle).toEqual({ ...LORRY, useId: ANY_USE_ID, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
@@ -83,19 +87,19 @@ test("a shift started WITH a vehicle persists exactly what the driver entered", 
 });
 
 test("the intended company is carried, and Personal is carried as itself", async () => {
-  await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
-  expect((await readOpenShift())?.workingFor).toEqual(NORTHGATE);
+  await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  expect((await readOpenShift(SCOPE))?.workingFor).toEqual(NORTHGATE);
 
-  await clearOpenShift();
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await clearOpenShift(SCOPE);
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
   // No invented company stands in for Personal (D27, D21).
-  expect((await readOpenShift())?.workingFor).toEqual({ kind: "personal" });
+  expect((await readOpenShift(SCOPE))?.workingFor).toEqual({ kind: "personal" });
 });
 
 test("every shift gets its own stable identifier", async () => {
-  const first = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
-  await clearOpenShift();
-  const second = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const first = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await clearOpenShift(SCOPE);
+  const second = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
   expect(first.id).not.toBe(second.id);
   expect(first.id).toHaveLength(36);
@@ -106,37 +110,37 @@ test("every shift gets its own stable identifier", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("pressing start twice returns the SAME shift — no duplicate is created", async () => {
-  const first = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
-  const second = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const first = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const second = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
   expect(second.id).toBe(first.id);
-  expect(await readOpenShift()).toEqual(first);
+  expect(await readOpenShift(SCOPE)).toEqual(first);
 });
 
 test("a second start with DIFFERENT details does not overwrite the open shift", async () => {
   // A retry must not silently re-time the working day, and a stray press must
   // not swap the driver's vehicle out from under them.
-  const first = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const first = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
-  const again = await startLocalShift({
+  const again = await startLocalShift(SCOPE, {
     workingFor: NORTHGATE,
     startedAt: new Date(2026, 8, 13, 11, 0),
     vehicle: LORRY,
   });
 
   expect(again).toEqual(first);
-  expect((await readOpenShift())?.vehicle).toBeNull();
+  expect((await readOpenShift(SCOPE))?.vehicle).toBeNull();
 });
 
 test("many rapid starts in parallel still leave exactly one shift", async () => {
   const results = await Promise.all(
     Array.from({ length: 8 }, () =>
-      startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null })),
+      startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null })),
   );
 
   const ids = new Set(results.map(shift => shift.id));
   expect(ids.size).toBe(1);
-  expect((await readOpenShift())?.id).toBe(results[0]?.id);
+  expect((await readOpenShift(SCOPE))?.id).toBe(results[0]?.id);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -144,7 +148,7 @@ test("many rapid starts in parallel still leave exactly one shift", async () => 
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("everything needed to recover the day reaches the FILE — nothing is held in memory", async () => {
-  const started = await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
+  const started = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
 
   // Read back off the filesystem directly, bypassing the module entirely.
   // Whatever is here is what a relaunched app has to work with.
@@ -160,6 +164,7 @@ test("COLD START: a shift this module never created is recovered from the file a
   // document by hand and reading it through the public API exercises exactly
   // what a relaunch does: reconstruct the day from bytes, with no prior state.
   const shift = {
+    ownerUserId: SCOPE.userId,
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: NORTHGATE,
     startedAt: STARTED_AT.toISOString(),
@@ -176,7 +181,7 @@ test("COLD START: a shift this module never created is recovered from the file a
   file.create({ overwrite: true });
   file.write(JSON.stringify(shift));
 
-  const recovered = await readOpenShift();
+  const recovered = await readOpenShift(SCOPE);
 
   expect(recovered).toEqual(shift);
 });
@@ -189,6 +194,7 @@ test("a day saved BEFORE vehicles carried a start time is still the driver's ope
   // only way a day got a vehicle, and a Start Shift vehicle's use began at the
   // shift's declared start.
   const legacy = {
+    ownerUserId: SCOPE.userId,
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: NORTHGATE,
     startedAt: "2026-09-13T05:42:00+01:00",
@@ -201,7 +207,7 @@ test("a day saved BEFORE vehicles carried a start time is still the driver's ope
   const bytes = JSON.stringify(legacy);
   file.write(bytes);
 
-  const recovered = await readOpenShift();
+  const recovered = await readOpenShift(SCOPE);
 
   expect(recovered).not.toBeNull();
   expect(recovered?.vehicle).toEqual({ ...LORRY, useId: "legacy-vehicle-2026-09-13T05:42:00+01:00", startedAt: "2026-09-13T05:42:00+01:00", checks: [], fills: [] });
@@ -214,7 +220,7 @@ test("a vehicle whose start time is not a real time is refused, like any malform
   const file = storedFile();
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: "11111111-2222-4333-8444-555555555555",
+    ownerUserId: SCOPE.userId, id: "11111111-2222-4333-8444-555555555555",
     workingFor: PERSONAL,
     startedAt: STARTED_AT.toISOString(),
     vehicle: { ...LORRY, startedAt: "not a time" },
@@ -224,14 +230,14 @@ test("a vehicle whose start time is not a real time is refused, like any malform
 
   // Not repaired from the shift's start: a PRESENT but broken value is not the
   // legacy case, and quietly overwriting it would be inventing data.
-  await expect(readOpenShift()).resolves.toBeNull();
+  await expect(readOpenShift(SCOPE)).resolves.toBeNull();
 });
 
 test("a recovered open shift blocks a new one — the day continues rather than restarting", async () => {
   const file = storedFile();
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: "11111111-2222-4333-8444-555555555555",
+    ownerUserId: SCOPE.userId, id: "11111111-2222-4333-8444-555555555555",
     workingFor: PERSONAL,
     startedAt: STARTED_AT.toISOString(),
     vehicle: null,
@@ -239,7 +245,7 @@ test("a recovered open shift blocks a new one — the day continues rather than 
     createdAt: STARTED_AT.toISOString(),
   }));
 
-  const attempted = await startLocalShift({ workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
+  const attempted = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
 
   expect(attempted.id).toBe("11111111-2222-4333-8444-555555555555");
   expect(attempted.vehicle).toBeNull();
@@ -252,7 +258,7 @@ test("a recovered open shift blocks a new one — the day continues rather than 
 test("starting a shift makes NO request", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
 
-  await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
+  await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: LORRY });
 
   expect(fetchSpy).not.toHaveBeenCalled();
   fetchSpy.mockRestore();
@@ -262,10 +268,10 @@ test("a DEAD network cannot stop a shift starting", async () => {
   const fetchSpy = jest.spyOn(global, "fetch")
     .mockImplementation(() => Promise.reject(new Error("Network request failed")));
 
-  const started = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const started = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
   expect(started.status).toBe("open");
-  expect(await readOpenShift()).toEqual(started);
+  expect(await readOpenShift(SCOPE)).toEqual(started);
   expect(fetchSpy).not.toHaveBeenCalled();
   fetchSpy.mockRestore();
 });
@@ -281,24 +287,24 @@ test("an unreadable file reports NO open shift rather than crashing or guessing"
 
   // Reporting "unknown" as "none" is the safe direction: the alternative is
   // an app that cannot open. The file is left alone rather than destroyed.
-  await expect(readOpenShift()).resolves.toBeNull();
+  await expect(readOpenShift(SCOPE)).resolves.toBeNull();
   expect(file.exists).toBe(true);
 });
 
 test("a file of the wrong shape reports NO open shift", async () => {
   const file = storedFile();
   file.create({ overwrite: true });
-  file.write(JSON.stringify({ id: "x", status: "open" }));
+  file.write(JSON.stringify({ ownerUserId: SCOPE.userId, id: "x", status: "open" }));
 
-  await expect(readOpenShift()).resolves.toBeNull();
+  await expect(readOpenShift(SCOPE)).resolves.toBeNull();
 });
 
 test("clearing removes the open shift", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
 
-  await expect(readOpenShift()).resolves.toBeNull();
+  await expect(readOpenShift(SCOPE)).resolves.toBeNull();
   expect(storedFile().exists).toBe(false);
 });
 
@@ -320,29 +326,29 @@ const ADDED_AT = new Date(2026, 8, 13, 8, 5);
 const VAN = { vehicleClass: "van" as const, numberPlate: "KAT 123", startMileage: 640 };
 
 test("an ADDED vehicle's use starts when it is added — not when the day did", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
-  const updated = await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
+  const updated = await addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT });
 
   expect(updated?.vehicle).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
   expect(updated?.vehicle?.startedAt).not.toBe(updated?.startedAt);
-  expect((await readOpenShift())?.vehicle).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
+  expect((await readOpenShift(SCOPE))?.vehicle).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
 });
 
 test("every class can be added — Class 1, Class 2 and Van", async () => {
   for (const vehicleClass of ["class1", "class2", "van"] as const) {
-    await clearOpenShift();
-    await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
-    await addVehicleToOpenShift({ vehicle: { ...VAN, vehicleClass }, startedAt: ADDED_AT });
-    expect((await readOpenShift())?.vehicle?.vehicleClass).toBe(vehicleClass);
+    await clearOpenShift(SCOPE);
+    await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+    await addVehicleToOpenShift(SCOPE, { vehicle: { ...VAN, vehicleClass }, startedAt: ADDED_AT });
+    expect((await readOpenShift(SCOPE))?.vehicle?.vehicleClass).toBe(vehicleClass);
   }
 });
 
 test("adding a vehicle changes NOTHING else about the day", async () => {
-  const before = await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  const before = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
 
-  await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
-  const after = await readOpenShift();
+  await addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT });
+  const after = await readOpenShift(SCOPE);
 
   // The declared start is the driver's; the add happened later and must not
   // re-time the day. Same id, same company, same status, same creation.
@@ -354,8 +360,8 @@ test("adding a vehicle changes NOTHING else about the day", async () => {
 });
 
 test("the added vehicle survives a COLD START — it is in the file, not in memory", async () => {
-  const before = await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
-  await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
+  const before = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  await addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT });
 
   // Read straight off the filesystem, bypassing the module: what a relaunch sees.
   const onDisk: unknown = JSON.parse(storedFile().textSync());
@@ -363,37 +369,37 @@ test("the added vehicle survives a COLD START — it is in the file, not in memo
 });
 
 test("a day that ALREADY has a vehicle is not overwritten — Add is not Change", async () => {
-  const started = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: LORRY });
+  const started = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: LORRY });
 
-  const result = await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
+  const result = await addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT });
 
   // Replacing a vehicle means an end mileage for the old one — that is the
   // Change flow's job, and a stray Add must never silently do it instead.
   expect(result).toEqual(started);
-  expect((await readOpenShift())?.vehicle).toEqual({ ...LORRY, useId: ANY_USE_ID, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
+  expect((await readOpenShift(SCOPE))?.vehicle).toEqual({ ...LORRY, useId: ANY_USE_ID, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
 });
 
 test("rapid repeated adds leave ONE vehicle — the first — and never a second", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
   const results = await Promise.all([
-    addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT }),
-    addVehicleToOpenShift({ vehicle: { ...VAN, numberPlate: "SECOND 1" }, startedAt: new Date(2026, 8, 13, 8, 6) }),
-    addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT }),
+    addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT }),
+    addVehicleToOpenShift(SCOPE, { vehicle: { ...VAN, numberPlate: "SECOND 1" }, startedAt: new Date(2026, 8, 13, 8, 6) }),
+    addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT }),
   ]);
 
-  const stored = (await readOpenShift())?.vehicle;
+  const stored = (await readOpenShift(SCOPE))?.vehicle;
   expect(stored).toEqual({ ...VAN, useId: ANY_USE_ID, startedAt: ADDED_AT.toISOString(), checks: [], fills: [] });
   for (const result of results) expect(result?.vehicle).toEqual(stored);
 });
 
 test("with NO open shift, adding a vehicle creates nothing", async () => {
-  await expect(addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT })).resolves.toBeNull();
+  await expect(addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT })).resolves.toBeNull();
   expect(storedFile().exists).toBe(false);
 });
 
 test("an invalid vehicle is REFUSED rather than written — a bad write would lose the day", async () => {
-  const started = await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  const started = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
 
   // The reader rejects a malformed vehicle by treating the whole file as no
   // open shift, so writing one would make the driver's day disappear.
@@ -402,19 +408,19 @@ test("an invalid vehicle is REFUSED rather than written — a bad write would lo
     { ...VAN, startMileage: -1 },
     { ...VAN, startMileage: 12.5 },
   ]) {
-    await expect(addVehicleToOpenShift({ vehicle, startedAt: ADDED_AT })).rejects.toThrow();
+    await expect(addVehicleToOpenShift(SCOPE, { vehicle, startedAt: ADDED_AT })).rejects.toThrow();
   }
-  expect(await readOpenShift()).toEqual(started);
+  expect(await readOpenShift(SCOPE)).toEqual(started);
 });
 
 test("adding a vehicle makes NO request", async () => {
   const fetchSpy = jest.spyOn(global, "fetch")
     .mockImplementation(() => Promise.reject(new Error("Network request failed")));
-  await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
 
-  await addVehicleToOpenShift({ vehicle: VAN, startedAt: ADDED_AT });
+  await addVehicleToOpenShift(SCOPE, { vehicle: VAN, startedAt: ADDED_AT });
 
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("KAT 123");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("KAT 123");
   expect(fetchSpy).not.toHaveBeenCalled();
   fetchSpy.mockRestore();
 });

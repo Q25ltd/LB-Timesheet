@@ -22,6 +22,8 @@ import { Restoring } from "../../src/components/Restoring";
 import { saveFailureMessage } from "../../src/screens/format";
 import { VIA_FINISH_REVIEW } from "../../src/navigation/useScreenDay";
 import { useAuth } from "../../src/auth/AuthContext";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 import {
   FinishTooEarlyError,
   USAGE_STATE,
@@ -33,6 +35,7 @@ import {
 } from "../../src/shift/localShift";
 
 export default function FinishShiftRoute() {
+  const scope = useAccountScope();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
   const { account } = useAuth();
   // Read once: the finish time must not creep forward while the driver types.
@@ -42,10 +45,13 @@ export default function FinishShiftRoute() {
   // opened from the Review — so it always shows the day as it now is (D41).
   useFocusEffect(useCallback(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []));
+  }, [scope]));
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   // The gate renders this route only when authenticated; a declaration is never unattributed.
   if (shift === null || account === null) return <Redirect href="/today" />;
@@ -56,7 +62,7 @@ export default function FinishShiftRoute() {
       openedAt={openedAt}
       onLeave={() => { router.back(); }}
       // Declared by the signed-in driver, at the press (D42).
-      onConfirm={(finish, version) => confirm(shift, finish, { at: new Date(), by: account.user.id, version })}
+      onConfirm={(finish, version) => confirm(scope, shift, finish, { at: new Date(), by: account.user.id, version })}
       onEditShift={() => { router.push("/edit-shift"); }}
       // Each use by its identity, in the state it is in; its screens come back here.
       onOpenVehicleUse={(usage, inUse) => {
@@ -70,9 +76,9 @@ export default function FinishShiftRoute() {
 }
 
 /** Finish the day on screen, and say only what is true of the result. */
-async function confirm(shift: LocalShift, finish: ShiftFinish, declared: Declared): Promise<void> {
+async function confirm(scope: AccountScope, shift: LocalShift, finish: ShiftFinish, declared: Declared): Promise<void> {
   try {
-    const done = await finishOpenShift({
+    const done = await finishOpenShift(scope, {
       shiftId: shift.id,
       vehicleUseId: shift.vehicle?.useId ?? null,
       trailerUseId: shift.trailer?.useId ?? null,

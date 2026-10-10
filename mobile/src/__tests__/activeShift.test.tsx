@@ -29,12 +29,20 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, StyleSheet } from "react-native";
 import { ActiveShiftScreen } from "../screens/ActiveShiftScreen";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { OPEN_SHIFT_TEMP_FILE, clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
 import type { LocalShift, LocalVehicle, VehicleClass, WorkingContext } from "../shift/localShift";
 import { checklistFor } from "../shift/checklists";
 import { CHECK_RESULT, CHECK_STATUS, type VehicleCheck } from "../shift/vehicleCheck";
 import { colors } from "../theme/index";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn() };
 
@@ -77,6 +85,7 @@ const LORRY: LocalVehicle = {
 
 function shiftWith(over: Partial<LocalShift> = {}): LocalShift {
   return {
+    ownerUserId: SCOPE.userId,
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: PERSONAL,
     startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
@@ -724,7 +733,7 @@ test("folding is screen state only: it survives a re-render of the same day, and
 
   expect(isExpanded(view)).toBe(false);
   // Nothing about the card reached the day it renders.
-  expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "previousTrailers", "previousVehicles", "startedAt", "status", "trailer", "vehicle", "workingFor"]);
+  expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "ownerUserId", "previousTrailers", "previousVehicles", "startedAt", "status", "trailer", "vehicle", "workingFor"]);
   expect(Object.keys(LORRY).sort()).toEqual(["checks", "fills", "numberPlate", "startMileage", "startedAt", "useId", "vehicleClass"]);
 });
 
@@ -889,7 +898,7 @@ test("the whole folded card, status and all, still opens with one press — and 
 
 describe("the Active Shift route", () => {
   beforeEach(async () => {
-    await clearOpenShift();
+    await clearOpenShift(SCOPE);
     mockRouter.replace.mockClear();
   });
   afterEach(() => { jest.restoreAllMocks(); });
@@ -906,33 +915,33 @@ describe("the Active Shift route", () => {
 
   test("a confirmed discard REMOVES the stored shift and leaves the workspace", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+    await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
 
     const view = await openRoute();
     await fireEvent.press(view.getByTestId("discard-shift"));
     confirmButton(alert)?.onPress?.();
 
-    await waitFor(async () => { expect(await readOpenShift()).toBeNull(); });
+    await waitFor(async () => { expect(await readOpenShift(SCOPE)).toBeNull(); });
     await waitFor(() => { expect(mockRouter.replace).toHaveBeenCalledWith("/today"); });
     alert.mockRestore();
   });
 
   test("a CANCELLED discard leaves the day exactly as it was", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    const started = await startLocalShift({ workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
+    const started = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: new Date(), vehicle: LORRY });
 
     const view = await openRoute();
     await fireEvent.press(view.getByTestId("discard-shift"));
     cancelButton(alert)?.onPress?.();
 
-    expect(await readOpenShift()).toEqual(started);
+    expect(await readOpenShift(SCOPE)).toEqual(started);
     expect(mockRouter.replace).not.toHaveBeenCalled();
     alert.mockRestore();
   });
 
   test("a Discard that fails before anything is removed says nothing was changed — and stays on the day", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+    await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
     const view = await openRoute();
     jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
 
@@ -942,20 +951,20 @@ describe("the Active Shift route", () => {
     await waitFor(() => { expect(alert).toHaveBeenCalledWith("Couldn't discard the shift", "Nothing was changed. Please try again."); });
     expect(mockRouter.replace).not.toHaveBeenCalled();
     jest.restoreAllMocks();
-    expect(await readOpenShift()).not.toBeNull();
+    expect(await readOpenShift(SCOPE)).not.toBeNull();
   });
 
   test("a Discard that fails PART-WAY never says nothing was changed — the driver is told to check the shift", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
-    const temp = new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+    await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: new Date(), vehicle: LORRY });
+    const temp = new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_TEMP_FILE);
     temp.create({ overwrite: true });
     temp.write("leftover");
     const view = await openRoute();
     // The live day file goes; the temporary file then cannot be dealt with.
     jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
       if (this.uri.endsWith(OPEN_SHIFT_TEMP_FILE)) throw new Error("busy");
-      return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+      return accountDirectoryOf(SCOPE).list().some(entry => entry.uri === this.uri);
     });
 
     await fireEvent.press(view.getByTestId("discard-shift"));
@@ -967,22 +976,22 @@ describe("the Active Shift route", () => {
     expect(alert.mock.calls.some(([, body]) => typeof body === "string" && /nothing was changed/i.test(body))).toBe(false);
     expect(mockRouter.replace).not.toHaveBeenCalled();
     jest.restoreAllMocks();
-    expect(await readOpenShift()).toBeNull();
+    expect(await readOpenShift(SCOPE)).toBeNull();
   });
 
   test("after discarding, Start Shift is free to begin a NEW day", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
-    const first = await startLocalShift({ workingFor: PERSONAL, startedAt: new Date(), vehicle: null });
+    const first = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: new Date(), vehicle: null });
 
     const view = await openRoute();
     await fireEvent.press(view.getByTestId("discard-shift"));
     confirmButton(alert)?.onPress?.();
-    await waitFor(async () => { expect(await readOpenShift()).toBeNull(); });
+    await waitFor(async () => { expect(await readOpenShift(SCOPE)).toBeNull(); });
 
     // The one-open-shift rule blocked this before the discard; it must not
     // keep blocking it afterwards, or discard has fixed nothing.
     const secondStart = new Date();
-    const second = await startLocalShift({ workingFor: NORTHGATE, startedAt: secondStart, vehicle: LORRY });
+    const second = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: secondStart, vehicle: LORRY });
     expect(second.id).not.toBe(first.id);
     expect(second.vehicle).toMatchObject({ numberPlate: LORRY.numberPlate, startedAt: secondStart.toISOString() });
     alert.mockRestore();

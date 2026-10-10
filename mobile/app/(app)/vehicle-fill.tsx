@@ -37,8 +37,11 @@ import {
 import { FILL_TYPES, fillTypeLabel, fillsOfType, type FillType } from "../../src/shift/vehicleFill";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
 import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function VehicleFillRoute() {
+  const scope = useAccountScope();
   const { type, usage, usageState, timesheet } = useLocalSearchParams<{ type?: string; usage?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
@@ -47,13 +50,16 @@ export default function VehicleFillRoute() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+      if (scope === null) return undefined;
+      void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, [timesheet]),
+    }, [scope, timesheet]),
   );
 
   const fillType = FILL_TYPES.find(entry => entry.id === type)?.id ?? null;
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (fillType === null || state === null || usage === undefined) return <Redirect href={missingHref(timesheet, true)} />;
 
   // Reading the phone's own shift file — not signing anyone in.
@@ -70,8 +76,8 @@ export default function VehicleFillRoute() {
       asset="vehicle"
       usage={target}
       onLeave={() => { router.back(); }}
-      onSave={entry => save(named, fillType, entry, setShift, timesheet)}
-      onRemove={fillId => remove(named, fillId, setShift, timesheet)}
+      onSave={entry => save(scope, named, fillType, entry, setShift, timesheet)}
+      onRemove={fillId => remove(scope, named, fillId, setShift, timesheet)}
     />
   );
 }
@@ -99,9 +105,9 @@ interface NamedUsage { shiftId: string; vehicleUseId: string; usageState: UsageS
 type Show = (shift: LocalShift | null) => void;
 
 /** Store the fill, then show the day it produced — no second read. */
-async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
+async function save(scope: AccountScope, named: NamedUsage, type: FillType, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    const day = await recordVehicleFill({
+    const day = await recordVehicleFill(scope, {
       ...named,
       // A correction keeps the entry's own id; a new fill gets one.
       fillId: entry.fillId ?? newLocalId(),
@@ -117,9 +123,9 @@ async function save(named: NamedUsage, type: FillType, entry: FillEntry, show: S
   }
 }
 
-async function remove(named: NamedUsage, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
+async function remove(scope: AccountScope, named: NamedUsage, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    settle(await removeVehicleFill({ ...named, fillId }), show, timesheet);
+    settle(await removeVehicleFill(scope, { ...named, fillId }), show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't remove that", saveFailureMessage(error));
     throw error;

@@ -10,7 +10,7 @@
  * and the trailer's never touch.
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, StyleSheet, Text, TextInput } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -39,6 +39,10 @@ import { TRAILER_TYPE, type TrailerDetails, type TrailerType } from "../shift/tr
 import { CHECK_RESULT, checkStateOf, type CheckAnswer } from "../shift/vehicleCheck";
 import { colors } from "../theme/index";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_trailer_1");
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { trailer?: string; usageState?: string } = {};
@@ -75,7 +79,7 @@ const DRIVER: AuthenticatedAccount = {
 };
 
 type View = Awaited<ReturnType<typeof render>>;
-const bytes = () => new File(Paths.document, OPEN_SHIFT_FILE).textSync();
+const bytes = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync();
 const text = (view: View, testID: string) => String(view.getByTestId(testID).props.children);
 function isSelected(view: View, testID: string): boolean {
   const state: unknown = view.getByTestId(testID).props.accessibilityState;
@@ -86,7 +90,7 @@ async function press(view: View, testID: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   delete params.trailer;
   delete params.usageState;
   for (const fn of Object.values(mockRouter)) fn.mockClear();
@@ -213,8 +217,8 @@ test("what needs a LOAD on board starts N/A — an empty trailer is normal; perm
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function dayWithTrailer(trailer: TrailerDetails = FRIDGE): Promise<{ shift: LocalShift; use: string }> {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer, startedAt: at(5, 30) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer, startedAt: at(5, 30) });
   return { shift, use: at(5, 30).toISOString() };
 }
 
@@ -225,15 +229,15 @@ function answersFor(checklist: Checklist, over: Record<string, CheckAnswer> = {}
 const defect = (key: string, note: string): CheckAnswer => ({ key, result: CHECK_RESULT.defect, note });
 
 async function complete(shift: LocalShift, use: string, type: TrailerType, over: Record<string, CheckAnswer> = {}, checkId = newLocalId()) {
-  return completeTrailerCheck({
+  return completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40),
     answers: answersFor(trailerChecklistFor(type), over), completedAt: at(5, 50), completedBy: DRIVER.user.id,
   });
 }
 async function draft(shift: LocalShift, use: string, answers: CheckAnswer[], checkId: string) {
-  return saveTrailerCheckDraft({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40), answers });
+  return saveTrailerCheckDraft(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, checkId, startedAt: at(5, 40), answers });
 }
-const trailerChecks = async () => (await readOpenShift())?.trailer?.checks ?? [];
+const trailerChecks = async () => (await readOpenShift(SCOPE))?.trailer?.checks ?? [];
 
 test("a draft stores ONLY the rows that differ from their defaults, and a row put back drops out", async () => {
   const { shift, use } = await dayWithTrailer();
@@ -316,7 +320,7 @@ test("a stored certificate is read from its OWN rows — later checklist wording
 
   // Simulate a future checklist: rewrite the label on disk, as a later build's
   // definition would differ — the stored record, not today's list, is shown.
-  new File(Paths.document, OPEN_SHIFT_FILE).write(bytes().replace('"label":"Landing legs"', '"label":"Landing legs (v1 wording)"'));
+  new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).write(bytes().replace('"label":"Landing legs"', '"label":"Landing legs (v1 wording)"'));
   const [check] = await trailerChecks();
   expect(check?.items.find(entry => entry.key === "landing-legs")?.label).toBe("Landing legs (v1 wording)");
 });
@@ -328,11 +332,11 @@ test("a check stays on trailer A; changing to trailer B starts B with NO check; 
   await complete(shift, a, TRAILER_TYPE.refrigerated);
   const certificateA = JSON.stringify(await trailerChecks());
 
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(a), next: BOX, changedAt: at(10) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(a), next: BOX, changedAt: at(10) });
   expect(await trailerChecks()).toEqual([]);
   await complete(shift, at(10).toISOString(), TRAILER_TYPE.standard);
 
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   expect(JSON.stringify(day?.previousTrailers[0]?.checks)).toBe(certificateA);
   expect(day?.trailer?.checks[0]?.checklist).toBe("trailer-standard");
 });
@@ -340,12 +344,12 @@ test("a check stays on trailer A; changing to trailer B starts B with NO check; 
 test("TR100 taken AGAIN is a fresh use: its check starts empty — the morning's certificate and draft never carry over", async () => {
   const { shift, use: morning } = await dayWithTrailer(FRIDGE);
   await complete(shift, morning, TRAILER_TYPE.refrigerated);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(10) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(morning), next: BOX, changedAt: at(10) });
   const middle = at(10).toISOString();
   await draft(shift, middle, answersFor(trailerChecklistFor(TRAILER_TYPE.standard), { "doors": defect("doors", "x") }), newLocalId());
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(middle), next: FRIDGE, changedAt: at(14) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(middle), next: FRIDGE, changedAt: at(14) });
 
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   expect(day?.trailer?.trailerNumber).toBe("TR100");
   expect(day?.trailer?.checks).toEqual([]);
   expect(checkStateOf(day?.trailer?.checks ?? [])).toBe("not-started");
@@ -357,12 +361,12 @@ test("two uses of TR100 never share a draft or a certificate: the afternoon's ow
   const { shift, use: morning } = await dayWithTrailer(FRIDGE);
   const morningId = newLocalId();
   await draft(shift, morning, answersFor(trailerChecklistFor(TRAILER_TYPE.refrigerated), { "doors": defect("doors", "morning") }), morningId);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(morning), next: FRIDGE, changedAt: at(14) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(morning), next: FRIDGE, changedAt: at(14) });
   const afternoon = at(14).toISOString();
 
   await complete(shift, afternoon, TRAILER_TYPE.refrigerated);
 
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   expect(day?.previousTrailers[0]?.checks).toMatchObject([{ id: morningId, status: "draft" }]);
   expect(day?.trailer?.checks).toHaveLength(1);
   expect(day?.trailer?.checks[0]?.id).not.toBe(morningId);
@@ -371,7 +375,7 @@ test("two uses of TR100 never share a draft or a certificate: the afternoon's ow
 test("STALE: a check opened for TR100 cannot save after the trailer changed — not to it, not to a replacement TR100", async () => {
   const { shift, use: opened } = await dayWithTrailer(FRIDGE);
   const id = newLocalId();
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(opened), next: FRIDGE, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(opened), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
 
   const saved = await draft(shift, opened, answersFor(trailerChecklistFor(TRAILER_TYPE.refrigerated), { "doors": defect("doors", "x") }), id);
@@ -392,38 +396,38 @@ test.each([["a trailer number", "TR100"], ["nothing", ""]])("a Trailer Check nam
 test("a VEHICLE change with the same trailer in use keeps the trailer's check exactly as it was", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
   await complete(shift, use, TRAILER_TYPE.refrigerated);
-  const trailer = JSON.stringify((await readOpenShift())?.trailer);
+  const trailer = JSON.stringify((await readOpenShift(SCOPE))?.trailer);
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: { ...UNIT, numberPlate: "CD34 EFG" }, changedAt: at(10) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: { ...UNIT, numberPlate: "CD34 EFG" }, changedAt: at(10) });
 
-  expect(JSON.stringify((await readOpenShift())?.trailer)).toBe(trailer);
+  expect(JSON.stringify((await readOpenShift(SCOPE))?.trailer)).toBe(trailer);
 });
 
 test("vehicle and trailer checks never touch: completing either leaves the other exactly as it was", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
     answers: answersFor(checklistFor("class1")), completedAt: at(5, 20), completedBy: DRIVER.user.id,
   });
   expect(await trailerChecks()).toEqual([]);
-  const vehicleChecks = JSON.stringify((await readOpenShift())?.vehicle?.checks);
+  const vehicleChecks = JSON.stringify((await readOpenShift(SCOPE))?.vehicle?.checks);
 
   await complete(shift, use, TRAILER_TYPE.refrigerated);
 
-  expect(JSON.stringify((await readOpenShift())?.vehicle?.checks)).toBe(vehicleChecks);
+  expect(JSON.stringify((await readOpenShift(SCOPE))?.vehicle?.checks)).toBe(vehicleChecks);
   expect(checkStateOf(await trailerChecks())).toBe("completed");
 });
 
 test("Fridge Diesel and Trailer Checks are independent: neither creates, requires or changes the other", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), litres: 40, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), litres: 40, note: "" });
   expect(await trailerChecks()).toEqual([]);
 
   await complete(shift, use, TRAILER_TYPE.refrigerated);
   const checks = JSON.stringify(await trailerChecks());
-  expect((await readOpenShift())?.trailer?.reeferDiesel).toHaveLength(1);
+  expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toHaveLength(1);
 
-  await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), litres: null, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), litres: null, note: "" });
   expect(JSON.stringify(await trailerChecks())).toBe(checks);
 });
 
@@ -521,7 +525,7 @@ test("STALE on screen: the trailer changes while the check is open — the save 
   const { shift, use } = await dayWithTrailer(FRIDGE);
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await openRoute(use);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(use), next: FRIDGE, changedAt: at(9) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(use), next: FRIDGE, changedAt: at(9) });
   const before = bytes();
 
   await press(view, "complete-check");
@@ -533,7 +537,7 @@ test("STALE on screen: the trailer changes while the check is open — the save 
 
 test.each([["a trailer number", "TR100"], ["a use that has ended", "ended"]])("the screen is not opened for %s", async (_why, name) => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  if (name === "ended") await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(use), next: null, changedAt: at(9) });
+  if (name === "ended") await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(use), next: null, changedAt: at(9) });
 
   const view = await openRoute(name === "ended" ? use : name);
 
@@ -557,7 +561,7 @@ function screen(shift: LocalShift, onTrailerChecks: jest.Mock = jest.fn()): Reac
   );
 }
 const stored = async (): Promise<LocalShift> => {
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   if (day === null) throw new Error("expected an open day");
   return day;
 };
@@ -613,7 +617,7 @@ test("ONLY an explicit completion turns the card green — 'Completed' open, 'Ch
 
 test("a completed UNIT check does not make the trailer green, and a completed trailer check does not make the unit green", async () => {
   const { shift } = await dayWithTrailer(FRIDGE);
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: newLocalId(), startedAt: at(5, 10),
     answers: answersFor(checklistFor("class1")), completedAt: at(5, 20), completedBy: DRIVER.user.id,
   });
@@ -624,16 +628,16 @@ test("a completed UNIT check does not make the trailer green, and a completed tr
 });
 
 test("no trailer, no Trailer Checks — and the day cannot hold a trailer behind a van or no vehicle to render one", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
   const view = await render(screen(shift));
   expect(view.queryByTestId("trailer-checks")).toBeNull();
   await view.unmount();
 
   // A van cannot take one, and neither can a day with no vehicle.
   for (const vehicle of [{ ...UNIT, vehicleClass: "van" as const }, null]) {
-    await clearOpenShift();
-    const day = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
-    await expect(addTrailerToOpenShift({ shiftId: day.id, trailer: FRIDGE, startedAt: at(6) })).rejects.toThrow(Error);
+    await clearOpenShift(SCOPE);
+    const day = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
+    await expect(addTrailerToOpenShift(SCOPE, { shiftId: day.id, trailer: FRIDGE, startedAt: at(6) })).rejects.toThrow(Error);
     expect((await stored()).trailer).toBeNull();
   }
 });

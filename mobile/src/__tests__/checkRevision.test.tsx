@@ -11,7 +11,7 @@
  * whose checks never touch. Each store proof below runs for BOTH assets.
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Pressable, Text, TextInput } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -49,6 +49,14 @@ import { TRAILER_TYPE, type TrailerDetails } from "../shift/trailer";
 import { CHECK_RESULT, checkStateOf, effectiveItems, type CheckAnswer, type VehicleCheck } from "../shift/vehicleCheck";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_revise_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { usage?: string; trailer?: string; usageState?: string } = {};
@@ -87,7 +95,7 @@ const DRIVER: AuthenticatedAccount = {
 const CERTIFIER = "user_original";
 
 type View = Awaited<ReturnType<typeof render>>;
-const bytes = () => new File(Paths.document, OPEN_SHIFT_FILE).textSync();
+const bytes = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync();
 const text = (view: View, testID: string) => String(view.getByTestId(testID).props.children);
 async function press(view: View, testID: string): Promise<void> {
   await act(async () => { await fireEvent.press(view.getByTestId(testID)); });
@@ -97,7 +105,7 @@ async function type(view: View, testID: string, value: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   for (const key of ["usage", "trailer", "usageState"] as const) delete params[key];
   for (const fn of Object.values(mockRouter)) fn.mockClear();
 });
@@ -147,7 +155,7 @@ function withChanges(checklist: Checklist, changes: Record<string, { result: Che
 }
 
 async function findUse(startedAt: string) {
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   return day?.vehicle?.startedAt === startedAt ? day.vehicle
     : day?.trailer?.startedAt === startedAt ? day.trailer
     : [...(day?.previousVehicles ?? []), ...(day?.previousTrailers ?? [])].find(use => use.startedAt === startedAt);
@@ -158,28 +166,28 @@ const VEHICLE: Asset = {
   useAt: vehicleUseAt,
   checklist: checklistFor("class1"),
   day: async () => {
-    const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+    const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
     const first = STARTED_AT.toISOString();
-    await completeVehicleCheck({
+    await completeVehicleCheck(SCOPE, {
       shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.inUse, checkId: "check-first", startedAt: at(5, 5),
       answers: defaults(checklistFor("class1")), completedAt: at(5, 10), completedBy: CERTIFIER,
     });
-    await recordVehicleFill({
+    await recordVehicleFill(SCOPE, {
       shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.inUse, fillId: "fuel-1",
       type: FILL_TYPE.fuel, recordedAt: at(6), litres: 300, note: "",
     });
-    await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(first), endMileage: 100_100, next: OTHER, changedAt: at(9) });
+    await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(first), endMileage: 100_100, next: OTHER, changedAt: at(9) });
     const middle = at(9).toISOString();
-    await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(middle), endMileage: 220_050, next: { ...UNIT, startMileage: 100_200 }, changedAt: at(11) });
+    await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(middle), endMileage: 220_050, next: { ...UNIT, startMileage: 100_200 }, changedAt: at(11) });
     const current = at(11).toISOString();
-    await completeVehicleCheck({
+    await completeVehicleCheck(SCOPE, {
       shiftId: shift.id, vehicleUseId: vehicleUseAt(current), usageState: USAGE_STATE.inUse, checkId: "check-current", startedAt: at(11, 5),
       answers: defaults(checklistFor("class1")), completedAt: at(11, 10), completedBy: CERTIFIER,
     });
     return { shift, first, middle, current };
   },
-  revise: reviseVehicleCheck,
-  draft: (shift, startedAt, state, checkId) => saveVehicleCheckDraft({
+  revise: input => reviseVehicleCheck(SCOPE, input),
+  draft: (shift, startedAt, state, checkId) => saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(startedAt), usageState: state, checkId, startedAt: new Date(),
     answers: [{ key: "tyre-condition", result: CHECK_RESULT.defect, note: "draft" }],
   }),
@@ -192,26 +200,26 @@ const TRAILER: Asset = {
   useAt: trailerUseAt,
   checklist: trailerChecklistFor(TRAILER_TYPE.refrigerated),
   day: async () => {
-    const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
-    await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+    const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+    await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
     const first = at(5, 30).toISOString();
-    await completeTrailerCheck({
+    await completeTrailerCheck(SCOPE, {
       shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, checkId: "check-first", startedAt: at(5, 35),
       answers: defaults(trailerChecklistFor(TRAILER_TYPE.refrigerated)), completedAt: at(5, 40), completedBy: CERTIFIER,
     });
-    await recordReeferDiesel({ shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, fillId: "diesel-1", recordedAt: at(6), litres: 40, note: "" });
-    await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(first), next: GFD, changedAt: at(9) });
+    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, fillId: "diesel-1", recordedAt: at(6), litres: 40, note: "" });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(first), next: GFD, changedAt: at(9) });
     const middle = at(9).toISOString();
-    await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(middle), next: TR23, changedAt: at(11) });
+    await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(middle), next: TR23, changedAt: at(11) });
     const current = at(11).toISOString();
-    await completeTrailerCheck({
+    await completeTrailerCheck(SCOPE, {
       shiftId: shift.id, trailerUseId: trailerUseAt(current), usageState: USAGE_STATE.inUse, checkId: "check-current", startedAt: at(11, 5),
       answers: defaults(trailerChecklistFor(TRAILER_TYPE.refrigerated)), completedAt: at(11, 10), completedBy: CERTIFIER,
     });
     return { shift, first, middle, current };
   },
-  revise: reviseTrailerCheck,
-  draft: (shift, startedAt, state, checkId) => saveTrailerCheckDraft({
+  revise: input => reviseTrailerCheck(SCOPE, input),
+  draft: (shift, startedAt, state, checkId) => saveTrailerCheckDraft(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(startedAt), usageState: state, checkId, startedAt: new Date(),
     answers: [{ key: "tyre-condition", result: CHECK_RESULT.defect, note: "draft" }],
   }),
@@ -404,7 +412,7 @@ describe.each([VEHICLE, TRAILER])("$name — corrections", asset => {
   test("malformed revision data fails CLOSED: the check is dropped and reads as not completed — never as a pass", async () => {
     const day = await asset.day();
     const broken = bytes().replace('"check-first",', '"check-first","revisions":[{"id":"r1","revisedAt":"not a time","revisedBy":"x","items":[]}],');
-    new File(Paths.document, OPEN_SHIFT_FILE).write(broken);
+    new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).write(broken);
 
     expect(checkStateOf(await asset.checksOf(day.first))).toBe("not-started");
     // The other, well-formed use of the same plate / number is unaffected.
@@ -542,9 +550,9 @@ test("a corrected ended trailer use still reads 'Checks completed' on its USED T
 // ─── A Vehicle / Unit Check forgotten before the vehicle was handed back ────
 
 async function vehicleDayUnchecked(): Promise<{ shift: LocalShift; first: string; second: string }> {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(9).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_200 }, changedAt: at(11) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(9).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_200 }, changedAt: at(11) });
   return { shift, first: STARTED_AT.toISOString(), second: at(9).toISOString() };
 }
 
@@ -577,7 +585,7 @@ test("the forgotten Unit Check opens FRESH, writing nothing, and completes dated
   expect(check?.completedBy).toBe(DRIVER.user.id);
   expect(mockRouter.back).toHaveBeenCalled();
   // The same plate's later use, in use now, is untouched.
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("a DRAFT left on an ended vehicle use is resumed there, and a completed one reopens read-only with Correct Check", async () => {
@@ -589,7 +597,7 @@ test("a DRAFT left on an ended vehicle use is resumed there, and a completed one
   if (target === undefined) throw new Error("expected the first use");
   target.checks = [{ id: "draft-1", checklist: list.id, checklistVersion: list.version, startedAt: at(5, 5).toISOString(),
     status: "draft", completedAt: null, completedBy: null, items: [{ key: "horn", label: "Horn", result: "fail", note: "Silent" }] }];
-  new File(Paths.document, OPEN_SHIFT_FILE).write(JSON.stringify(day));
+  new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).write(JSON.stringify(day));
 
   const view = await openCheck(VEHICLE, first, USAGE_STATE.ended);
   expect(String(view.getByTestId("check-note-horn").props.value)).toBe("Silent");
@@ -607,11 +615,11 @@ test("a forgotten vehicle check is never written to another use: a stale or wron
   const { shift, first, second } = await vehicleDayUnchecked();
   const before = bytes();
 
-  const asInUse = await saveVehicleCheckDraft({
+  const asInUse = await saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.inUse, checkId: "x", startedAt: new Date(),
     answers: [{ key: "horn", result: CHECK_RESULT.defect, note: "x" }],
   });
-  const byPlate = await saveVehicleCheckDraft({
+  const byPlate = await saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, checkId: "x", startedAt: new Date(),
     answers: [{ key: "horn", result: CHECK_RESULT.defect, note: "x" }],
   });
@@ -619,12 +627,12 @@ test("a forgotten vehicle check is never written to another use: a stale or wron
   expect(bytes()).toBe(before);
 
   // Completing the middle use leaves both AB12 uses alone.
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(second), usageState: USAGE_STATE.ended, checkId: newLocalId(), startedAt: new Date(),
     answers: defaults(checklistFor("class1")), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
   expect(await VEHICLE.checksOf(first)).toEqual([]);
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test.each([["a plate", "AB12 CDE"], ["the vehicle in use, as ended", "current"]])("the forgotten-check screen is not opened for %s", async (_why, name) => {

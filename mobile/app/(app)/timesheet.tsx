@@ -20,17 +20,23 @@ import { TimesheetDetailScreen } from "../../src/screens/TimesheetDetailScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { REVIEW_TO_DECLARE } from "../../src/navigation/useScreenDay";
 import { DeleteUncertainError, USAGE_STATE, deleteCompletedShift, readCompletedShift, type CompletedShift } from "../../src/shift/localShift";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function TimesheetRoute() {
+  const scope = useAccountScope();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [shift, setShift] = useState<CompletedShift | null | "loading">("loading");
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
-    void readCompletedShift(id ?? "").then(found => { if (!cancelled) setShift(found); });
+    if (scope === null) return undefined;
+    void readCompletedShift(scope, id ?? "").then(found => { if (!cancelled) setShift(found); });
     return () => { cancelled = true; };
-  }, [id]));
+  }, [scope, id]));
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading timesheet…" />;
   const timesheet = shift?.id ?? "";
   const ended = USAGE_STATE.ended;
@@ -40,7 +46,7 @@ export default function TimesheetRoute() {
       onBack={() => { router.back(); }}
       onEdit={() => { router.push({ pathname: "/edit-timesheet", params: { id: timesheet } }); }}
       onReview={() => { router.push({ pathname: "/edit-timesheet", params: { id: timesheet, review: REVIEW_TO_DECLARE } }); }}
-      onDelete={() => { void remove(timesheet); }}
+      onDelete={() => { void remove(scope, timesheet); }}
       onOpenVehicleUse={usage => { router.push({ pathname: "/vehicle-usage", params: { usage, timesheet } }); }}
       onOpenTrailerUse={usage => { router.push({ pathname: "/trailer-usage", params: { usage, timesheet } }); }}
       onVehicleCheck={usage => { router.push({ pathname: "/vehicle-check", params: { usage, usageState: ended, timesheet } }); }}
@@ -50,9 +56,9 @@ export default function TimesheetRoute() {
 }
 
 /** Delete exactly this day, and say only what is true of the result. */
-async function remove(id: string): Promise<void> {
+async function remove(scope: AccountScope, id: string): Promise<void> {
   try {
-    const deleted = await deleteCompletedShift(id);
+    const deleted = await deleteCompletedShift(scope, id);
     if (!deleted) {
       Alert.alert("Nothing was deleted", "This timesheet is no longer on this phone.");
     } else {

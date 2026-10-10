@@ -14,7 +14,7 @@
  *              happen, and never goes on to act on the asset that replaced it
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { Directory, File, Paths } from "expo-file-system";
+import { Directory, File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, Text, TextInput } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -47,6 +47,14 @@ import {
 import { TRAILER_TYPE, type TrailerDetails } from "../shift/trailer";
 import type { CheckAnswer } from "../shift/vehicleCheck";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_harden_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const params: { usage?: string; usageState?: string } = {};
@@ -83,7 +91,7 @@ const DRIVER: AuthenticatedAccount = {
 };
 
 type View = Awaited<ReturnType<typeof render>>;
-const file = () => new File(Paths.document, OPEN_SHIFT_FILE);
+const file = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
 const bytes = () => file().textSync();
 const text = (view: View, testID: string) => String(view.getByTestId(testID).props.children);
 async function press(view: View, testID: string): Promise<void> {
@@ -98,10 +106,10 @@ async function mount(node: React.ReactElement): Promise<View> {
   return view;
 }
 const dayWith = (vehicle: VehicleDetails | null = UNIT) =>
-  startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
+  startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   delete params.usage;
   delete params.usageState;
   for (const fn of Object.values(mockRouter)) fn.mockClear();
@@ -124,13 +132,13 @@ test.each([
   await expect(dayWith(vehicle)).rejects.toThrow(Error);
 
   expect(file().exists).toBe(false);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("Start Shift stores the plate trimmed and upper-cased, as every other vehicle write does", async () => {
   await dayWith({ ...UNIT, numberPlate: "  ab12 cde " });
 
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB12 CDE");
 });
 
 test("a check answer that is not OK / N/A / DEFECT is refused — a certificate is never written that the reader would drop", async () => {
@@ -140,24 +148,24 @@ test("a check answer that is not OK / N/A / DEFECT is refused — a certificate 
   const bad = answers.map(answer => (answer.key === "horn" ? { ...answer, result: "maybe" as CheckAnswer["result"] } : answer));
   const target = { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: at(5, 5) };
 
-  await expect(completeVehicleCheck({ ...target, answers: bad, completedAt: at(5, 10), completedBy: "user_1" })).rejects.toThrow(Error);
-  await expect(saveVehicleCheckDraft({ ...target, answers: [{ key: "horn", result: "maybe" as CheckAnswer["result"], note: "" }] })).rejects.toThrow(Error);
+  await expect(completeVehicleCheck(SCOPE, { ...target, answers: bad, completedAt: at(5, 10), completedBy: "user_1" })).rejects.toThrow(Error);
+  await expect(saveVehicleCheckDraft(SCOPE, { ...target, answers: [{ key: "horn", result: "maybe" as CheckAnswer["result"], note: "" }] })).rejects.toThrow(Error);
 
   expect(bytes()).toBe(before);
 });
 
 test.each([0, 1, 2, 3, 5])("DISCARD racing a write already queued (%i ticks in) stays discarded — the write never resurrects the day", async ticks => {
   const shift = await dayWith();
-  const save = saveVehicleCheckDraft({
+  const save = saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: "c1",
     startedAt: at(5, 5), answers: [{ key: "horn", result: "na", note: "" }],
   });
   for (let tick = 0; tick < ticks; tick += 1) await Promise.resolve();
 
-  await Promise.all([save, clearOpenShift()]);
+  await Promise.all([save, clearOpenShift(SCOPE)]);
 
   expect(file().exists).toBe(false);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -173,12 +181,12 @@ test.each([
 
   file().write(JSON.stringify(corrupt(day)));
 
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("a check of the WRONG asset never reads as that asset's check — a trailer's on a vehicle, a unit's on a trailer", async () => {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const certificate = (checklist: string) => ({
     id: `c-${checklist}`, checklist, checklistVersion: 1, startedAt: at(5, 40).toISOString(), status: "completed",
     completedAt: at(5, 50).toISOString(), completedBy: "user_1",
@@ -189,7 +197,7 @@ test("a check of the WRONG asset never reads as that asset's check — a trailer
   day.trailer.checks = [certificate("hgv-unit")];
   file().write(JSON.stringify(day));
 
-  const read = await readOpenShift();
+  const read = await readOpenShift(SCOPE);
 
   // The day itself is intact; neither misplaced certificate is read.
   expect(read?.vehicle?.checks).toEqual([]);
@@ -199,7 +207,7 @@ test("a check of the WRONG asset never reads as that asset's check — a trailer
 test("CONTROL: the same day, as written, loads", async () => {
   await dayWith();
 
-  expect(await readOpenShift()).not.toBeNull();
+  expect(await readOpenShift(SCOPE)).not.toBeNull();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -209,8 +217,8 @@ test("CONTROL: the same day, as written, loads", async () => {
 test("Change Vehicle whose vehicle was changed behind it: nothing saved, the driver is told, and NO check opens on the replacement", async () => {
   const shift = await dayWith();
   // Earlier today: XY34, so it is offered back.
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(7) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(7) });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100200");
@@ -220,7 +228,7 @@ test("Change Vehicle whose vehicle was changed behind it: nothing saved, the dri
   await press(view, "perform-checks-yes");
 
   // Behind the screen, the unit it was opened for is handed back.
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(7).toISOString()), endMileage: 100_150, next: { ...OTHER, numberPlate: "ZZ99 ZZZ" }, changedAt: at(8) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(7).toISOString()), endMileage: 100_150, next: { ...OTHER, numberPlate: "ZZ99 ZZZ" }, changedAt: at(8) });
   const before = bytes();
   await press(view, "change-confirm");
 
@@ -233,8 +241,8 @@ test("Change Vehicle whose vehicle was changed behind it: nothing saved, the dri
 
 test("CONTROL: a real change with checks opens the check for EXACTLY the new vehicle use", async () => {
   const shift = await dayWith();
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(7) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(7) });
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100200");
   await press(view, "change-continue");
@@ -244,8 +252,8 @@ test("CONTROL: a real change with checks opens the check for EXACTLY the new veh
 
   await press(view, "change-confirm");
 
-  const now = (await readOpenShift())?.vehicle?.startedAt ?? "";
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("XY34 ZZZ");
+  const now = (await readOpenShift(SCOPE))?.vehicle?.startedAt ?? "";
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("XY34 ZZZ");
   expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/vehicle-check", params: { usage: vehicleUseAt(now), usageState: "in-use" } });
 });
 
@@ -257,7 +265,7 @@ test("No vehicle whose vehicle was changed behind it: nothing saved, and the dri
   await press(view, "change-continue");
   await press(view, "use-no-vehicle");
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_150, next: OTHER, changedAt: at(8) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_150, next: OTHER, changedAt: at(8) });
   const before = bytes();
   await press(view, "no-vehicle-confirm");
 
@@ -267,18 +275,18 @@ test("No vehicle whose vehicle was changed behind it: nothing saved, and the dri
 
 test("Change Trailer whose trailer was changed behind it: nothing saved, and the driver is told", async () => {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeTrailerRoute />);
   await press(view, "use-no-trailer");
 
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 30).toISOString()), next: { trailerNumber: "GFD", trailerType: TRAILER_TYPE.standard }, changedAt: at(8) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 30).toISOString()), next: { trailerNumber: "GFD", trailerType: TRAILER_TYPE.standard }, changedAt: at(8) });
   const before = bytes();
   await press(view, "no-trailer-confirm");
 
   expect(bytes()).toBe(before);
   expect(alert).toHaveBeenCalled();
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("GFD");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("GFD");
 });
 
 test("Add Trailer when a trailer arrived behind it: the typed trailer is NOT silently dropped as if added", async () => {
@@ -288,13 +296,13 @@ test("Add Trailer when a trailer arrived behind it: the typed trailer is NOT sil
   await type(view, "trailer-number", "NEW1");
   await press(view, "trailer-type-standard");
 
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(8) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(8) });
   const before = bytes();
   await press(view, "add-trailer-submit");
 
   expect(bytes()).toBe(before);
   expect(alert).toHaveBeenCalled();
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("TR23");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("TR23");
 });
 
 test("Add Vehicle when a vehicle arrived behind it: the typed vehicle is NOT silently dropped as if added", async () => {
@@ -305,13 +313,13 @@ test("Add Vehicle when a vehicle arrived behind it: the typed vehicle is NOT sil
   await type(view, "number-plate", "NEW 1");
   await type(view, "start-mileage", "5000");
 
-  await addVehicleToOpenShift({ vehicle: UNIT, startedAt: at(8) });
+  await addVehicleToOpenShift(SCOPE, { vehicle: UNIT, startedAt: at(8) });
   const before = bytes();
   await press(view, "add-vehicle-submit");
 
   expect(bytes()).toBe(before);
   expect(alert).toHaveBeenCalled();
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB12 CDE");
 });
 
 // ─── Vehicle Checks: exact use, and a stale screen says so ─────────────────
@@ -342,7 +350,7 @@ async function signedIn(node: React.ReactElement): Promise<View> {
 
 test("Vehicle Checks named for a use that is no longer the one in use is not a screen — the vehicle in use is not substituted", async () => {
   const shift = await dayWith();
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
   params.usage = vehicleUseAt(STARTED_AT.toISOString());
   params.usageState = USAGE_STATE.inUse;
 
@@ -356,7 +364,7 @@ test("a Vehicle Check whose vehicle was changed while open: completing saves not
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await signedIn(<VehicleCheckRoute />);
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(6) });
   const before = bytes();
   await press(view, "complete-check");
 
@@ -376,14 +384,14 @@ test("a stale No vehicle cannot leave a day it would make unreadable, whatever t
   await press(view, "use-no-vehicle");
   jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
 
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(8) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(8) });
   const before = bytes();
   await press(view, "no-vehicle-confirm");
 
   expect(bytes()).toBe(before);
-  expect(await readOpenShift()).not.toBeNull();
+  expect(await readOpenShift(SCOPE)).not.toBeNull();
   // The ended-without-trailer path through the store still refuses directly.
-  await expect(endVehicleUse({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_200, endedAt: at(9) })).rejects.toThrow(Error);
+  await expect(endVehicleUse(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_200, endedAt: at(9) })).rejects.toThrow(Error);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -397,9 +405,9 @@ const clockMessage = (alert: jest.SpyInstance) =>
   alert.mock.calls.some(([, message]) => typeof message === "string" && message.includes("clock is earlier"));
 
 test("Change Vehicle with the phone clock before the unit's start: refused, explained, nothing written, stays on screen", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(FUTURE(5).toISOString()), endMileage: 100_100, next: OTHER, changedAt: FUTURE(6) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(FUTURE(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: FUTURE(7) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(FUTURE(5).toISOString()), endMileage: 100_100, next: OTHER, changedAt: FUTURE(6) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(FUTURE(6).toISOString()), endMileage: 220_050, next: { ...UNIT, startMileage: 100_100 }, changedAt: FUTURE(7) });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100200");
@@ -418,7 +426,7 @@ test("Change Vehicle with the phone clock before the unit's start: refused, expl
 });
 
 test("No vehicle with the phone clock before the unit's start: refused, explained, nothing written", async () => {
-  await startLocalShift({ workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
+  await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeVehicleRoute />);
   await type(view, "end-mileage", "100200");
@@ -434,8 +442,8 @@ test("No vehicle with the phone clock before the unit's start: refused, explaine
 });
 
 test.each([["No trailer", null], ["Change Trailer", "GFD"]] as const)("%s with the phone clock before the trailer's start: refused, explained, nothing written", async (_what, nextNumber) => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: FUTURE(6) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: FUTURE(5), vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: FUTURE(6) });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeTrailerRoute />);
   if (nextNumber === null) {
@@ -452,7 +460,7 @@ test.each([["No trailer", null], ["Change Trailer", "GFD"]] as const)("%s with t
   expect(bytes()).toBe(before);
   expect(clockMessage(alert)).toBe(true);
   expect(mockRouter.dismissTo).not.toHaveBeenCalled();
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("TR23");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("TR23");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -460,14 +468,14 @@ test.each([["No trailer", null], ["Change Trailer", "GFD"]] as const)("%s with t
 // (closeout, 2026-09-28) — the old day file may already be gone
 // ═══════════════════════════════════════════════════════════════════════════
 
-const temporary = () => new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+const temporary = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_TEMP_FILE);
 const alertBodies = (alert: jest.SpyInstance): string[] =>
   alert.mock.calls.map(([, body]) => (typeof body === "string" ? body : ""));
 
 /** Change Trailer's No trailer, as the driver presses it, with `failing` installed just before the press. */
 async function pressNoTrailer(failing: () => void): Promise<string> {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const view = await mount(<ChangeTrailerRoute />);
   await press(view, "use-no-trailer");
   const before = bytes();
@@ -486,11 +494,11 @@ test("the message is decided by the error's TYPE: a failed save says it was pres
 
 test("STALE target keeps its truthful message: 'Nothing was saved', and never the save-failure one", async () => {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(5, 30) });
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await mount(<ChangeTrailerRoute />);
   await press(view, "use-no-trailer");
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(5, 30).toISOString()), next: null, changedAt: at(8) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 30).toISOString()), next: null, changedAt: at(8) });
 
   await press(view, "no-trailer-confirm");
 
@@ -525,7 +533,7 @@ test("a REPLACEMENT failure that already removed the old day file never claims '
   // Persistence itself unchanged: no live day, the complete next state kept aside, never read as the day.
   expect(file().exists).toBe(false);
   expect(JSON.parse(temporary().textSync())).toMatchObject({ trailer: null, previousTrailers: [{ trailerNumber: "TR23" }] });
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
   expect(mockRouter.dismissTo).not.toHaveBeenCalled();
 });
 
@@ -537,7 +545,7 @@ test("a REPLACEMENT failure with the old day still in place gets the same messag
 
   expect(alertBodies(alert)).toEqual([SAFE_SAVE_FAILED]);
   expect(bytes()).toBe(before);
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("TR23");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("TR23");
 });
 
 async function startShiftScreen(): Promise<View> {

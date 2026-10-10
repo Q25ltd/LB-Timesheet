@@ -28,20 +28,26 @@ import {
 import { TRAILER_TYPE } from "../../src/shift/trailer";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
 import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function TrailerDieselRoute() {
+  const scope = useAccountScope();
   const { trailer, usageState, timesheet } = useLocalSearchParams<{ trailer?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+      if (scope === null) return undefined;
+      void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, [timesheet]),
+    }, [scope, timesheet]),
   );
 
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (trailer === undefined || state === null) return <Redirect href={missingHref(timesheet, true)} />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
@@ -62,8 +68,8 @@ export default function TrailerDieselRoute() {
         fills: use.reeferDiesel,
       }}
       onLeave={() => { router.back(); }}
-      onSave={entry => save(named, entry, setShift, timesheet)}
-      onRemove={fillId => remove(named, fillId, setShift, timesheet)}
+      onSave={entry => save(scope, named, entry, setShift, timesheet)}
+      onRemove={fillId => remove(scope, named, fillId, setShift, timesheet)}
     />
   );
 }
@@ -71,9 +77,9 @@ export default function TrailerDieselRoute() {
 interface NamedTrailer { shiftId: string; trailerUseId: string; usageState: UsageState }
 type Show = (shift: LocalShift | null) => void;
 
-async function save(named: NamedTrailer, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
+async function save(scope: AccountScope, named: NamedTrailer, entry: FillEntry, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    settle(await recordReeferDiesel({
+    settle(await recordReeferDiesel(scope, {
       ...named,
       fillId: entry.fillId ?? newLocalId(),
       recordedAt: entry.recordedAt,
@@ -86,9 +92,9 @@ async function save(named: NamedTrailer, entry: FillEntry, show: Show, timesheet
   }
 }
 
-async function remove(named: NamedTrailer, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
+async function remove(scope: AccountScope, named: NamedTrailer, fillId: string, show: Show, timesheet: string | undefined): Promise<void> {
   try {
-    settle(await removeReeferDiesel({ ...named, fillId }), show, timesheet);
+    settle(await removeReeferDiesel(scope, { ...named, fillId }), show, timesheet);
   } catch (error: unknown) {
     Alert.alert("Couldn't remove that", saveFailureMessage(error));
     throw error;

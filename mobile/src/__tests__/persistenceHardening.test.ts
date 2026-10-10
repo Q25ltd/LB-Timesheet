@@ -12,7 +12,7 @@
  *                    refused at the store with the day unchanged, and refused
  *                    by the reader if a saved day claims it.
  */
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
   OPEN_SHIFT_TEMP_FILE,
@@ -36,6 +36,10 @@ import {
 import { TRAILER_TYPE } from "../shift/trailer";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
@@ -43,20 +47,20 @@ const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", 
 const OTHER: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 
-const live = () => new File(Paths.document, OPEN_SHIFT_FILE);
-const temp = () => new File(Paths.document, OPEN_SHIFT_TEMP_FILE);
+const live = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
+const temp = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_TEMP_FILE);
 const bytes = () => live().textSync();
 /** Every recovery file in the documents directory, name → bytes. */
 function recoveries(): Map<string, string> {
   const found = new Map<string, string>();
-  for (const entry of new Directory(Paths.document).list()) {
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     const name = entry.uri.split("/").pop() ?? "";
     if (name.startsWith(RECOVERY_FILE_PREFIX) && entry instanceof File) found.set(name, entry.textSync());
   }
   return found;
 }
 function removeRecoveries(): void {
-  for (const entry of new Directory(Paths.document).list()) {
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     const name = entry.uri.split("/").pop() ?? "";
     if ((name.startsWith(RECOVERY_FILE_PREFIX) || name === OPEN_SHIFT_TEMP_FILE) && entry instanceof File) entry.delete();
   }
@@ -66,11 +70,11 @@ function writeRaw(target: File, content: string): void {
   target.write(content);
 }
 const dayWith = (vehicle: VehicleDetails | null = UNIT): Promise<LocalShift> =>
-  startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
+  startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
 const UNREADABLE = '{"id":"yesterday","status":"open","vehicle":{"startMileage":12.5},"note":"do not lose me"}';
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   removeRecoveries();
 });
 afterEach(() => { jest.restoreAllMocks(); });
@@ -81,22 +85,22 @@ afterEach(() => { jest.restoreAllMocks(); });
 
 test("Start Shift over an UNREADABLE day moves its exact bytes to a recovery file, then starts the new day", async () => {
   writeRaw(live(), UNREADABLE);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 
   const shift = await dayWith();
 
   const saved = [...recoveries().values()];
   expect(saved).toEqual([UNREADABLE]);
   expect([...recoveries().keys()][0]).toMatch(new RegExp(`^${RECOVERY_FILE_PREFIX}unreadable-\\d+-[0-9a-f-]{36}\\.json$`));
-  expect((await readOpenShift())?.id).toBe(shift.id);
+  expect((await readOpenShift(SCOPE))?.id).toBe(shift.id);
 });
 
 test("a recovery file is never read as the day — it sits outside the open-shift path", async () => {
   writeRaw(live(), UNREADABLE);
   await dayWith();
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
 
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
   expect(recoveries().size).toBe(1);
 });
 
@@ -119,7 +123,7 @@ test("a recovery name that is already taken fails CLOSED — nothing overwritten
   const [taken] = [...recoveries().keys()];
   expect(taken).toBeDefined();
   const takenBytes = recoveries().get(taken ?? "") ?? "";
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   writeRaw(live(), `${UNREADABLE} second`);
 
   await expect(dayWith()).rejects.toThrow(Error);
@@ -144,10 +148,10 @@ test("CONTROL: a READABLE open day is simply returned — nothing is moved", asy
 test("a successful write leaves the complete new day live, and no temporary file behind", async () => {
   const shift = await dayWith();
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
 
   expect(temp().exists).toBe(false);
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("XY34 ZZZ");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("XY34 ZZZ");
   expect(JSON.parse(bytes())).toMatchObject({ previousVehicles: [{ numberPlate: "AB12 CDE", endMileage: 100_100 }] });
 });
 
@@ -156,7 +160,7 @@ test("a FAILED temporary write leaves the live day byte-for-byte, and the failur
   const before = bytes();
   jest.spyOn(File.prototype, "write").mockImplementation(() => { throw new Error("disk full"); });
 
-  await expect(changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
+  await expect(changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
     .rejects.toThrow(SafeSaveFailedError);
 
   jest.restoreAllMocks();
@@ -172,14 +176,14 @@ test("a temporary write that lands INCOMPLETE is never moved into place", async 
     return this.uri.endsWith(OPEN_SHIFT_TEMP_FILE) ? stored.slice(0, Math.floor(stored.length / 2)) : stored;
   });
 
-  await expect(recordVehicleFill({
+  await expect(recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
     fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "",
   })).rejects.toThrow(SafeSaveFailedError);
 
   jest.restoreAllMocks();
   expect(bytes()).toBe(before);
-  expect(await readOpenShift()).not.toBeNull();
+  expect(await readOpenShift(SCOPE)).not.toBeNull();
 });
 
 test("a FAILED replacement is reported — never silently counted as saved — and the previous day still reads", async () => {
@@ -187,22 +191,22 @@ test("a FAILED replacement is reported — never silently counted as saved — a
   const before = bytes();
   jest.spyOn(File.prototype, "moveSync").mockImplementation(() => { throw new Error("rename failed"); });
 
-  await expect(changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
+  await expect(changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
     .rejects.toThrow(SafeSaveFailedError);
 
   jest.restoreAllMocks();
   expect(bytes()).toBe(before);
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB12 CDE");
 });
 
 test("a leftover temporary file is NEVER read as the day after a restart", async () => {
   await dayWith();
   const valid = bytes();
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   // A crash left a complete next day in the temporary file, and no live day.
   writeRaw(temp(), valid);
 
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("a leftover temporary file is PRESERVED as recovery at the next write — never promoted, never deleted", async () => {
@@ -210,14 +214,14 @@ test("a leftover temporary file is PRESERVED as recovery at the next write — n
   const leftover = bytes().replace("AB12 CDE", "UNCONFIRMED");
   writeRaw(temp(), leftover);
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) });
 
   expect(temp().exists).toBe(false);
   const saved = [...recoveries().entries()];
   expect(saved).toHaveLength(1);
   expect(saved[0]?.[0]).toMatch(new RegExp(`^${RECOVERY_FILE_PREFIX}unfinished-`));
   expect(saved[0]?.[1]).toBe(leftover);
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("XY34 ZZZ");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("XY34 ZZZ");
 });
 
 test("a next state the READER would refuse is never written — the live day is untouched", async () => {
@@ -229,7 +233,7 @@ test("a next state the READER would refuse is never written — the live day is 
   jest.spyOn(JSON, "stringify").mockImplementationOnce((value: unknown) =>
     realStringify(value).replace('"startMileage":100000', '"startMileage":12.5'));
 
-  await expect(recordVehicleFill({
+  await expect(recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
     fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "",
   })).rejects.toThrow("Refusing to store a day the reader would refuse");
@@ -242,22 +246,22 @@ test("a next state the READER would refuse is never written — the live day is 
 test("after a FAILED replacement the next write succeeds, and keeps the unconfirmed state as recovery", async () => {
   const shift = await dayWith();
   jest.spyOn(File.prototype, "moveSync").mockImplementationOnce(() => { throw new Error("rename failed"); });
-  await expect(changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
+  await expect(changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }))
     .rejects.toThrow(SafeSaveFailedError);
   jest.restoreAllMocks();
   const unconfirmed = temp().textSync();
 
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_200, next: OTHER, changedAt: at(10) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_200, next: OTHER, changedAt: at(10) });
 
   expect(temp().exists).toBe(false);
   expect([...recoveries().values()]).toEqual([unconfirmed]);
-  expect((await readOpenShift())?.previousVehicles[0]?.endMileage).toBe(100_200);
+  expect((await readOpenShift(SCOPE))?.previousVehicles[0]?.endMileage).toBe(100_200);
 });
 
 test("Start Shift with only a leftover temporary file starts a fresh day and keeps the leftover as recovery", async () => {
   await dayWith();
   const leftover = bytes();
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   writeRaw(temp(), leftover);
 
   const shift = await dayWith(OTHER);
@@ -270,25 +274,25 @@ test("two queued writes both land, in order, through the safe path", async () =>
   const shift = await dayWith();
 
   await Promise.all([
-    recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "" }),
-    recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(7), litres: null, note: "" }),
+    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "" }),
+    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(7), litres: null, note: "" }),
   ]);
 
-  expect((await readOpenShift())?.vehicle?.fills.map(fill => fill.id)).toEqual(["f1", "f2"]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.fills.map(fill => fill.id)).toEqual(["f1", "f2"]);
   expect(temp().exists).toBe(false);
 });
 
 test.each([["mutation then Discard", true], ["Discard then mutation", false]])("%s: the day ends discarded — no write resurrects it", async (_order, mutationFirst) => {
   const shift = await dayWith();
-  const mutate = () => saveVehicleCheckDraft({
+  const mutate = () => saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: "c1",
     startedAt: at(5, 5), answers: [{ key: "horn", result: "na", note: "" }],
   });
 
-  await (mutationFirst ? Promise.all([mutate(), clearOpenShift()]) : Promise.all([clearOpenShift(), mutate()]));
+  await (mutationFirst ? Promise.all([mutate(), clearOpenShift(SCOPE)]) : Promise.all([clearOpenShift(SCOPE), mutate()]));
 
   expect(live().exists).toBe(false);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("a failed write followed by Discard leaves no day and no resurrection", async () => {
@@ -296,14 +300,14 @@ test("a failed write followed by Discard leaves no day and no resurrection", asy
   jest.spyOn(File.prototype, "moveSync").mockImplementationOnce(() => { throw new Error("rename failed"); });
 
   await Promise.all([
-    changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }).catch(() => null),
-    clearOpenShift(),
+    changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(9) }).catch(() => null),
+    clearOpenShift(SCOPE),
   ]);
   jest.restoreAllMocks();
 
   expect(live().exists).toBe(false);
   expect(temp().exists).toBe(false);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
   // Nor is the discarded day's unconfirmed change kept as recovery later.
   await dayWith(OTHER);
   expect(recoveries().size).toBe(0);
@@ -315,13 +319,13 @@ test("a failed write followed by Discard leaves no day and no resurrection", asy
 
 async function dayWithTrailer(): Promise<LocalShift> {
   const shift = await dayWith();
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(6) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(6) });
   return shift;
 }
 
 test.each([
-  ["Change Vehicle", async (shift: LocalShift) => changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(4, 59) })],
-  ["No vehicle", async (shift: LocalShift) => endVehicleUse({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, endedAt: at(4, 59) })],
+  ["Change Vehicle", async (shift: LocalShift) => changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, next: OTHER, changedAt: at(4, 59) })],
+  ["No vehicle", async (shift: LocalShift) => endVehicleUse(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_100, endedAt: at(4, 59) })],
 ] as const)("%s with the phone clock BEFORE the vehicle's start is refused, and the day is unchanged — restart included", async (_what, act) => {
   const shift = await dayWith();
   const before = bytes();
@@ -329,7 +333,7 @@ test.each([
   await expect(act(shift)).rejects.toThrow(UseEndsBeforeItStartedError);
 
   expect(bytes()).toBe(before);
-  expect((await readOpenShift())?.vehicle?.startedAt).toBe(STARTED_AT.toISOString());
+  expect((await readOpenShift(SCOPE))?.vehicle?.startedAt).toBe(STARTED_AT.toISOString());
 });
 
 test.each([
@@ -339,28 +343,28 @@ test.each([
   const shift = await dayWithTrailer();
   const before = bytes();
 
-  await expect(changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next, changedAt: at(5, 59) }))
+  await expect(changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next, changedAt: at(5, 59) }))
     .rejects.toThrow(UseEndsBeforeItStartedError);
 
   expect(bytes()).toBe(before);
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("TR23");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("TR23");
 });
 
 test("an end at the very instant of the start is a use of no length — accepted, and it reads back", async () => {
   const shift = await dayWith();
 
-  const day = await endVehicleUse({ shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_000, endedAt: STARTED_AT });
+  const day = await endVehicleUse(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_000, endedAt: STARTED_AT });
 
   expect(day?.previousVehicles).toEqual([expect.objectContaining({ startedAt: STARTED_AT.toISOString(), endedAt: STARTED_AT.toISOString() })]);
-  expect((await readOpenShift())?.previousVehicles).toHaveLength(1);
+  expect((await readOpenShift(SCOPE))?.previousVehicles).toHaveLength(1);
 });
 
 test("a trailer ended at the very instant it began is accepted, and it reads back", async () => {
   const shift = await dayWithTrailer();
 
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next: null, changedAt: at(6) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next: null, changedAt: at(6) });
 
-  expect((await readOpenShift())?.previousTrailers).toEqual([expect.objectContaining({ startedAt: at(6).toISOString(), endedAt: at(6).toISOString() })]);
+  expect((await readOpenShift(SCOPE))?.previousTrailers).toEqual([expect.objectContaining({ startedAt: at(6).toISOString(), endedAt: at(6).toISOString() })]);
 });
 
 test.each([
@@ -372,7 +376,7 @@ test.each([
 
   writeRaw(live(), JSON.stringify({ ...day, [field]: [use] }));
 
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("CONTROL: the same ended uses, in order, load", async () => {
@@ -383,7 +387,7 @@ test("CONTROL: the same ended uses, in order, load", async () => {
     previousVehicles: [{ ...UNIT, startedAt: at(4).toISOString(), checks: [], fills: [], endMileage: 100_000, endedAt: at(4).toISOString() }],
   }));
 
-  expect(await readOpenShift()).not.toBeNull();
+  expect(await readOpenShift(SCOPE)).not.toBeNull();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -401,7 +405,7 @@ async function everyFile(): Promise<{ recoveryName: string; recoveryBytes: strin
   writeRaw(temp(), bytes().replace("AB12 CDE", "UNCONFIRMED"));
   const recoveryName = `${RECOVERY_FILE_PREFIX}unreadable-1-keep.json`;
   const recoveryBytes = "not a day, kept on purpose";
-  writeRaw(new File(Paths.document, recoveryName), recoveryBytes);
+  writeRaw(new File(accountDirectoryOf(SCOPE), recoveryName), recoveryBytes);
   return { recoveryName, recoveryBytes };
 }
 const isTemp = (file: File) => file.uri.endsWith(OPEN_SHIFT_TEMP_FILE);
@@ -409,12 +413,12 @@ const isTemp = (file: File) => file.uri.endsWith(OPEN_SHIFT_TEMP_FILE);
 test("a successful Discard removes the day and its temporary file, and leaves every recovery file byte-for-byte", async () => {
   const { recoveryName, recoveryBytes } = await everyFile();
 
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
 
   expect(live().exists).toBe(false);
   expect(temp().exists).toBe(false);
   expect(recoveries().get(recoveryName)).toBe(recoveryBytes);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("Discard failing BEFORE anything is removed is an ordinary failure: the day is exactly as it was, and reads back after a restart", async () => {
@@ -423,14 +427,14 @@ test("Discard failing BEFORE anything is removed is an ordinary failure: the day
   const leftover = temp().textSync();
   jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
 
-  const failure = clearOpenShift();
+  const failure = clearOpenShift(SCOPE);
 
   await expect(failure).rejects.toThrow("busy");
   await expect(failure).rejects.not.toBeInstanceOf(DiscardIncompleteError);
   jest.restoreAllMocks();
   expect(bytes()).toBe(before);
   expect(temp().textSync()).toBe(leftover);
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB12 CDE");
 });
 
 test("live file REMOVED, then the temporary file fails: DiscardIncompleteError — never 'nothing changed' — and a restart shows no day", async () => {
@@ -439,17 +443,17 @@ test("live file REMOVED, then the temporary file fails: DiscardIncompleteError �
   // The temporary file cannot even be looked at once the live file is gone.
   jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
     if (isTemp(this)) throw new Error("busy");
-    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+    return accountDirectoryOf(SCOPE).list().some(entry => entry.uri === this.uri);
   });
 
-  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+  await expect(clearOpenShift(SCOPE)).rejects.toBeInstanceOf(DiscardIncompleteError);
 
   jest.restoreAllMocks();
   // What is genuinely there: no live day, the leftover as it was, recovery untouched.
   expect(live().exists).toBe(false);
   expect(temp().textSync()).toBe(leftover);
   expect(recoveries().get(recoveryName)).toBe(recoveryBytes);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("a delete that throws AFTER removing the live file is incomplete too — the disk, not the error, decides", async () => {
@@ -458,25 +462,25 @@ test("a delete that throws AFTER removing the live file is incomplete too — th
   jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => {
     // Gone from its path, then the call reports failure. (Moved through its own
     // handle: the mock's move re-points the handle it is called on.)
-    live().moveSync(new File(Paths.document, `${RECOVERY_FILE_PREFIX}test-moved-away.json`));
+    live().moveSync(new File(accountDirectoryOf(SCOPE), `${RECOVERY_FILE_PREFIX}test-moved-away.json`));
     throw new Error("busy");
   });
 
-  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+  await expect(clearOpenShift(SCOPE)).rejects.toBeInstanceOf(DiscardIncompleteError);
 
   jest.restoreAllMocks();
   expect(live().exists).toBe(false);
   expect(temp().textSync()).toBe(leftover);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("with NO day open, a temporary file that cannot be removed is an ordinary failure — nothing was removed", async () => {
   await dayWith();
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   writeRaw(temp(), "leftover");
   jest.spyOn(File.prototype, "delete").mockImplementationOnce(() => { throw new Error("busy"); });
 
-  const failure = clearOpenShift();
+  const failure = clearOpenShift(SCOPE);
 
   await expect(failure).rejects.toThrow("busy");
   await expect(failure).rejects.not.toBeInstanceOf(DiscardIncompleteError);
@@ -486,12 +490,12 @@ test("a Discard that failed part-way does not poison the queue: the next Discard
   await everyFile();
   jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
     if (isTemp(this)) throw new Error("busy");
-    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+    return accountDirectoryOf(SCOPE).list().some(entry => entry.uri === this.uri);
   });
-  await expect(clearOpenShift()).rejects.toBeInstanceOf(DiscardIncompleteError);
+  await expect(clearOpenShift(SCOPE)).rejects.toBeInstanceOf(DiscardIncompleteError);
   jest.restoreAllMocks();
 
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
 
   expect(live().exists).toBe(false);
   expect(temp().exists).toBe(false);
@@ -502,10 +506,10 @@ test("a write queued behind a Discard that failed part-way does not resurrect th
   writeRaw(temp(), "leftover");
   jest.spyOn(File.prototype, "exists", "get").mockImplementation(function (this: File) {
     if (isTemp(this)) throw new Error("busy");
-    return new Directory(Paths.document).list().some(entry => entry.uri === this.uri);
+    return accountDirectoryOf(SCOPE).list().some(entry => entry.uri === this.uri);
   });
-  const discard = clearOpenShift();
-  const write = recordVehicleFill({
+  const discard = clearOpenShift(SCOPE);
+  const write = recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
     fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 10, note: "",
   });
@@ -514,5 +518,5 @@ test("a write queued behind a Discard that failed part-way does not resurrect th
   expect(await write).toBeNull();
   jest.restoreAllMocks();
   expect(live().exists).toBe(false);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });

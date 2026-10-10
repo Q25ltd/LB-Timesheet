@@ -16,7 +16,7 @@
  * check can never land on a different day or a different vehicle, and a
  * registration seen again later does not inherit a check made earlier.
  */
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
   USAGE_STATE,
@@ -33,6 +33,10 @@ import {
 import { checklistFor, checklistItems } from "../shift/checklists";
 import { checkStateOf, resultsOf, summarise, type CheckAnswer } from "../shift/vehicleCheck";
 import { vehicleUseAt } from "./useIdAt";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const STARTED_AT = new Date(2026, 8, 13, 5, 42);
 const CHECK_STARTED = new Date(2026, 8, 13, 5, 50);
@@ -41,10 +45,10 @@ const UNIT = { vehicleClass: "class1" as const, numberPlate: "AB24 XYZ", startMi
 /** The authenticated driver who certifies a check. */
 const DRIVER = "user_1";
 
-const storedFile = () => new File(Paths.document, OPEN_SHIFT_FILE);
+const storedFile = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
 
 async function dayWith(vehicle: VehicleDetails = UNIT): Promise<LocalShift> {
-  return startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
+  return startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
 }
 
 function write(shift: LocalShift, answers: CheckAnswer[], checkId = "check-1"): VehicleCheckWrite {
@@ -60,7 +64,7 @@ function allOk(vehicleClass: "class1" | "class2" | "van" = "class1"): CheckAnswe
   return checklistItems(checklistFor(vehicleClass)).map(entry => ok(entry.key));
 }
 
-beforeEach(async () => { await clearOpenShift(); });
+beforeEach(async () => { await clearOpenShift(SCOPE); });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Where checks live
@@ -68,24 +72,24 @@ beforeEach(async () => { await clearOpenShift(); });
 
 test("a vehicle starts with NO checks — not an empty draft, not a placeholder", async () => {
   await dayWith();
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 
-  await clearOpenShift();
-  await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: null });
-  await addVehicleToOpenShift({ vehicle: UNIT, startedAt: CHECK_STARTED });
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  await clearOpenShift(SCOPE);
+  await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: null });
+  await addVehicleToOpenShift(SCOPE, { vehicle: UNIT, startedAt: CHECK_STARTED });
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("a day saved BEFORE checks existed loads, with no checks rather than a guessed one", async () => {
   const file = storedFile();
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
+    ownerUserId: SCOPE.userId, id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
     startedAt: STARTED_AT.toISOString(), vehicle: { ...UNIT, startedAt: STARTED_AT.toISOString() },
     status: "open", createdAt: STARTED_AT.toISOString(),
   }));
 
-  const shift = await readOpenShift();
+  const shift = await readOpenShift(SCOPE);
   expect(shift?.vehicle?.checks).toEqual([]);
   expect(checkStateOf(shift?.vehicle?.checks ?? [])).toBe("not-started");
 });
@@ -100,7 +104,7 @@ test("a DRAFT holds only what the driver CHANGED — the defaults are not copied
   // change. Only the two real changes are stored.
   const answers = [ok("front-view"), na("hv-cut-off"), na("horn"), defect("oil-leaks", "Oil drip")];
 
-  const check = await saveVehicleCheckDraft(write(shift, answers));
+  const check = await saveVehicleCheckDraft(SCOPE, write(shift, answers));
 
   expect(check).toEqual({
     id: "check-1", checklist: "hgv-unit", checklistVersion: 1,
@@ -110,24 +114,24 @@ test("a DRAFT holds only what the driver CHANGED — the defaults are not copied
       { key: "oil-leaks", label: "Oil leaks", result: "fail", note: "Oil drip" },
     ],
   });
-  expect(checkStateOf((await readOpenShift())?.vehicle?.checks ?? [])).toBe("in-progress");
+  expect(checkStateOf((await readOpenShift(SCOPE))?.vehicle?.checks ?? [])).toBe("in-progress");
 });
 
 test("a row put BACK to its default drops out of the draft again", async () => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft(write(shift, [na("horn")]));
-  expect((await readOpenShift())?.vehicle?.checks[0]?.items).toHaveLength(1);
+  await saveVehicleCheckDraft(SCOPE, write(shift, [na("horn")]));
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.items).toHaveLength(1);
 
-  const back = await saveVehicleCheckDraft(write(shift, [ok("horn")]));
+  const back = await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn")]));
 
   expect(back?.items).toEqual([]);
 });
 
 test("the results shown are the class defaults with the driver's changes laid over them", async () => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft(write(shift, [defect("oil-leaks", "Oil drip"), ok("hv-cut-off")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [defect("oil-leaks", "Oil drip"), ok("hv-cut-off")]));
 
-  const stored = (await readOpenShift())?.vehicle?.checks[0] ?? null;
+  const stored = (await readOpenShift(SCOPE))?.vehicle?.checks[0] ?? null;
   const results = resultsOf(checklistFor("class1"), stored);
 
   expect(results.size).toBe(42);
@@ -140,9 +144,9 @@ test("the results shown are the class defaults with the driver's changes laid ov
 test("a defect's description is kept exactly as typed while the check is a draft", async () => {
   const shift = await dayWith();
 
-  await saveVehicleCheckDraft(write(shift, [defect("oil-leaks", "Oil drip under ")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [defect("oil-leaks", "Oil drip under ")]));
 
-  expect((await readOpenShift())?.vehicle?.checks[0]?.items).toEqual([
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.items).toEqual([
     { key: "oil-leaks", label: "Oil leaks", result: "fail", note: "Oil drip under " },
   ]);
 });
@@ -150,16 +154,16 @@ test("a defect's description is kept exactly as typed while the check is a draft
 test("a defect with nothing typed yet is stored as a defect with NO description, not an empty one", async () => {
   const shift = await dayWith();
 
-  await saveVehicleCheckDraft(write(shift, [defect("horn", "")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [defect("horn", "")]));
 
-  expect((await readOpenShift())?.vehicle?.checks[0]?.items[0]?.note).toBeNull();
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.items[0]?.note).toBeNull();
 });
 
 test("switching DEFECT back leaves no description attached — and back to the default, no row at all", async () => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft(write(shift, [defect("horn", "Horn silent"), defect("steering", "Play")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [defect("horn", "Horn silent"), defect("steering", "Play")]));
 
-  const check = await saveVehicleCheckDraft(write(shift, [ok("horn"), na("steering")]));
+  const check = await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn"), na("steering")]));
 
   // `horn` is back at its default and disappears; `steering` is N/A, which is
   // a change from its OK default, so it stays — with no description.
@@ -168,9 +172,9 @@ test("switching DEFECT back leaves no description attached — and back to the d
 
 test("later saves keep the check's ORIGINAL start time", async () => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft(write(shift, [ok("horn")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn")]));
 
-  const later = await saveVehicleCheckDraft({ ...write(shift, [ok("horn"), ok("steering")]), startedAt: CHECK_DONE });
+  const later = await saveVehicleCheckDraft(SCOPE, { ...write(shift, [ok("horn"), ok("steering")]), startedAt: CHECK_DONE });
 
   expect(later?.startedAt).toBe(CHECK_STARTED.toISOString());
 });
@@ -178,7 +182,7 @@ test("later saves keep the check's ORIGINAL start time", async () => {
 test("changed items are stored in checklist order, whatever order they were changed in", async () => {
   const shift = await dayWith();
 
-  const check = await saveVehicleCheckDraft(write(shift, [ok("other-equipment"), na("front-view"), na("battery")]));
+  const check = await saveVehicleCheckDraft(SCOPE, write(shift, [ok("other-equipment"), na("front-view"), na("battery")]));
 
   expect(check?.items.map(entry => entry.key)).toEqual(["front-view", "battery", "other-equipment"]);
 });
@@ -187,8 +191,8 @@ test("an item that is not on this vehicle's checklist is REFUSED, and nothing is
   const shift = await dayWith();
 
   // `tow-bar` is a van item; this is a Class 1 unit.
-  await expect(saveVehicleCheckDraft(write(shift, [ok("tow-bar")]))).rejects.toThrow();
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  await expect(saveVehicleCheckDraft(SCOPE, write(shift, [ok("tow-bar")]))).rejects.toThrow();
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -201,7 +205,7 @@ test("COMPLETING writes the full record — every row, defaults included, each w
   const answers = [...resultsOf(checklistFor("class1"), null).values()]
     .map(answer => (answer.key === "oil-leaks" ? defect("oil-leaks", "Oil level low.") : answer));
 
-  const check = await completeVehicleCheck({ ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const check = await completeVehicleCheck(SCOPE, { ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
 
   expect(check?.items).toHaveLength(42);
   expect(check?.items.find(entry => entry.key === "front-view")).toEqual({
@@ -224,8 +228,8 @@ test("a completed record reads back EXACTLY as it was written — sections inclu
   const shift = await dayWith();
   const answers = allOk().map(answer => (answer.key === "wipers" ? defect("wipers", "Blade split.") : answer));
 
-  const written = await completeVehicleCheck({ ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
-  const read = (await readOpenShift())?.vehicle?.checks[0];
+  const written = await completeVehicleCheck(SCOPE, { ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const read = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
 
   expect(read).toEqual(written);
   expect(read?.items.every(entry => entry.section !== undefined)).toBe(true);
@@ -234,9 +238,9 @@ test("a completed record reads back EXACTLY as it was written — sections inclu
 test("a DRAFT records no layout — it is read against the checklist it is being answered on", async () => {
   const shift = await dayWith();
 
-  await saveVehicleCheckDraft(write(shift, [defect("wipers", "Blade split."), ok("hv-cut-off")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [defect("wipers", "Blade split."), ok("hv-cut-off")]));
 
-  const stored = (await readOpenShift())?.vehicle?.checks[0];
+  const stored = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(stored?.items).toEqual([
     { key: "wipers", label: "Windscreen wipers", result: "fail", note: "Blade split." },
     { key: "hv-cut-off", label: "High-voltage cut-off", result: "pass", note: null },
@@ -249,43 +253,43 @@ test("completing stores every answer, the completion time, and trimmed descripti
   const shift = await dayWith();
   const answers = allOk().map(answer => (answer.key === "oil-leaks" ? defect("oil-leaks", "  Oil level low.  ") : answer));
 
-  const check = await completeVehicleCheck({ ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const check = await completeVehicleCheck(SCOPE, { ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER });
 
   expect(check?.status).toBe("completed");
   expect(check?.completedAt).toBe(CHECK_DONE.toISOString());
   expect(check?.items).toHaveLength(checklistItems(checklistFor("class1")).length);
   expect(check?.items.find(entry => entry.key === "oil-leaks")?.note).toBe("Oil level low.");
-  expect(checkStateOf((await readOpenShift())?.vehicle?.checks ?? [])).toBe("completed");
+  expect(checkStateOf((await readOpenShift(SCOPE))?.vehicle?.checks ?? [])).toBe("completed");
 });
 
 test("a check with ANY unanswered item cannot be completed", async () => {
   const shift = await dayWith();
   const allButOne = allOk().slice(1);
 
-  await expect(completeVehicleCheck({ ...write(shift, allButOne), completedAt: CHECK_DONE, completedBy: DRIVER })).rejects.toThrow();
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  await expect(completeVehicleCheck(SCOPE, { ...write(shift, allButOne), completedAt: CHECK_DONE, completedBy: DRIVER })).rejects.toThrow();
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test.each(["", "   "])("a defect described as %p cannot be completed", async note => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft(write(shift, [ok("horn")]));
+  await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn")]));
   const answers = allOk().map(answer => (answer.key === "horn" ? defect("horn", note) : answer));
 
-  await expect(completeVehicleCheck({ ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER })).rejects.toThrow();
+  await expect(completeVehicleCheck(SCOPE, { ...write(shift, answers), completedAt: CHECK_DONE, completedBy: DRIVER })).rejects.toThrow();
   // The draft is untouched by the refused completion.
-  expect((await readOpenShift())?.vehicle?.checks[0]?.status).toBe("draft");
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.status).toBe("draft");
 });
 
 test("rapid repeated completion makes ONE completed check, and does not move its time", async () => {
   const shift = await dayWith();
 
   const results = await Promise.all([
-    completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER }),
-    completeVehicleCheck({ ...write(shift, allOk()), completedAt: new Date(2026, 8, 13, 6, 3), completedBy: DRIVER }),
-    completeVehicleCheck({ ...write(shift, allOk()), completedAt: new Date(2026, 8, 13, 6, 4), completedBy: DRIVER }),
+    completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER }),
+    completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: new Date(2026, 8, 13, 6, 3), completedBy: DRIVER }),
+    completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: new Date(2026, 8, 13, 6, 4), completedBy: DRIVER }),
   ]);
 
-  const checks = (await readOpenShift())?.vehicle?.checks ?? [];
+  const checks = (await readOpenShift(SCOPE))?.vehicle?.checks ?? [];
   expect(checks).toHaveLength(1);
   expect(checks[0]?.completedAt).toBe(CHECK_DONE.toISOString());
   for (const result of results) expect(result).toEqual(checks[0]);
@@ -293,22 +297,22 @@ test("rapid repeated completion makes ONE completed check, and does not move its
 
 test("a late draft save cannot REOPEN a completed check", async () => {
   const shift = await dayWith();
-  const completed = await completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const completed = await completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
-  const late = await saveVehicleCheckDraft(write(shift, [defect("horn", "changed my mind")]));
+  const late = await saveVehicleCheckDraft(SCOPE, write(shift, [defect("horn", "changed my mind")]));
 
   expect(late).toEqual(completed);
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([completed]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([completed]);
 });
 
 test("a second check is not started beside an existing one — repeat checks are not built yet", async () => {
   const shift = await dayWith();
-  const completed = await completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const completed = await completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
-  const other = await saveVehicleCheckDraft(write(shift, [ok("horn")], "check-2"));
+  const other = await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn")], "check-2"));
 
   expect(other).toEqual(completed);
-  expect((await readOpenShift())?.vehicle?.checks).toHaveLength(1);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toHaveLength(1);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -318,33 +322,33 @@ test("a second check is not started beside an existing one — repeat checks are
 test("a DRAFT is nobody's declaration — no completion time, no driver", async () => {
   const shift = await dayWith();
 
-  const draft = await saveVehicleCheckDraft(write(shift, [defect("horn", "Horn silent")]));
+  const draft = await saveVehicleCheckDraft(SCOPE, write(shift, [defect("horn", "Horn silent")]));
 
   // `completedAt === null` is the whole answer to "has this walkaround been
   // certified?", whatever results the screen is showing.
   expect(draft?.status).toBe("draft");
   expect(draft?.completedAt).toBeNull();
   expect(draft?.completedBy).toBeNull();
-  expect(checkStateOf((await readOpenShift())?.vehicle?.checks ?? [])).toBe("in-progress");
+  expect(checkStateOf((await readOpenShift(SCOPE))?.vehicle?.checks ?? [])).toBe("in-progress");
 });
 
 test("completing records WHO declared it, and the record is auditable back to them", async () => {
   const shift = await dayWith();
 
-  const check = await completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const check = await completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
   expect(check?.completedBy).toBe(DRIVER);
   expect(check?.completedAt).toBe(CHECK_DONE.toISOString());
-  expect((await readOpenShift())?.vehicle?.checks[0]?.completedBy).toBe(DRIVER);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.completedBy).toBe(DRIVER);
 });
 
 test("a certification with no driver is REFUSED, not stored anonymously", async () => {
   const shift = await dayWith();
 
-  await expect(completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: "" }))
+  await expect(completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: "" }))
     .rejects.toThrow();
 
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("REPLAYING the same completion event makes no second certificate", async () => {
@@ -352,14 +356,14 @@ test("REPLAYING the same completion event makes no second certificate", async ()
   // and may be replayed. A replay resolves to the record already written — it
   // never certifies twice, and never moves the time or the author.
   const shift = await dayWith();
-  const first = await completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const first = await completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
-  const replay = await completeVehicleCheck({
+  const replay = await completeVehicleCheck(SCOPE, {
     ...write(shift, allOk()), completedAt: new Date(2026, 8, 13, 9, 30), completedBy: "someone-else",
   });
 
   expect(replay).toEqual(first);
-  const checks = (await readOpenShift())?.vehicle?.checks ?? [];
+  const checks = (await readOpenShift(SCOPE))?.vehicle?.checks ?? [];
   expect(checks).toHaveLength(1);
   expect(checks[0]?.completedAt).toBe(CHECK_DONE.toISOString());
   expect(checks[0]?.completedBy).toBe(DRIVER);
@@ -370,12 +374,12 @@ test("a stored 'completed' check with no driver cannot be read as a completed ch
   storeWithChecks([noDriver]);
 
   // Unauditable: it claims a walkaround was certified but not by whom.
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("tomorrow's checklist cannot add rows to yesterday's completed record", async () => {
   storeWithChecks([goodCompleted()]);
-  const stored = (await readOpenShift())?.vehicle?.checks[0] ?? null;
+  const stored = (await readOpenShift(SCOPE))?.vehicle?.checks[0] ?? null;
   const today = checklistFor("class1");
 
   // A later version of the same checklist, with a row that did not exist when
@@ -402,34 +406,34 @@ test("tomorrow's checklist cannot add rows to yesterday's completed record", asy
 test("a check is written only onto the day AND vehicle use it was begun on", async () => {
   const shift = await dayWith();
 
-  expect(await saveVehicleCheckDraft({ ...write(shift, [ok("horn")]), shiftId: "another-day" })).toBeNull();
-  expect(await saveVehicleCheckDraft({ ...write(shift, [ok("horn")]), vehicleUseId: vehicleUseAt(CHECK_DONE.toISOString()) })).toBeNull();
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect(await saveVehicleCheckDraft(SCOPE, { ...write(shift, [ok("horn")]), shiftId: "another-day" })).toBeNull();
+  expect(await saveVehicleCheckDraft(SCOPE, { ...write(shift, [ok("horn")]), vehicleUseId: vehicleUseAt(CHECK_DONE.toISOString()) })).toBeNull();
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("the SAME registration on a new day inherits nothing — an old check proves nothing now", async () => {
   const first = await dayWith();
-  await completeVehicleCheck({ ...write(first, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  await completeVehicleCheck(SCOPE, { ...write(first, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   const second = await dayWith();
 
   expect(second.vehicle?.numberPlate).toBe(first.vehicle?.numberPlate);
   expect(second.vehicle?.checks).toEqual([]);
   expect(checkStateOf(second.vehicle?.checks ?? [])).toBe("not-started");
   // And the completed check from the first day cannot be written into it.
-  expect(await completeVehicleCheck({ ...write(first, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER })).toBeNull();
+  expect(await completeVehicleCheck(SCOPE, { ...write(first, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER })).toBeNull();
 });
 
 test("each class is checked against its own list — a van check refuses HGV items", async () => {
   const shift = await dayWith({ vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640 });
 
-  const check = await completeVehicleCheck({ ...write(shift, allOk("van")), completedAt: CHECK_DONE, completedBy: DRIVER });
+  const check = await completeVehicleCheck(SCOPE, { ...write(shift, allOk("van")), completedAt: CHECK_DONE, completedBy: DRIVER });
   expect(check?.checklist).toBe("van");
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
 
   const van = await dayWith({ vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640 });
-  await expect(saveVehicleCheckDraft(write(van, [ok("air-leaks")]))).rejects.toThrow();
+  await expect(saveVehicleCheckDraft(SCOPE, write(van, [ok("air-leaks")]))).rejects.toThrow();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -440,7 +444,7 @@ function storeWithChecks(checks: unknown): void {
   const file = storedFile();
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
+    ownerUserId: SCOPE.userId, id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
     startedAt: STARTED_AT.toISOString(),
     vehicle: { ...UNIT, startedAt: STARTED_AT.toISOString(), checks },
     status: "open", createdAt: STARTED_AT.toISOString(),
@@ -481,7 +485,7 @@ test.each([
 ])("%s is DROPPED — never read as a result — and the day still loads", async (_why, broken) => {
   storeWithChecks([broken]);
 
-  const shift = await readOpenShift();
+  const shift = await readOpenShift(SCOPE);
 
   // The day survives: a broken check is no reason to lose the driver's day.
   expect(shift?.id).toBe("11111111-2222-4333-8444-555555555555");
@@ -493,7 +497,7 @@ test.each([
 test("a broken check does not take a good one with it", async () => {
   storeWithChecks([{ junk: true }, goodCompleted()]);
 
-  const checks = (await readOpenShift())?.vehicle?.checks ?? [];
+  const checks = (await readOpenShift(SCOPE))?.vehicle?.checks ?? [];
 
   expect(checks.map(check => check.id)).toEqual(["good"]);
 });
@@ -504,7 +508,7 @@ test("a COMPLETED record is read as it was written — later default changes can
   const items = completeItems().map(entry => ({ ...entry, result: "na" as const }));
   storeWithChecks([{ ...goodCompleted(), checklistVersion: 1, items }]);
 
-  const stored = (await readOpenShift())?.vehicle?.checks[0] ?? null;
+  const stored = (await readOpenShift(SCOPE))?.vehicle?.checks[0] ?? null;
 
   expect(stored?.status).toBe("completed");
   expect(stored?.items.every(entry => entry.result === "na")).toBe(true);
@@ -520,7 +524,7 @@ test("a completed record with FEWER rows than today's list shows only what it re
   // a driver's finished record that the driver never gave.
   storeWithChecks([{ ...goodCompleted(), checklistVersion: 7, items: completeItems().slice(0, 40) }]);
 
-  const stored = (await readOpenShift())?.vehicle?.checks[0] ?? null;
+  const stored = (await readOpenShift(SCOPE))?.vehicle?.checks[0] ?? null;
   const results = resultsOf(checklistFor("class1"), stored);
 
   expect(stored?.items).toHaveLength(40);
@@ -531,12 +535,12 @@ test("a completed record with FEWER rows than today's list shows only what it re
 
 test("a completed record from an OLDER checklist version still loads", async () => {
   storeWithChecks([{ ...goodCompleted(), checklistVersion: 1, items: completeItems().slice(0, 40) }]);
-  expect((await readOpenShift())?.vehicle?.checks).toHaveLength(0);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toHaveLength(0);
 
   // A different VERSION is not a different meaning: its rows carry their own
   // labels and results, so it is kept as the record it is.
   storeWithChecks([{ ...goodCompleted(), checklistVersion: 7 }]);
-  const kept = (await readOpenShift())?.vehicle?.checks[0];
+  const kept = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(kept?.checklistVersion).toBe(7);
   expect(kept?.items).toHaveLength(42);
 });
@@ -544,7 +548,7 @@ test("a completed record from an OLDER checklist version still loads", async () 
 test("a completed record from BEFORE sections were stored still loads — and is given none", async () => {
   storeWithChecks([goodCompleted()]);
 
-  const kept = (await readOpenShift())?.vehicle?.checks[0];
+  const kept = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
 
   expect(kept?.status).toBe("completed");
   expect(kept?.items).toHaveLength(42);
@@ -556,7 +560,7 @@ test("a completed record from BEFORE sections were stored still loads — and is
 test("`checks` that is not a list at all reads as no checks", async () => {
   storeWithChecks("everything passed");
 
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -606,10 +610,10 @@ test("saving and completing a check make NO request", async () => {
   const fetchSpy = jest.spyOn(global, "fetch").mockImplementation(() => Promise.reject(new Error("offline")));
   const shift = await dayWith();
 
-  await saveVehicleCheckDraft(write(shift, [ok("horn")]));
-  await completeVehicleCheck({ ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
+  await saveVehicleCheckDraft(SCOPE, write(shift, [ok("horn")]));
+  await completeVehicleCheck(SCOPE, { ...write(shift, allOk()), completedAt: CHECK_DONE, completedBy: DRIVER });
 
-  expect(checkStateOf((await readOpenShift())?.vehicle?.checks ?? [])).toBe("completed");
+  expect(checkStateOf((await readOpenShift(SCOPE))?.vehicle?.checks ?? [])).toBe("completed");
   expect(fetchSpy).not.toHaveBeenCalled();
   fetchSpy.mockRestore();
 });

@@ -10,9 +10,11 @@
  */
 import { router, type Href } from "expo-router";
 import { readFinishedDayOfUses, readOpenShift, type LocalShift } from "../shift/localShift";
+import type { AccountScope } from "../shift/accountScope";
 
-export function readScreenDay(timesheet: string | undefined): Promise<LocalShift | null> {
-  return timesheet === undefined ? readOpenShift() : readFinishedDayOfUses(timesheet);
+/** The day this use screen works on, in the signed-in account's records only (F-31). */
+export function readScreenDay(scope: AccountScope, timesheet: string | undefined): Promise<LocalShift | null> {
+  return timesheet === undefined ? readOpenShift(scope) : readFinishedDayOfUses(scope, timesheet);
 }
 
 /** Where a use screen goes when its day — or, with `dayFound`, its use — cannot be found. */

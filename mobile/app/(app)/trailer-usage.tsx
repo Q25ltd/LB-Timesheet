@@ -22,8 +22,11 @@ import { USAGE_STATE, UseTimesError, correctTrailerUseTimes, type LocalShift, ty
 import { leaveStale, missingHref, readScreenDay, withTimesheet, withVia } from "../../src/navigation/useScreenDay";
 import { useTimesMessage, type UseTimes } from "../../src/screens/UseTimesEditor";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function TrailerUsageRoute() {
+  const scope = useAccountScope();
   const { usage, usageState, timesheet, via } = useLocalSearchParams<{ usage?: string; usageState?: string; timesheet?: string; via?: string }>();
   // Ended unless named otherwise: the trailer IN USE is opened from the Finish Review (D41).
   const state: UsageState = usageState === USAGE_STATE.inUse ? USAGE_STATE.inUse : USAGE_STATE.ended;
@@ -32,11 +35,14 @@ export default function TrailerUsageRoute() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+      if (scope === null) return undefined;
+      void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
       return () => { cancelled = true; };
-    }, [timesheet]),
+    }, [scope, timesheet]),
   );
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading shift…" />;
   if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
 
@@ -57,18 +63,18 @@ export default function TrailerUsageRoute() {
       onCorrectNumber={() => {
         router.push({ pathname: "/correct-name", params: withVia(withTimesheet({ asset: "trailer", usage: use.useId, usageState: state }, timesheet), via) });
       }}
-      onSaveTimes={times => saveTimes({ shiftId: shift.id, useId: use.useId, usageState: state, ...times }, setShift, timesheet)}
+      onSaveTimes={times => saveTimes(scope, { shiftId: shift.id, useId: use.useId, usageState: state, ...times }, setShift, timesheet)}
     />
   );
 }
 
-async function saveTimes(
+async function saveTimes(scope: AccountScope, 
   input: { shiftId: string; useId: string; usageState: UsageState } & UseTimes,
   show: (shift: LocalShift) => void,
   timesheet: string | undefined,
 ): Promise<void> {
   try {
-    const day = await correctTrailerUseTimes(input);
+    const day = await correctTrailerUseTimes(scope, input);
     if (day === null) {
       Alert.alert("Nothing was saved", "That trailer is no longer the one this was opened for.");
       leaveStale(timesheet);

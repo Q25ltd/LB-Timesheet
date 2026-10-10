@@ -11,12 +11,14 @@ import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { HomeScreen } from "../../../src/screens/HomeScreen";
 import { useAuth } from "../../../src/auth/AuthContext";
+import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShift } from "../../../src/shift/localShift";
 
 /** How many finished days Home previews; the Timesheets tab has them all. */
 const RECENT_TIMESHEETS = 3;
 
 export default function TodayRoute() {
+  const scope = useAccountScope();
   const {
     account, biometrics, biometricUnlockEnabled, enableBiometricUnlock,
   } = useAuth();
@@ -27,13 +29,15 @@ export default function TodayRoute() {
   // no request, no shared store.
   useFocusEffect(useCallback(() => {
     let cancelled = false;
-    listCompletedShifts().then(
+    // Only the signed-in account's days, once its scope exists (F-31).
+    if (scope === null) return undefined;
+    listCompletedShifts(scope).then(
       // Readable days only; Home carries no warning about any that are not.
       ({ timesheets }) => { if (!cancelled) setRecent(timesheets.slice(0, RECENT_TIMESHEETS)); },
       () => { if (!cancelled) setRecent("unreadable"); },
     );
     return () => { cancelled = true; };
-  }, []));
+  }, [scope]));
 
   // The gate renders this route only when the provider is `authenticated`, and
   // `account` is set in the same update as that status. A null here would be a

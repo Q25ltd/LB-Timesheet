@@ -9,7 +9,7 @@
  *   IN USE      Active Shift corrects the plate or trailer number typed wrong
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, Text } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -47,6 +47,10 @@ import { TRAILER_TYPE } from "../shift/trailer";
 import { CHECK_RESULT } from "../shift/vehicleCheck";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
 import { finishDeclared, correctDeclared } from "./declared";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_edit_1");
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const mockParams: Record<string, string | undefined> = {};
@@ -114,7 +118,7 @@ async function declareAndSave(view: View): Promise<void> {
 async function refocus(): Promise<void> {
   await act(async () => { for (const again of [...mockFocus]) again(); await Promise.resolve(); });
 }
-const recordBytes = (id: string) => new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`).textSync();
+const recordBytes = (id: string) => new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`).textSync();
 
 function SignedIn({ children }: { children: React.ReactNode }) {
   const { signIn, status } = useAuth();
@@ -138,26 +142,26 @@ const edit = (id: string) => { mockParams.id = id; return mount(<EditTimesheetRo
 
 /** A plain finished day 05:00–17:00, no vehicle. */
 async function plainDay(workingFor: WorkingContext = { kind: "personal" }): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor, startedAt: at(5), vehicle: null });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: at(17), nightOut: false, notes: "" });
+  const shift = await startLocalShift(SCOPE, { workingFor, startedAt: at(5), vehicle: null });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: at(17), nightOut: false, notes: "" });
   if (done === null) throw new Error("expected the day to finish");
   return done;
 }
 
 /** AB12 CDE 05:00–09:00, XY34 ZZZ 09:00–17:00; TR23 10:00–12:00 then RF77 12:00–17:00. */
 async function busyDay(): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor: NORTHGATE, startedAt: at(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: at(10) });
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(10).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: at(12) });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), trailerUseId: trailerUseAt(at(12).toISOString()), finalMileage: 220_080, endedAt: at(17), nightOut: false, notes: "" });
+  const shift = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: at(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: at(10) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(10).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: at(12) });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), trailerUseId: trailerUseAt(at(12).toISOString()), finalMileage: 220_080, endedAt: at(17), nightOut: false, notes: "" });
   if (done === null) throw new Error("expected the day to finish");
   return done;
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
-  for (const entry of new Directory(Paths.document).list()) {
+  await clearOpenShift(SCOPE);
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File) entry.delete();
   }
   for (const key of Object.keys(mockParams)) mockParams[key] = undefined;
@@ -206,7 +210,7 @@ test("correcting Working For Personal → company, Night Out and notes APPENDS a
   await declareAndSave(view);
 
   await waitFor(() => { expect(mockRouter.back).toHaveBeenCalled(); });
-  const stored = await readCompletedShift(done.id);
+  const stored = await readCompletedShift(SCOPE, done.id);
   expect(stored?.workingFor).toEqual({ kind: "personal" });
   expect(stored?.corrections).toEqual([expect.objectContaining({ workingFor: NORTHGATE, nightOut: true, notes: "Tipped late", correctedBy: DRIVER.user.id })]);
 
@@ -228,7 +232,7 @@ test("company A → company B, and company → Personal", async () => {
   await press(first, "edit-working-for-m2");
   await press(first, "edit-timesheet-save");
   await declareAndSave(first);
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections?.[0]?.workingFor).toEqual(EASTWAY); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections?.[0]?.workingFor).toEqual(EASTWAY); });
   await first.unmount();
 
   const second = await edit(done.id);
@@ -238,7 +242,7 @@ test("company A → company B, and company → Personal", async () => {
   await press(second, "edit-timesheet-save");
   await declareAndSave(second);
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections?.[1]?.workingFor).toEqual({ kind: "personal" }); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections?.[1]?.workingFor).toEqual({ kind: "personal" }); });
 });
 
 test("a day worked for a company the driver no longer belongs to keeps it as an option — never dropped", async () => {
@@ -259,7 +263,7 @@ test("a start corrected to the evening BEFORE — across midnight — is saved o
   await press(view, "edit-timesheet-save");
 
   await waitFor(async () => {
-    expect((await readCompletedShift(done.id))?.corrections?.[0]?.startedAt).toBe(new Date(2026, 8, 18, 22, 0).toISOString());
+    expect((await readCompletedShift(SCOPE, done.id))?.corrections?.[0]?.startedAt).toBe(new Date(2026, 8, 18, 22, 0).toISOString());
   });
 });
 
@@ -284,7 +288,7 @@ test.each([
 test("a STALE edit — the day corrected elsewhere since it opened — saves nothing and says so", async () => {
   const done = await plainDay();
   const view = await edit(done.id);
-  await correctDeclared({
+  await correctDeclared(SCOPE, {
     shiftId: done.id, basedOn: null, correctionId: "elsewhere", workingFor: { kind: "personal" }, startedAt: at(5), endedAt: at(17),
     nightOut: true, notes: "", correctedAt: new Date(), correctedBy: DRIVER.user.id,
   });
@@ -332,8 +336,8 @@ test("confirmed, Delete removes EXACTLY this timesheet and returns; the list sho
   await act(async () => { deleteButtons().find(button => button.text === "Delete Timesheet")?.onPress?.(); await Promise.resolve(); });
 
   await waitFor(() => { expect(mockRouter.back).toHaveBeenCalled(); });
-  expect(await readCompletedShift(gone.id)).toBeNull();
-  expect(await readCompletedShift(kept.id)).not.toBeNull();
+  expect(await readCompletedShift(SCOPE, gone.id)).toBeNull();
+  expect(await readCompletedShift(SCOPE, kept.id)).not.toBeNull();
   await refocus();
   await waitFor(() => { expect(list.queryByTestId("timesheet-1")).toBeNull(); });
   expect(text(list, "timesheet-0-working-for")).toBe("Northgate Haulage");
@@ -342,7 +346,7 @@ test("confirmed, Delete removes EXACTLY this timesheet and returns; the list sho
   jest.mocked(Alert.alert).mockClear();
   await press(last, "timesheet-delete");
   await act(async () => { deleteButtons().find(button => button.text === "Delete Timesheet")?.onPress?.(); await Promise.resolve(); });
-  await waitFor(async () => { expect(await readCompletedShift(kept.id)).toBeNull(); });
+  await waitFor(async () => { expect(await readCompletedShift(SCOPE, kept.id)).toBeNull(); });
   await refocus();
   await waitFor(() => { expect(list.getByTestId("timesheets-empty")).toBeTruthy(); });
 });
@@ -357,7 +361,7 @@ test("a Delete that FAILS says nothing was deleted — and the timesheet is stil
 
   await waitFor(() => { expect(Alert.alert).toHaveBeenCalledWith("Couldn't delete the timesheet", "Nothing was deleted. Please try again."); });
   failing.mockRestore();
-  expect(await readCompletedShift(done.id)).toEqual(done);
+  expect(await readCompletedShift(SCOPE, done.id)).toEqual(done);
   expect(mockRouter.back).not.toHaveBeenCalled();
 });
 
@@ -392,9 +396,9 @@ test("Vehicle Use of a finished day corrects its END MILEAGE on that use only", 
   await type(view, "usage-end-mileage-input", "100150");
   await press(view, "usage-end-mileage-save");
 
-  const after = await readCompletedShift(done.id);
+  const after = await readCompletedShift(SCOPE, done.id);
   expect(after?.previousVehicles.map(use => use.endMileage)).toEqual([100_150, 220_080]);
-  expect(await readOpenShift()).toBeNull();
+  expect(await readOpenShift(SCOPE)).toBeNull();
 });
 
 test("Fuel is added to a finished day's use from its Fuel screen", async () => {
@@ -406,8 +410,8 @@ test("Fuel is added to a finished day's use from its Fuel screen", async () => {
   await type(view, "litres", "180");
   await press(view, "fill-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousVehicles[1]?.fills).toMatchObject([{ type: "fuel", litres: 180 }]); });
-  expect((await readCompletedShift(done.id))?.previousVehicles[0]?.fills).toEqual([]);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[1]?.fills).toMatchObject([{ type: "fuel", litres: 180 }]); });
+  expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[0]?.fills).toEqual([]);
 });
 
 test("a FORGOTTEN vehicle check is completed after the finish — by the driver, now — and returns to the day", async () => {
@@ -418,11 +422,11 @@ test("a FORGOTTEN vehicle check is completed after the finish — by the driver,
 
   await press(view, "complete-check");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousVehicles[0]?.checks[0]?.status).toBe("completed"); });
-  const check = (await readCompletedShift(done.id))?.previousVehicles[0]?.checks[0];
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[0]?.checks[0]?.status).toBe("completed"); });
+  const check = (await readCompletedShift(SCOPE, done.id))?.previousVehicles[0]?.checks[0];
   expect(check?.completedBy).toBe(DRIVER.user.id);
   expect(Date.parse(check?.completedAt ?? "")).toBeGreaterThanOrEqual(pressedAt);
-  expect((await readCompletedShift(done.id))?.previousVehicles[1]?.checks).toEqual([]);
+  expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[1]?.checks).toEqual([]);
   expect(mockRouter.back).toHaveBeenCalled();
 });
 
@@ -434,13 +438,13 @@ test("Fridge Diesel is added to a finished day's refrigerated trailer use", asyn
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousTrailers[1]?.reeferDiesel).toMatchObject([{ litres: null }]); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[1]?.reeferDiesel).toMatchObject([{ litres: null }]); });
 });
 
 test("a completed Trailer Check on a finished day is CORRECTED by an appended revision", async () => {
   const done = await busyDay();
   const items = checklistItems(trailerChecklistFor(TRAILER_TYPE.standard));
-  await completeTrailerCheck({
+  await completeTrailerCheck(SCOPE, {
     shiftId: done.id, trailerUseId: trailerUseAt(at(10).toISOString()), usageState: USAGE_STATE.ended, checkId: "tc", startedAt: new Date(),
     answers: items.map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })), completedAt: new Date(), completedBy: DRIVER.user.id,
   });
@@ -454,8 +458,8 @@ test("a completed Trailer Check on a finished day is CORRECTED by an appended re
   await type(view, `check-note-${first.key}`, "Found later");
   await press(view, "confirm-correction");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousTrailers[0]?.checks[0]?.revisions).toHaveLength(1); });
-  const check = (await readCompletedShift(done.id))?.previousTrailers[0]?.checks[0];
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[0]?.checks[0]?.revisions).toHaveLength(1); });
+  const check = (await readCompletedShift(SCOPE, done.id))?.previousTrailers[0]?.checks[0];
   expect(check?.items.every(item => item.result !== CHECK_RESULT.defect)).toBe(true);
 });
 
@@ -473,11 +477,11 @@ test("on a finished day nothing is IN USE: a use screen asked for one goes to th
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("the vehicle card offers Correct number plate for the EXACT use in it; the correction changes only the plate", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: at(5), vehicle: { ...UNIT, numberPlate: "AB12 CED" } });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: at(5), vehicle: { ...UNIT, numberPlate: "AB12 CED" } });
   const card = await mount(<ActiveShiftRoute />, ["correct-plate"]);
   await press(card, "correct-plate");
   expect(mockRouter.push).toHaveBeenCalledWith({ pathname: "/correct-name", params: { asset: "vehicle", usage: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.inUse } });
-  const before = (await readOpenShift())?.vehicle;
+  const before = (await readOpenShift(SCOPE))?.vehicle;
 
   Object.assign(mockParams, { asset: "vehicle", usage: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.inUse });
   const view = await mount(<CorrectNameRoute />, ["correct-name-save"]);
@@ -485,25 +489,25 @@ test("the vehicle card offers Correct number plate for the EXACT use in it; the 
   await type(view, "correct-name-input", "ab12 cde");
   await press(view, "correct-name-save");
 
-  await waitFor(async () => { expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB12 CDE"); });
-  expect((await readOpenShift())?.vehicle).toEqual({ ...before, numberPlate: "AB12 CDE" });
+  await waitFor(async () => { expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB12 CDE"); });
+  expect((await readOpenShift(SCOPE))?.vehicle).toEqual({ ...before, numberPlate: "AB12 CDE" });
   expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift");
-  expect(shift.id).toBe((await readOpenShift())?.id);
+  expect(shift.id).toBe((await readOpenShift(SCOPE))?.id);
 });
 
 test("the trailer card offers Correct trailer number; a stale screen saves nothing and says so", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: at(5), vehicle: UNIT });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: { trailerNumber: "TR2", trailerType: TRAILER_TYPE.standard }, startedAt: at(6) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: at(5), vehicle: UNIT });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR2", trailerType: TRAILER_TYPE.standard }, startedAt: at(6) });
   Object.assign(mockParams, { asset: "trailer", usage: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse });
   const view = await mount(<CorrectNameRoute />, ["correct-name-save"]);
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next: { trailerNumber: "GFD", trailerType: TRAILER_TYPE.standard }, changedAt: at(8) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(6).toISOString()), next: { trailerNumber: "GFD", trailerType: TRAILER_TYPE.standard }, changedAt: at(8) });
 
   await type(view, "correct-name-input", "TR23");
   await press(view, "correct-name-save");
 
   await waitFor(() => { expect(Alert.alert).toHaveBeenCalledWith("Nothing was saved", "That trailer is no longer the one this was opened for."); });
-  expect((await readOpenShift())?.trailer?.trailerNumber).toBe("GFD");
-  expect((await readOpenShift())?.previousTrailers[0]?.trailerNumber).toBe("TR2");
+  expect((await readOpenShift(SCOPE))?.trailer?.trailerNumber).toBe("GFD");
+  expect((await readOpenShift(SCOPE))?.previousTrailers[0]?.trailerNumber).toBe("TR2");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -568,7 +572,7 @@ test("an UNCHANGED finish is never asked about, whatever the clock — only a co
 
 test("GO BACK saves nothing; USE THIS TIME saves the exact finish given — the correction history kept", async () => {
   const done = await plainDay();
-  await correctDeclared({
+  await correctDeclared(SCOPE, {
     shiftId: done.id, basedOn: null, correctionId: "earlier", workingFor: { kind: "personal" }, startedAt: at(5), endedAt: at(17),
     nightOut: true, notes: "", correctedAt: new Date(), correctedBy: DRIVER.user.id,
   });
@@ -586,8 +590,8 @@ test("GO BACK saves nothing; USE THIS TIME saves the exact finish given — the 
   const [, [, , buttons]] = aheadCalls() as [unknown, [string, string, AheadButtons]];
   await act(async () => { buttons.find(button => button.text === "Use This Time")?.onPress?.(); await Promise.resolve(); });
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections).toHaveLength(2); });
-  const stored = await readCompletedShift(done.id);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections).toHaveLength(2); });
+  const stored = await readCompletedShift(SCOPE, done.id);
   expect(stored?.corrections?.[0]?.id).toBe("earlier");
   expect(stored?.corrections?.[1]?.endedAt).toBe(declared.toISOString());
 });
@@ -602,8 +606,8 @@ test("a corrected finish moves the vehicle and trailer the finish ended — the 
   await press(view, "edit-timesheet-save");
   await declareAndSave(view);
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.corrections).toHaveLength(1); });
-  const stored = await readCompletedShift(done.id);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.corrections).toHaveLength(1); });
+  const stored = await readCompletedShift(SCOPE, done.id);
   if (stored === null) throw new Error("expected the day");
   const uses = effectiveUses(stored);
   expect(uses.previousVehicles.map(use => use.endedAt)).toEqual([at(9).toISOString(), at(16, 30).toISOString()]);
@@ -632,8 +636,8 @@ test("a finished day's Vehicle Use offers Correct number plate for EXACTLY that 
   await type(view, "correct-name-input", "xy34 zzy");
   await press(view, "correct-name-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousVehicles[1]?.numberPlate).toBe("XY34 ZZY"); });
-  const after = await readCompletedShift(done.id);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[1]?.numberPlate).toBe("XY34 ZZY"); });
+  const after = await readCompletedShift(SCOPE, done.id);
   expect(after?.previousVehicles[1]).toEqual({ ...done.previousVehicles[1], numberPlate: "XY34 ZZY" });
   expect(after?.previousVehicles[0]).toEqual(done.previousVehicles[0]);
   expect(mockRouter.back).toHaveBeenCalled();
@@ -651,6 +655,6 @@ test("a finished day's Trailer Use offers Correct trailer number for EXACTLY tha
   await type(view, "correct-name-input", "TR24");
   await press(view, "correct-name-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(done.id))?.previousTrailers[0]?.trailerNumber).toBe("TR24"); });
-  expect((await readCompletedShift(done.id))?.previousTrailers[1]).toEqual(done.previousTrailers[1]);
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[0]?.trailerNumber).toBe("TR24"); });
+  expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[1]).toEqual(done.previousTrailers[1]);
 });

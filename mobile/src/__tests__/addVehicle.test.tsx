@@ -25,6 +25,14 @@ import AddVehicleRoute from "../../app/(app)/add-vehicle";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
 import { clearOpenShift, readOpenShift, startLocalShift } from "../shift/localShift";
 import type { LocalShift, VehicleDetails, WorkingContext } from "../shift/localShift";
+import { scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = {
   replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn(),
@@ -100,7 +108,7 @@ function allText(view: View): string {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   for (const fn of Object.values(mockRouter)) fn.mockClear();
   mockFocusEffects.length = 0;
 });
@@ -248,14 +256,14 @@ async function openRoute(): Promise<View> {
 }
 
 test("adding stores the vehicle in the open day and returns to Active Shift", async () => {
-  const before = await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  const before = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
 
   const view = await openRoute();
   await fill(view, "class2", " ab24 xyz", "184203");
   await press(view, "add-vehicle-submit");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
-  const after = await readOpenShift();
+  const after = await readOpenShift(SCOPE);
   expect(after?.vehicle).toMatchObject({ vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203 });
   // Its use began when it was added — later than the day's declared start.
   expect(Date.parse(after?.vehicle?.startedAt ?? "")).toBeGreaterThan(Date.parse(before.startedAt));
@@ -269,19 +277,19 @@ test("adding stores the vehicle in the open day and returns to Active Shift", as
 test("the whole flow works with the network DEAD, and calls no server", async () => {
   const fetchSpy = jest.spyOn(global, "fetch")
     .mockImplementation(() => Promise.reject(new Error("Network request failed")));
-  await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
 
   const view = await openRoute();
   await fill(view, "van", "KAT 123", "640");
   await press(view, "add-vehicle-submit");
 
-  await waitFor(async () => { expect((await readOpenShift())?.vehicle?.numberPlate).toBe("KAT 123"); });
+  await waitFor(async () => { expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("KAT 123"); });
   // No /shifts/*, no /auth/switch-company, nothing.
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
 test("a rapid double submit through the route stores ONE vehicle", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
   const view = await openRoute();
   await fill(view, "class1", "AB24 XYZ", "1000");
 
@@ -293,7 +301,7 @@ test("a rapid double submit through the route stores ONE vehicle", async () => {
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalled(); });
   expect(mockRouter.dismissTo).toHaveBeenCalledTimes(1);
-  expect((await readOpenShift())?.vehicle?.numberPlate).toBe("AB24 XYZ");
+  expect((await readOpenShift(SCOPE))?.vehicle?.numberPlate).toBe("AB24 XYZ");
 });
 
 test("with NO open day there is nothing to add to — back to Home", async () => {
@@ -305,7 +313,7 @@ test("with NO open day there is nothing to add to — back to Home", async () =>
 });
 
 test("a day that ALREADY has a vehicle is not offered Add — back to Active Shift", async () => {
-  await startLocalShift({
+  await startLocalShift(SCOPE, {
     workingFor: PERSONAL, startedAt: STARTED_AT,
     vehicle: { vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 1000 },
   });
@@ -322,6 +330,7 @@ test("a day that ALREADY has a vehicle is not offered Add — back to Active Shi
 
 function noVehicleShift(): LocalShift {
   return {
+    ownerUserId: SCOPE.userId,
     id: "11111111-2222-4333-8444-555555555555",
     workingFor: PERSONAL,
     startedAt: STARTED_AT.toISOString(),
@@ -349,7 +358,7 @@ test("Add Vehicle on a no-vehicle Active Shift opens the flow", async () => {
 });
 
 test("the Active Shift route sends Add Vehicle to the add-vehicle screen", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
   const view = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(view.queryByTestId("add-vehicle")).not.toBeNull(); });
 
@@ -359,7 +368,7 @@ test("the Active Shift route sends Add Vehicle to the add-vehicle screen", async
 });
 
 test("returning to Active Shift shows the vehicle IMMEDIATELY — checks still Not completed", async () => {
-  await startLocalShift({ workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: STARTED_AT, vehicle: null });
   const view = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(view.queryByTestId("no-vehicle")).not.toBeNull(); });
 
@@ -367,7 +376,7 @@ test("returning to Active Shift shows the vehicle IMMEDIATELY — checks still N
   const add = await openRoute();
   await fill(add, "class1", "wgm-4471-klz", "9");
   await press(add, "add-vehicle-submit");
-  await waitFor(async () => { expect((await readOpenShift())?.vehicle).not.toBeNull(); });
+  await waitFor(async () => { expect((await readOpenShift(SCOPE))?.vehicle).not.toBeNull(); });
 
   // Coming back into focus re-reads the day rather than showing a stale one.
   await act(async () => { for (const effect of [...mockFocusEffects]) await Promise.resolve(effect()); });
@@ -383,11 +392,11 @@ test("returning to Active Shift shows the vehicle IMMEDIATELY — checks still N
 });
 
 test("after a RESTART the day comes back with its vehicle, start and company unchanged", async () => {
-  const before = await startLocalShift({ workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
+  const before = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: STARTED_AT, vehicle: null });
   const add = await openRoute();
   await fill(add, "van", "KAT 123", "640");
   await press(add, "add-vehicle-submit");
-  await waitFor(async () => { expect((await readOpenShift())?.vehicle).not.toBeNull(); });
+  await waitFor(async () => { expect((await readOpenShift(SCOPE))?.vehicle).not.toBeNull(); });
   await add.unmount();
 
   // A fresh mount reads only the file: what a relaunch has to work with.
@@ -399,5 +408,5 @@ test("after a RESTART the day comes back with its vehicle, start and company unc
   expect(relaunched.getByTestId("current-asset-label").props.children).toBe("CURRENT VEHICLE");
   expect(relaunched.getByTestId("shift-working-for").props.children).toBe("Northgate Logistics");
   expect(relaunched.getByTestId("shift-started-at").props.children).toBe("05:42");
-  expect((await readOpenShift())?.startedAt).toBe(before.startedAt);
+  expect((await readOpenShift(SCOPE))?.startedAt).toBe(before.startedAt);
 });

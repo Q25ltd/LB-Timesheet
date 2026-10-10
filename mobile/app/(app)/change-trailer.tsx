@@ -18,16 +18,22 @@ import { Restoring } from "../../src/components/Restoring";
 import { UseEndsBeforeItStartedError, changeTrailer, readOpenShift, type LocalShift } from "../../src/shift/localShift";
 import type { LocalTrailer, TrailerDetails } from "../../src/shift/trailer";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function ChangeTrailerRoute() {
+  const scope = useAccountScope();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []);
+  }, [scope]);
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring />;
   if (shift === null) return <Redirect href="/today" />;
   const current = shift.trailer;
@@ -37,15 +43,15 @@ export default function ChangeTrailerRoute() {
     <ChangeTrailerScreen
       current={current}
       onLeave={() => { router.back(); }}
-      onConfirm={next => confirm(shift.id, current, next)}
+      onConfirm={next => confirm(scope, shift.id, current, next)}
     />
   );
 }
 
-async function confirm(shiftId: string, current: LocalTrailer, next: TrailerDetails | null): Promise<void> {
+async function confirm(scope: AccountScope, shiftId: string, current: LocalTrailer, next: TrailerDetails | null): Promise<void> {
   try {
     const changedAt = new Date();
-    const day = await changeTrailer({ shiftId, endingUseId: current.useId, next, changedAt });
+    const day = await changeTrailer(scope, { shiftId, endingUseId: current.useId, next, changedAt });
     if (day === null) { router.replace("/today"); return; }
     // Success is the trailer on screen having ended AT THIS PRESS; the store
     // changes nothing once another has replaced it, and the driver is told so.

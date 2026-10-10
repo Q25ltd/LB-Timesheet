@@ -7,19 +7,23 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { TimesheetsScreen } from "../../../src/screens/TimesheetsScreen";
+import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShiftListing } from "../../../src/shift/localShift";
 
 export default function TimesheetsRoute() {
+  const scope = useAccountScope();
   const [listing, setListing] = useState<CompletedShiftListing | "loading" | "unreadable">("loading");
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
-    listCompletedShifts().then(
+    // Only the signed-in account's days, once its scope exists (F-31).
+    if (scope === null) return undefined;
+    listCompletedShifts(scope).then(
       found => { if (!cancelled) setListing(found); },
       () => { if (!cancelled) setListing("unreadable"); },
     );
     return () => { cancelled = true; };
-  }, []));
+  }, [scope]));
 
   return (
     <TimesheetsScreen

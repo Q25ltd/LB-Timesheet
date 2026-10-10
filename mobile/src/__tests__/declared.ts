@@ -18,6 +18,7 @@ import {
   type Declared,
   type FinishShiftInput,
 } from "../shift/localShift";
+import type { AccountScope } from "../shift/accountScope";
 
 export const DECLARED_BY = "driver-under-test";
 
@@ -30,9 +31,9 @@ const declaredAs = (version: string): Declared => ({ at: new Date(), by: DECLARE
  * A finish the open day would refuse (a stale one) is declared as a version
  * no day has: the store must refuse it for what it is, not for the declaration.
  */
-export async function declaredFinish(input: Undeclared<FinishShiftInput>): Promise<FinishShiftInput> {
+export async function declaredFinish(scope: AccountScope, input: Undeclared<FinishShiftInput>): Promise<FinishShiftInput> {
   if (input.declared !== undefined) return { ...input, declared: input.declared };
-  const open = await readOpenShift();
+  const open = await readOpenShift(scope);
   if (open === null) return { ...input, declared: null };
   let version = "no-such-version";
   try {
@@ -43,8 +44,8 @@ export async function declaredFinish(input: Undeclared<FinishShiftInput>): Promi
   return { ...input, declared: declaredAs(version) };
 }
 
-export async function finishDeclared(input: Undeclared<FinishShiftInput>): Promise<CompletedShift | null> {
-  return finishOpenShift(await declaredFinish(input));
+export async function finishDeclared(scope: AccountScope, input: Undeclared<FinishShiftInput>): Promise<CompletedShift | null> {
+  return finishOpenShift(scope, await declaredFinish(scope, input));
 }
 
 /** The version a correction would leave the day at — as Edit Timesheet's Review shows it. */
@@ -65,9 +66,9 @@ export function correctedVersion(day: CompletedShift, input: Omit<CorrectComplet
   });
 }
 
-export async function correctDeclared(input: Undeclared<CorrectCompletedShiftInput>): Promise<CompletedShift | null> {
-  if (input.declared !== undefined) return correctCompletedShift({ ...input, declared: input.declared });
-  const day = await readCompletedShift(input.shiftId);
+export async function correctDeclared(scope: AccountScope, input: Undeclared<CorrectCompletedShiftInput>): Promise<CompletedShift | null> {
+  if (input.declared !== undefined) return correctCompletedShift(scope, { ...input, declared: input.declared });
+  const day = await readCompletedShift(scope, input.shiftId);
   const declared = day === null ? null : declaredAs(correctedVersion(day, input));
-  return correctCompletedShift({ ...input, declared });
+  return correctCompletedShift(scope, { ...input, declared });
 }

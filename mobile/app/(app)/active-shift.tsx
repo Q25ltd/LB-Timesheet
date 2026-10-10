@@ -17,18 +17,24 @@ import { Redirect, router, useFocusEffect } from "expo-router";
 import { ActiveShiftScreen } from "../../src/screens/ActiveShiftScreen";
 import { Restoring } from "../../src/components/Restoring";
 import { DiscardIncompleteError, USAGE_STATE, clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function ActiveShiftRoute() {
+  const scope = useAccountScope();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
-    void readOpenShift().then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readOpenShift(scope).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, []));
+  }, [scope]));
 
   // Reading a file is fast, but it is not synchronous: holding avoids a frame
   // that claims there is no shift before anyone has looked.
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring />;
   // No open shift — nothing to be active about. Back to the tabs.
   if (shift === null) return <Redirect href="/today" />;
@@ -36,7 +42,7 @@ export default function ActiveShiftRoute() {
   return (
     <ActiveShiftScreen
       shift={shift}
-      onDiscard={discard}
+      onDiscard={() => { discard(scope); }}
       onFinish={() => { router.push("/finish-shift"); }}
       onAddVehicle={() => { router.push("/add-vehicle"); }}
       // Vehicle Checks name the EXACT use in the card, as Trailer Checks do.
@@ -86,8 +92,8 @@ export default function ActiveShiftRoute() {
  * changed" only when nothing was removed. A discard that failed part-way
  * (`DiscardIncompleteError`) may already have removed the day.
  */
-function discard(): void {
-  void clearOpenShift().then(
+function discard(scope: AccountScope): void {
+  void clearOpenShift(scope).then(
     () => { router.replace("/today"); },
     (error: unknown) => {
       Alert.alert(

@@ -33,6 +33,14 @@ import {
   type VehicleDetails,
 } from "../shift/localShift";
 import type { CheckAnswer, VehicleCheck } from "../shift/vehicleCheck";
+import { scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 
@@ -114,7 +122,7 @@ async function openScreen(details: VehicleDetails = UNIT, check: VehicleCheck | 
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   for (const fn of Object.values(mockRouter)) fn.mockClear();
 });
 afterEach(() => {
@@ -462,7 +470,7 @@ test("put back and left, Active Shift agrees — Not completed, and no default r
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
 
   // Only overrides are ever stored: with none left, the draft holds nothing.
-  expect((await readOpenShift())?.vehicle?.checks[0]?.items).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.items).toEqual([]);
   const active = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(active.queryByTestId("vehicle-checks-state")).not.toBeNull(); });
   expect(text(active, "vehicle-checks-state")).toBe("Not completed");
@@ -711,7 +719,7 @@ test("the keyboard cannot sit on a defect description", async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function dayWith(details: VehicleDetails = UNIT): Promise<LocalShift> {
-  return startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: details });
+  return startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: details });
 }
 
 /**
@@ -756,7 +764,7 @@ test("OPENING a check stores nothing — Active Shift still reads Not completed"
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
   // Not a single write: 42 rows on screen, none of them on disk.
   expect(writes).not.toHaveBeenCalled();
-  expect((await readOpenShift())?.vehicle?.checks).toEqual([]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks).toEqual([]);
 });
 
 test("only the driver's CHANGES are stored, and leaving keeps the draft In progress", async () => {
@@ -771,7 +779,7 @@ test("only the driver's CHANGES are stored, and leaving keeps the draft In progr
   await press(view, "vehicle-check-back");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
-  const checks = (await readOpenShift())?.vehicle?.checks ?? [];
+  const checks = (await readOpenShift(SCOPE))?.vehicle?.checks ?? [];
   expect(checks).toHaveLength(1);
   expect(checks[0]).toMatchObject({ status: "draft", completedAt: null, checklist: "hgv-unit" });
   // `front-view` was already OK, so it is not a change and is not written.
@@ -781,7 +789,7 @@ test("only the driver's CHANGES are stored, and leaving keeps the draft In progr
     { key: "load-security", label: "Load security", result: "pass", note: null },
   ]);
   // It belongs to THIS day's vehicle — the day is otherwise untouched.
-  expect((await readOpenShift())?.startedAt).toBe(shift.startedAt);
+  expect((await readOpenShift(SCOPE))?.startedAt).toBe(shift.startedAt);
 });
 
 test("after a RESTART, Active Shift reads In progress and the check reopens exactly", async () => {
@@ -810,7 +818,7 @@ test("completing stores the completion time, returns to the shift, and Active Sh
   const shift = await dayWith();
   const vehicleUseId = shift.vehicle?.useId ?? "";
   // Every row but one already answered, as a driver part-way through.
-  await saveVehicleCheckDraft({
+  await saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId, usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").filter(key => key !== "horn").map(key => ({ key, result: "pass", note: "" })),
   });
@@ -822,7 +830,7 @@ test("completing stores the completion time, returns to the shift, and Active Sh
   await press(view, "complete-check");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
-  const check = (await readOpenShift())?.vehicle?.checks[0];
+  const check = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(check?.status).toBe("completed");
   expect(Date.parse(check?.completedAt ?? "")).toBeGreaterThanOrEqual(before - 1000);
   expect(check?.items.find(entry => entry.key === "horn")).toEqual({
@@ -843,7 +851,7 @@ test("a check certified through the route is attributed to the SIGNED-IN driver"
   await press(view, "complete-check");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
-  const check = (await readOpenShift())?.vehicle?.checks[0];
+  const check = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(check?.completedBy).toBe(DRIVER.user.id);
   expect(typeof check?.completedAt).toBe("string");
 });
@@ -858,7 +866,7 @@ test("a draft carries no completion time and no driver — defaults on screen ch
   await press(view, "vehicle-check-back");
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalled(); });
-  const check = (await readOpenShift())?.vehicle?.checks[0];
+  const check = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(check?.status).toBe("draft");
   expect(check?.completedAt).toBeNull();
   expect(check?.completedBy).toBeNull();
@@ -866,7 +874,7 @@ test("a draft carries no completion time and no driver — defaults on screen ch
 
 test("rapid Complete taps through the route store ONE completed check", async () => {
   const shift = await dayWith();
-  await saveVehicleCheckDraft({
+  await saveVehicleCheckDraft(SCOPE, {
     shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })),
   });
@@ -880,7 +888,7 @@ test("rapid Complete taps through the route store ONE completed check", async ()
 
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalled(); });
   expect(mockRouter.dismissTo).toHaveBeenCalledTimes(1);
-  const checks = (await readOpenShift())?.vehicle?.checks ?? [];
+  const checks = (await readOpenShift(SCOPE))?.vehicle?.checks ?? [];
   expect(checks).toHaveLength(1);
   expect(checks[0]?.status).toBe("completed");
 });
@@ -893,18 +901,18 @@ test("the whole flow works with the network DEAD, and calls no server", async ()
   for (const key of keysOf("van")) await press(view, `check-${key}-pass`);
   await press(view, "complete-check");
 
-  await waitFor(async () => { expect((await readOpenShift())?.vehicle?.checks[0]?.status).toBe("completed"); });
+  await waitFor(async () => { expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]?.status).toBe("completed"); });
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
 test("with no vehicle there is nothing to check — back to Active Shift; with no day, Home", async () => {
-  await startLocalShift({ workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: null });
+  await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle: null });
   const noVehicle = await wrap(<VehicleCheckRoute />);
   await waitFor(() => { expect(noVehicle.queryByTestId("redirect")).not.toBeNull(); });
   expect(text(noVehicle, "redirect")).toBe("/active-shift");
   await noVehicle.unmount();
 
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   const noDay = await wrap(<VehicleCheckRoute />);
   await waitFor(() => { expect(noDay.queryByTestId("redirect")).not.toBeNull(); });
   expect(text(noDay, "redirect")).toBe("/today");
@@ -912,7 +920,7 @@ test("with no vehicle there is nothing to check — back to Active Shift; with n
 
 test("a COMPLETED check is still reachable from Active Shift — demoted, not disabled", async () => {
   const shift = await dayWith();
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: shift.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "c1", startedAt: STARTED_AT,
     answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })), completedAt: new Date(), completedBy: "user_1",
   });
@@ -940,12 +948,12 @@ test("Active Shift opens the check, and its row follows Not completed → In pro
 
   // A real change: Horn starts at OK. (OK would be no change at all, and a
   // draft of no changes is not work in progress.)
-  await saveVehicleCheckDraft({ ...target, answers: [{ key: "horn", result: "na", note: "" }] });
+  await saveVehicleCheckDraft(SCOPE, { ...target, answers: [{ key: "horn", result: "na", note: "" }] });
   const inProgress = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(text(inProgress, "vehicle-checks-state")).toBe("In progress"); });
   await inProgress.unmount();
 
-  await completeVehicleCheck({ ...target, answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })), completedAt: new Date(), completedBy: "user_1" });
+  await completeVehicleCheck(SCOPE, { ...target, answers: keysOf("class1").map(key => ({ key, result: "pass", note: "" })), completedAt: new Date(), completedBy: "user_1" });
   const done = await wrap(<ActiveShiftRoute />);
   await waitFor(() => { expect(text(done, "vehicle-checks-state")).toBe("Completed"); });
 });

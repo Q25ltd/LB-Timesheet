@@ -26,8 +26,11 @@ import {
   type Declared,
 } from "../../src/shift/localShift";
 import { REVIEW_TO_DECLARE } from "../../src/navigation/useScreenDay";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function EditTimesheetRoute() {
+  const scope = useAccountScope();
   const { id, review } = useLocalSearchParams<{ id?: string; review?: string }>();
   const { account } = useAuth();
   const [shift, setShift] = useState<CompletedShift | null | "loading">("loading");
@@ -35,10 +38,13 @@ export default function EditTimesheetRoute() {
 
   useEffect(() => {
     let cancelled = false;
-    void readCompletedShift(id ?? "").then(found => { if (!cancelled) setShift(found); });
+    if (scope === null) return undefined;
+    void readCompletedShift(scope, id ?? "").then(found => { if (!cancelled) setShift(found); });
     return () => { cancelled = true; };
-  }, [id]);
+  }, [scope, id]);
 
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (shift === "loading") return <Restoring message="Loading timesheet…" />;
   // The gate renders this route only when authenticated; a correction is never unattributed.
   if (shift === null || account === null) {
@@ -54,7 +60,7 @@ export default function EditTimesheetRoute() {
       memberships={account.memberships}
       onLeave={() => { router.back(); }}
       startInReview={review === REVIEW_TO_DECLARE}
-      onSave={(edit, version) => save(
+      onSave={(edit, version) => save(scope, 
         { shiftId: shift.id, basedOn, correctionId, correctedBy },
         edit,
         version === null ? null : { at: new Date(), by: correctedBy, version },
@@ -71,13 +77,13 @@ function Missing() {
   return null;
 }
 
-async function save(
+async function save(scope: AccountScope, 
   by: { shiftId: string; basedOn: string | null; correctionId: string; correctedBy: string },
   edit: TimesheetEdit,
   declared: Declared | null,
 ): Promise<void> {
   try {
-    const day = await correctCompletedShift({ ...by, correctedAt: new Date(), ...edit, declared });
+    const day = await correctCompletedShift(scope, { ...by, correctedAt: new Date(), ...edit, declared });
     if (day === null) {
       Alert.alert("Nothing was saved", "This timesheet changed after you opened it, or is no longer on this phone. Open it again to make your correction.");
     }

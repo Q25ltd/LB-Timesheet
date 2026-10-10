@@ -12,7 +12,7 @@
  *              same review and declaration, never an ordinary save
  */
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
-import { Directory, File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Alert, Pressable, Text } from "react-native";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
@@ -56,6 +56,10 @@ import { checklistFor, checklistItems } from "../shift/checklists";
 import { FILL_TYPE } from "../shift/vehicleFill";
 import { trailerUseAt, vehicleUseAt } from "./useIdAt";
 import { finishDeclared } from "./declared";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_review_1");
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
 const mockParams: Record<string, string | undefined> = {};
@@ -117,7 +121,7 @@ async function refocus(): Promise<void> {
   await act(async () => { for (const again of [...mockFocus]) again(); await Promise.resolve(); });
 }
 async function open(): Promise<LocalShift> {
-  const day = await readOpenShift();
+  const day = await readOpenShift(SCOPE);
   if (day === null) throw new Error("expected an open day");
   return day;
 }
@@ -127,10 +131,10 @@ async function open(): Promise<LocalShift> {
  * use from 12:00 — every kind of use the Review offers a way into.
  */
 async function fullDay(workingFor: WorkingContext = { kind: "personal" }): Promise<LocalShift> {
-  const shift = await startLocalShift({ workingFor, startedAt: at(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
-  await addTrailerToOpenShift({ shiftId: shift.id, trailer: TR23, startedAt: at(10) });
-  await changeTrailer({ shiftId: shift.id, endingUseId: trailerUseAt(at(10).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: at(12) });
+  const shift = await startLocalShift(SCOPE, { workingFor, startedAt: at(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: TR23, startedAt: at(10) });
+  await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(10).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: at(12) });
   return open();
 }
 
@@ -179,8 +183,8 @@ async function mount(node: React.ReactElement, ready: string[]): Promise<View> {
 }
 
 beforeEach(async () => {
-  await clearOpenShift();
-  for (const entry of new Directory(Paths.document).list()) {
+  await clearOpenShift(SCOPE);
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File) entry.delete();
   }
   for (const key of Object.keys(mockParams)) mockParams[key] = undefined;
@@ -339,7 +343,7 @@ test("Edit Shift corrects who the open day is for and an EARLIER start; a start 
   expect((await open()).startedAt).toBe(at(4, 30).toISOString());
   expect(mockRouter.back).toHaveBeenCalled();
   // Choosing a company sent nothing and recorded nothing as sent.
-  expect(new File(Paths.document, OPEN_SHIFT_FILE).textSync()).not.toMatch(/sent|submitted/i);
+  expect(new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE).textSync()).not.toMatch(/sent|submitted/i);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -374,10 +378,10 @@ test("leaving the Review to correct anything clears the declaration — even wit
 });
 
 test.each([
-  ["a plate", async (shift: LocalShift) => { await correctNumberPlate({ shiftId: shift.id, useId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, value: "XY34 ZZY" }); }, "review-vehicle-1-title", "XY34 ZZY · Rigid truck"],
-  ["a start mileage", async (shift: LocalShift) => { await correctStartMileage({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, startMileage: 220_050 }); }, "review-vehicle-1-mileage", "220,050 → 220,100 · 50 mi"],
-  ["a fill", async (shift: LocalShift) => { await recordVehicleFill({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 80, note: "" }); }, "review-vehicle-0-fuel", "Fuel: 80 L · 1 entry"],
-  ["the start and who it is for", async (shift: LocalShift) => { await correctOpenShift({ shiftId: shift.id, workingFor: NORTHGATE, startedAt: at(4) }); }, "review-duration", "13 h 40 min"],
+  ["a plate", async (shift: LocalShift) => { await correctNumberPlate(SCOPE, { shiftId: shift.id, useId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, value: "XY34 ZZY" }); }, "review-vehicle-1-title", "XY34 ZZY · Rigid truck"],
+  ["a start mileage", async (shift: LocalShift) => { await correctStartMileage(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, startMileage: 220_050 }); }, "review-vehicle-1-mileage", "220,050 → 220,100 · 50 mi"],
+  ["a fill", async (shift: LocalShift) => { await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 80, note: "" }); }, "review-vehicle-0-fuel", "Fuel: 80 L · 1 entry"],
+  ["the start and who it is for", async (shift: LocalShift) => { await correctOpenShift(SCOPE, { shiftId: shift.id, workingFor: NORTHGATE, startedAt: at(4) }); }, "review-duration", "13 h 40 min"],
   ["a trailer number", async (shift: LocalShift) => { await correctTrailerNumberAt(shift, at(10), "TR24"); }, "review-trailer-0-title", "TR24 · Standard"],
 ])("a correction of %s shows on the Review at once — and the old declaration no longer holds", async (_what, correction, testID, shown) => {
   const shift = await fullDay();
@@ -393,7 +397,7 @@ test.each([
 });
 
 async function correctTrailerNumberAt(shift: LocalShift, startedAt: Date, value: string): Promise<void> {
-  await correctTrailerNumber({ shiftId: shift.id, useId: trailerUseAt(startedAt.toISOString()), usageState: USAGE_STATE.ended, value });
+  await correctTrailerNumber(SCOPE, { shiftId: shift.id, useId: trailerUseAt(startedAt.toISOString()), usageState: USAGE_STATE.ended, value });
 }
 
 test("the Finish route RE-READS the day as it comes back into view — a completed check shows, the declaration is clear", async () => {
@@ -406,7 +410,7 @@ test("the Finish route RE-READS the day as it comes back into view — a complet
   expect(text(view, "review-vehicle-0-checks")).toBe("Not completed");
   await press(view, "finish-confirm-declaration");
 
-  await completeVehicleCheck({
+  await completeVehicleCheck(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, checkId: "late", startedAt: new Date(),
     answers: checklistItems(checklistFor("class1")).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
     completedAt: new Date(), completedBy: DRIVER.user.id,
@@ -422,7 +426,7 @@ test("the Finish route RE-READS the day as it comes back into view — a complet
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("PERSONAL: 'Save Timesheet' — saved on this phone, nothing sent, nothing claimed sent; still editable and deletable", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: at(5), vehicle: null });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: at(5), vehicle: null });
   jest.mocked(Alert.alert).mockClear();
   const view = await mount(<FinishShiftRoute />, ["night-out-no"]);
   await press(view, "night-out-no");
@@ -433,8 +437,8 @@ test("PERSONAL: 'Save Timesheet' — saved on this phone, nothing sent, nothing 
   await press(view, "finish-confirm-declaration");
   await press(view, "finish-confirm");
 
-  await waitFor(async () => { expect(await readCompletedShift(shift.id)).not.toBeNull(); });
-  const stored = new File(Paths.document, `${COMPLETED_SHIFT_FILE_PREFIX}${shift.id}.json`).textSync();
+  await waitFor(async () => { expect(await readCompletedShift(SCOPE, shift.id)).not.toBeNull(); });
+  const stored = new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${shift.id}.json`).textSync();
   expect(stored).not.toMatch(/sent|submitted|declar|confirm/i);
   mockParams.id = shift.id;
   const page = await mount(<TimesheetRoute />, ["timesheet-edit"]);
@@ -443,7 +447,7 @@ test("PERSONAL: 'Save Timesheet' — saved on this phone, nothing sent, nothing 
 });
 
 test("COMPANY: the action says plainly that sending is not built — no 'Save & Send', nothing sent, nothing claimed", async () => {
-  const shift = await startLocalShift({ workingFor: NORTHGATE, startedAt: at(5), vehicle: null });
+  const shift = await startLocalShift(SCOPE, { workingFor: NORTHGATE, startedAt: at(5), vehicle: null });
   const { view, confirmed } = await review(shift);
 
   expect(text(view, "finish-confirm-meaning")).toBe("Sending timesheets to Northgate Haulage isn't available yet. This saves it on this phone only — nothing is sent to Northgate Haulage.");
@@ -463,7 +467,7 @@ test("the declaration marks nothing done: an incomplete check stays incomplete i
   const finish = confirmed[0];
   if (finish === undefined) throw new Error("expected the confirmation");
 
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), trailerUseId: trailerUseAt(at(12).toISOString()), ...finish });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), trailerUseId: trailerUseAt(at(12).toISOString()), ...finish });
 
   expect(done?.previousVehicles.every(use => use.checks.length === 0)).toBe(true);
   expect(done?.previousTrailers.every(use => use.checks.length === 0)).toBe(true);
@@ -474,8 +478,8 @@ test("the declaration marks nothing done: an incomplete check stays incomplete i
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function finishedPersonalDay(): Promise<CompletedShift> {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: at(5), vehicle: null });
-  const done = await finishDeclared({ shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: at(17), nightOut: false, notes: "" });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: at(5), vehicle: null });
+  const done = await finishDeclared(SCOPE, { shiftId: shift.id, vehicleUseId: null, trailerUseId: null, finalMileage: null, endedAt: at(17), nightOut: false, notes: "" });
   if (done === null) throw new Error("expected the day to finish");
   return done;
 }
@@ -537,22 +541,22 @@ test("a Personal day's edit that does NOT make it a company's is an ordinary sav
 test("the store keeps its rules for the open-day corrections: a start after a use refused; a start mileage above the end refused", async () => {
   const shift = await fullDay();
 
-  await expect(correctOpenShift({ shiftId: shift.id, workingFor: { kind: "personal" }, startedAt: at(6) })).rejects.toThrow(TimesheetBoundsError);
-  await expect(correctStartMileage({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, startMileage: 100_200 })).rejects.toThrow(Error);
-  expect(await correctStartMileage({ shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, startMileage: 1 })).toBeNull();
+  await expect(correctOpenShift(SCOPE, { shiftId: shift.id, workingFor: { kind: "personal" }, startedAt: at(6) })).rejects.toThrow(TimesheetBoundsError);
+  await expect(correctStartMileage(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, startMileage: 100_200 })).rejects.toThrow(Error);
+  expect(await correctStartMileage(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, startMileage: 1 })).toBeNull();
 
   expect(await open()).toEqual(shift);
 });
 
 test("a start mileage is corrected on EXACTLY one use — never the same plate's other use", async () => {
-  const shift = await startLocalShift({ workingFor: { kind: "personal" }, startedAt: at(5), vehicle: UNIT });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(9).toISOString()), endMileage: 220_040, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(11) });
-  await changeVehicle({ shiftId: shift.id, endingUseId: vehicleUseAt(at(11).toISOString()), endMileage: 100_300, next: RIGID, changedAt: at(13) });
+  const shift = await startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: at(5), vehicle: UNIT });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(5).toISOString()), endMileage: 100_100, next: RIGID, changedAt: at(9) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(9).toISOString()), endMileage: 220_040, next: { ...UNIT, startMileage: 100_100 }, changedAt: at(11) });
+  await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(at(11).toISOString()), endMileage: 100_300, next: RIGID, changedAt: at(13) });
   const before = await open();
 
   // The SECOND use of AB12 CDE — a plate lookup would find the first.
-  await correctStartMileage({ shiftId: shift.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, startMileage: 100_110 });
+  await correctStartMileage(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, startMileage: 100_110 });
 
   const after = await open();
   expect(after.previousVehicles[2]).toEqual({ ...before.previousVehicles[2], startMileage: 100_110 });

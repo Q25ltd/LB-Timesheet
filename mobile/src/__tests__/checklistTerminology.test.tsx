@@ -19,7 +19,7 @@
  * sees on screen while correcting it — not today's (owner decision,
  * 2026-10-03). Only new checks use the new words.
  */
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { render } from "@testing-library/react-native";
 import {
   OPEN_SHIFT_FILE,
@@ -32,6 +32,10 @@ import { checklistFor, checklistItems, trailerChecklistFor } from "../shift/chec
 import { TRAILER_TYPE } from "../shift/trailer";
 import { CHECK_RESULT, effectiveItems, readChecksFor, sectionsOf, type CheckAnswer } from "../shift/vehicleCheck";
 import { VehicleFields } from "../screens/vehicleForm";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
 
 const ALL_CHECKLISTS = [
   checklistFor("class1"), checklistFor("class2"), checklistFor("van"),
@@ -119,10 +123,10 @@ function completedBeforeTheChange() {
 }
 
 function storeOpenDayWith(check: unknown): void {
-  const file = new File(Paths.document, OPEN_SHIFT_FILE);
+  const file = new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: SHIFT_ID, workingFor: { kind: "personal" }, startedAt: STARTED_AT.toISOString(),
+    ownerUserId: SCOPE.userId, id: SHIFT_ID, workingFor: { kind: "personal" }, startedAt: STARTED_AT.toISOString(),
     vehicle: {
       vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000,
       startedAt: STARTED_AT.toISOString(), checks: [check],
@@ -135,7 +139,7 @@ function answers(overrides: Record<string, CheckAnswer> = {}): CheckAnswer[] {
   return checklistItems(checklistFor("class1")).map(entry => overrides[entry.key] ?? { key: entry.key, result: "pass", note: "" });
 }
 
-beforeEach(async () => { await clearOpenShift(); });
+beforeEach(async () => { await clearOpenShift(SCOPE); });
 
 describe("a check completed before the change", () => {
   test("still loads, under the same keys, and still reads in its OWN words", () => {
@@ -148,10 +152,10 @@ describe("a check completed before the change", () => {
 
   test("a CORRECTION of it records the words that check shows — not today's", async () => {
     storeOpenDayWith(completedBeforeTheChange());
-    const open = await readOpenShift();
+    const open = await readOpenShift(SCOPE);
     const useId = open?.vehicle?.useId ?? "";
 
-    const revised = await reviseVehicleCheck({
+    const revised = await reviseVehicleCheck(SCOPE, {
       shiftId: SHIFT_ID, useId, usageState: USAGE_STATE.inUse, checkId: "old-check", revisionId: "rev-1",
       answers: answers({ "number-plate": { key: "number-plate", result: CHECK_RESULT.defect, note: "Rear plate cracked" } }),
       revisedAt: new Date(2026, 8, 13, 7, 0), revisedBy: "user_1",
@@ -168,9 +172,9 @@ describe("a check completed before the change", () => {
 
   test("saving a correction that changes NO answer adds no correction — wording alone is not a change", async () => {
     storeOpenDayWith(completedBeforeTheChange());
-    const open = await readOpenShift();
+    const open = await readOpenShift(SCOPE);
 
-    const revised = await reviseVehicleCheck({
+    const revised = await reviseVehicleCheck(SCOPE, {
       shiftId: SHIFT_ID, useId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, checkId: "old-check", revisionId: "rev-1",
       answers: answers(), revisedAt: new Date(2026, 8, 13, 7, 0), revisedBy: "user_1",
     });

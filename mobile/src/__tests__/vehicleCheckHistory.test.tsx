@@ -15,13 +15,21 @@
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Text, Pressable } from "react-native";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import type { AuthenticatedAccount } from "../api/account";
 import VehicleCheckRoute from "../../app/(app)/vehicle-check";
 import ActiveShiftRoute from "../../app/(app)/active-shift";
 import { checklistFor, checklistItems, type Checklist } from "../shift/checklists";
 import { clearOpenShift, OPEN_SHIFT_FILE, readOpenShift, startLocalShift } from "../shift/localShift";
+import { accountDirectoryOf, scopeFor } from "./testScope";
+
+/** The signed-in driver's records — F-31: every store call names its account. */
+const SCOPE = scopeFor("user_1");
+// Screens act for this test's driver. The real hook's sign-in / sign-out
+// behaviour is proven in accountSwitchRoute.test.tsx.
+jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+const mockScope = SCOPE;
 
 /** The checklist every part of the app sees in place of today's, while set. */
 let mockTomorrow: Checklist | null = null;
@@ -113,7 +121,7 @@ async function openRoute(): Promise<View> {
 }
 
 async function dayWithUnit(): Promise<void> {
-  await startLocalShift({
+  await startLocalShift(SCOPE, {
     workingFor: { kind: "personal" },
     startedAt: STARTED_AT,
     vehicle: { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 124_560 },
@@ -134,7 +142,7 @@ async function certifyToday() {
   await press(view, "complete-check");
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
   await view.unmount();
-  const signed = (await readOpenShift())?.vehicle?.checks[0];
+  const signed = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   if (signed?.status !== "completed") throw new Error("expected a completed check");
   return signed;
 }
@@ -164,7 +172,7 @@ function tomorrowOf(today: Checklist): Checklist {
 
 beforeEach(async () => {
   mockTomorrow = null;
-  await clearOpenShift();
+  await clearOpenShift(SCOPE);
   for (const fn of Object.values(mockRouter)) fn.mockClear();
 });
 afterEach(() => { jest.restoreAllMocks(); });
@@ -227,7 +235,7 @@ test("a check certified under today's checklist reads EXACTLY the same under tom
 
   // Reading history wrote nothing, and the record is still the one signed.
   expect(writes).not.toHaveBeenCalled();
-  expect((await readOpenShift())?.vehicle?.checks[0]).toEqual(signed);
+  expect((await readOpenShift(SCOPE))?.vehicle?.checks[0]).toEqual(signed);
 });
 
 test("under tomorrow's checklist, Active Shift still reads today's certificate as Completed", async () => {
@@ -264,7 +272,7 @@ test("a reopened certificate cannot be changed — and reopening it rewrites not
   await waitFor(() => { expect(mockRouter.dismissTo).toHaveBeenCalledWith("/active-shift"); });
 
   expect(writes).not.toHaveBeenCalled();
-  const after = (await readOpenShift())?.vehicle?.checks[0];
+  const after = (await readOpenShift(SCOPE))?.vehicle?.checks[0];
   expect(after?.id).toBe(signed.id);
   expect(after?.completedAt).toBe(signed.completedAt);
   expect(after?.completedBy).toBe(signed.completedBy);
@@ -286,10 +294,10 @@ function recordedBeforeSections() {
 }
 
 function storeDayWith(items: unknown[]): void {
-  const file = new File(Paths.document, OPEN_SHIFT_FILE);
+  const file = new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
   file.create({ overwrite: true });
   file.write(JSON.stringify({
-    id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
+    ownerUserId: SCOPE.userId, id: "11111111-2222-4333-8444-555555555555", workingFor: { kind: "personal" },
     startedAt: STARTED_AT.toISOString(),
     vehicle: {
       vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 124_560, startedAt: STARTED_AT.toISOString(),

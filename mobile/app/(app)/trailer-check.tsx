@@ -42,18 +42,24 @@ import {
 import type { LocalTrailer } from "../../src/shift/trailer";
 import { saveFailureMessage } from "../../src/screens/format";
 import { backToDay, leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
+import { useAccountScope } from "../../src/shift/useAccountScope";
+import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function TrailerCheckRoute() {
+  const scope = useAccountScope();
   const { trailer, usageState, timesheet, via } = useLocalSearchParams<{ trailer?: string; usageState?: string; timesheet?: string; via?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useEffect(() => {
     let cancelled = false;
-    void readScreenDay(timesheet).then(open => { if (!cancelled) setShift(open); });
+    if (scope === null) return undefined;
+    void readScreenDay(scope, timesheet).then(open => { if (!cancelled) setShift(open); });
     return () => { cancelled = true; };
-  }, [timesheet]);
+  }, [scope, timesheet]);
 
   const state = Object.values(USAGE_STATE).find(entry => entry === usageState) ?? null;
+  // No signed-in account's scope yet: nothing of anyone's is read (F-31).
+  if (scope === null) return <Restoring />;
   if (trailer === undefined || state === null) return <Redirect href={missingHref(timesheet, true)} />;
   if (shift === "loading") return <Restoring message="Loading check…" />;
   if (shift === null) return <Redirect href={missingHref(timesheet, false)} />;
@@ -62,11 +68,11 @@ export default function TrailerCheckRoute() {
     : (shift.previousTrailers.find(entry => entry.useId === trailer) ?? null);
   if (use === null) return <Redirect href={missingHref(timesheet, true)} />;
 
-  return <OpenCheck shift={shift} trailer={use} usageState={state} onShift={setShift} timesheet={timesheet} via={via} />;
+  return <OpenCheck scope={scope} shift={shift} trailer={use} usageState={state} onShift={setShift} timesheet={timesheet} via={via} />;
 }
 
-function OpenCheck({ shift, trailer, usageState, onShift, timesheet, via }: {
-  shift: LocalShift; trailer: LocalTrailer; usageState: UsageState; onShift: (shift: LocalShift | null) => void; timesheet?: string; via?: string;
+function OpenCheck({ scope, shift, trailer, usageState, onShift, timesheet, via }: {
+  scope: AccountScope; shift: LocalShift; trailer: LocalTrailer; usageState: UsageState; onShift: (shift: LocalShift | null) => void; timesheet?: string; via?: string;
 }) {
   const { account } = useAuth();
   const existing = latestCheck(trailer.checks);
@@ -85,7 +91,7 @@ function OpenCheck({ shift, trailer, usageState, onShift, timesheet, via }: {
 
   async function save(answers: CheckAnswer[]): Promise<void> {
     try {
-      const stored = await saveTrailerCheckDraft({ ...target, answers });
+      const stored = await saveTrailerCheckDraft(scope, { ...target, answers });
       if (stored === null) gone(timesheet);
     } catch (error: unknown) {
       Alert.alert("Couldn't save the check", saveFailureMessage(error, "Your last answer was not saved. Please try again."));
@@ -97,7 +103,7 @@ function OpenCheck({ shift, trailer, usageState, onShift, timesheet, via }: {
     // A check is never certified without a driver to attribute it to.
     if (account === null) return;
     try {
-      const stored = await completeTrailerCheck({ ...target, answers, completedAt: new Date(), completedBy: account.user.id });
+      const stored = await completeTrailerCheck(scope, { ...target, answers, completedAt: new Date(), completedBy: account.user.id });
       if (stored === null) { gone(timesheet); return; }
       // Back where it was opened from: the day, or the ended use's detail.
       if (usageState === USAGE_STATE.inUse) backToDay(via);
@@ -111,12 +117,12 @@ function OpenCheck({ shift, trailer, usageState, onShift, timesheet, via }: {
   async function revise(answers: CheckAnswer[]): Promise<void> {
     if (account === null || existing === null) return;
     try {
-      const stored = await reviseTrailerCheck({
+      const stored = await reviseTrailerCheck(scope, {
         shiftId: shift.id, useId: trailer.useId, usageState, checkId: existing.id,
         revisionId: newLocalId(), answers, revisedAt: new Date(), revisedBy: account.user.id,
       });
       if (stored === null) { gone(timesheet); return; }
-      onShift(await readScreenDay(timesheet));
+      onShift(await readScreenDay(scope, timesheet));
     } catch (error: unknown) {
       Alert.alert("Couldn't save the correction", saveFailureMessage(error));
       throw error;
