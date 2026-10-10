@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-10-10 — D63 stage 1: a company adds its drivers (invitation API)
+
+Owner-approved design recorded as D63 (`de334a0`), then stage 1 only.
+
+**Checked before building**, and raised with the owner:
+- Account email records require an account, and no company may read them
+  (D56). Owner: track invitation emails on the invitation itself;
+  `MailMessage.userId` becomes nullable for exactly that.
+- Anyone can register a company, so invitations could be used to send spam
+  from `logisticbay.com`. Owner: 50 per company per day; 3 emails per address
+  per week across companies, silently; fixed, escaped wording.
+
+**Built.**
+- Table and migration: `DriverInvitation` in additive migration
+  `20261010150000_driver_invitation`, with database-enforced rules — one open
+  invitation per company and address (case-insensitive), trimmed names,
+  NULL-not-empty payroll reference, expiry after creation, and it cascades
+  with its company.
+- Repository: every read and write takes the admin's `TenantContext`. The
+  one cross-company read is a count, for the address cap.
+- Service and routes: four routes; the service applies D54's admin gate. A
+  lapsed invitation is shown as expired and superseded on re-invite.
+- Guardrail: `tenant-models-via-repository` now also covers
+  `driverInvitation`.
+
+**Evidence.**
+- RED: all 18 `driverInvitations.test.ts` cases failed (404 — no routes).
+  GREEN: 18/18. Three first-run failures were test set-up mistakes, not
+  product bugs:
+  - two simulated expiry against the database's own CHECK;
+  - one cleared its outbox mid-test.
+- Mutation: 13 mutants, all killed. One first survived — the tracked mailer
+  recording an invitation as an account email, which only produced a false
+  error log because the database refuses the row — and a new
+  `emailDelivery.test.ts` now kills it.
+- Gate: every stage passes on this tree — rules, typecheck, lint, knip,
+  api 244, mobile 1448 + 7 restart checks, web 139, db 306 (288 + 18),
+  backup 12, build and start smoke. The web stage needed one retry (a 5 s
+  timeout) while a FamFusion dev server again loaded the machine.
+
+**Next (stage 2, awaiting approval):** driver email verification in the app.
+
+---
+
 ## 2026-10-10 — Three web test races fixed; Codex leftovers cleaned up
 
 **Flaky CI.** The first CI attempt on `7034de2` failed in
