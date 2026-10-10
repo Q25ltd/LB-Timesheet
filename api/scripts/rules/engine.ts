@@ -278,8 +278,8 @@ scan(
 // is src/tests/db/repositoryTenantBoundary.test.ts.
 scan(
   "tenant-models-via-repository",
-  "Shift/ShiftSegment/ShiftSubmitJob queries live in src/repositories — use shiftRepository with a TenantContext.",
-  line => /\bprisma\s*\.\s*(?:shift|shiftSegment|shiftSubmitJob)\s*\./.test(line.replace(/\/\/.*$/, "")),
+  "Shift/ShiftSegment/ShiftSubmitJob/DriverInvitation queries live in src/repositories — use their repository with a TenantContext.",
+  line => /\bprisma\s*\.\s*(?:shift|shiftSegment|shiftSubmitJob|driverInvitation)\s*\./.test(line.replace(/\/\/.*$/, "")),
   file => !/[/\\](?:repositories|tests|generated)[/\\]/.test(file) && !file.endsWith(".test.ts"),
 );
 

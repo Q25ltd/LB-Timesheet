@@ -32,6 +32,8 @@ export function trackedMailer(inner: Mailer, delivery: EmailDeliveryRepository, 
       if ((await delivery.suppressionReasons(message.to)).length > 0) throw new RecipientSuppressedError();
       const sesMessageId = await inner.send(message);
       if (sesMessageId === null) return null;
+      // Not an account's email (D63): its sender records it where it belongs.
+      if (message.userId === null) return sesMessageId;
       try {
         await delivery.recordSent({ sesMessageId, userId: message.userId, sender: message.sender });
       } catch (error) {

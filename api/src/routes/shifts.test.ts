@@ -93,7 +93,7 @@ function fixtures(options: { active?: boolean } = {}) {
       findMany:  () => Promise.resolve([]),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE }) },
+    company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE, name: "Test Haulage" }) },
     // D22: the two canonical halves. `startContext` derives the snapshot name
     // from them, so DRIVER_NAME below is the DERIVED value, not a column.
     user: {
@@ -120,6 +120,14 @@ function fixtures(options: { active?: boolean } = {}) {
     emailSuppression: { findMany: () => Promise.resolve([]) },
     emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
     emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
+    // Driver invitations (D63): not part of this test.
+    driverInvitation: {
+      create:     () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findFirst:  () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findMany:   () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      updateMany: () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      count:      () => Promise.reject(new Error("driverInvitation is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

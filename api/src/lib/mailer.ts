@@ -50,8 +50,13 @@ export const MAIL_REPLY_TO = "support@logisticbay.com";
 
 export interface MailMessage {
   sender: MailSender;
-  /** The account the email is for — what a later bounce or complaint is recorded against (D56). */
-  userId: string;
+  /**
+   * The account the email is for — what a later bounce or complaint is
+   * recorded against (D56). `null` for an email that is not an account's: a
+   * driver invitation, which the CALLER records on the invitation itself
+   * (D63), so that no company-triggered email enters an account's records.
+   */
+  userId: string | null;
   to: string;
   subject: string;
   text: string;

@@ -29,6 +29,8 @@ import { accountTokenRepository, type AccountTokenDatabase } from "./repositorie
 import { registerEmailVerificationRoutes } from "./routes/emailVerification.js";
 import { passwordRepository, type PasswordDatabase } from "./repositories/passwordRepository.js";
 import { registerPasswordRoutes } from "./routes/password.js";
+import { driverInvitationRepository, type DriverInvitationDatabase } from "./repositories/driverInvitationRepository.js";
+import { registerCompanyDriverRoutes } from "./routes/companyDrivers.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
 import { sendThrottle } from "./lib/sendThrottle.js";
 
@@ -48,7 +50,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -307,6 +309,17 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
     tokens,
     mail,
   }, limits);
+
+  // A company adds its drivers (D63, stage 1). Tenant posture; the service
+  // applies the company-admin gate (D54). The invitation email goes through
+  // the same tracked mailer — so a suppressed address is not asked — but is
+  // recorded on the invitation, never as an account's email (D56).
+  registerCompanyDriverRoutes(app, driverInvitationRepository(prisma), {
+    mailer:     mail.mailer,
+    work,
+    websiteUrl: mail.webAppUrl,
+    log:        app.log,
+  });
 
   // LIVENESS: the process is up and answering. Touches nothing else, so a
   // database outage never makes a supervisor restart a healthy process.

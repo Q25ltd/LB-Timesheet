@@ -40,6 +40,14 @@ export function emptyDatabase() {
     emailSuppression:   { findMany: () => Promise.resolve([]) },
     emailMessage:       { create: refuse("emailMessage.create") },
     emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
+    // Driver invitations (D63): not part of this test.
+    driverInvitation: {
+      create:     () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findFirst:  () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findMany:   () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      updateMany: () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      count:      () => Promise.reject(new Error("driverInvitation is not part of this test")),
+    },
     accountToken: {
       upsert:     refuse("accountToken.upsert"),
       findUnique: () => Promise.resolve(null),

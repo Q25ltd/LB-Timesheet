@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 import type { MembershipRole } from "../generated/enums.js";
+import type { DriverInvitationDatabase } from "../repositories/driverInvitationRepository.js";
 
 // env.ts validates process.env at import time and exits on failure, so these
 // must be set BEFORE app.js is loaded. Hence the dynamic import below — the
@@ -142,6 +143,8 @@ interface MembershipRow {
 }
 
 interface IdentityReads {
+  /** Driver invitations (D63) — never reached by these tests. */
+  driverInvitation: DriverInvitationDatabase["driverInvitation"];
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: {
     // Broadened for the refresh boundary: a credential is looked up by its
@@ -222,6 +225,14 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
     emailSuppression: { findMany: () => Promise.resolve([]) },
     emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
     emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
+    // Driver invitations (D63): not part of this test.
+    driverInvitation: {
+      create:     () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findFirst:  () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findMany:   () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      updateMany: () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      count:      () => Promise.reject(new Error("driverInvitation is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),

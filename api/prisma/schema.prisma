@@ -111,6 +111,7 @@ model Company {
   updatedAt    DateTime  @updatedAt
 
   memberships  CompanyMembership[]
+  driverInvitations DriverInvitation[]
 
   @@index([status])
 }
@@ -368,6 +369,49 @@ model CompanyMembership {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// One driver's working day for ONE company.
+/// Where a company's driver invitation stands (D63). An invitation past its
+/// `expiresAt` that is still `pending` is SHOWN as expired; it is marked
+/// `expired` when the company invites the same address again. Accepted and
+/// declined arrive with the driver's side of D63 (stage 3).
+enum DriverInvitationStatus {
+  pending
+  cancelled
+  expired
+}
+
+/// A company's invitation of a driver, by email address (D63). The company's
+/// own record of the person it means — the names and payroll reference ARE
+/// what the company typed, not a driver account's — and never evidence that a
+/// LogisticBay account uses the address. Nothing here is read on a driver's
+/// behalf until that driver has verified the address (stage 3).
+model DriverInvitation {
+  id          String                 @id @default(cuid())
+  companyId   String
+  /// The address the company typed. Matched, later, only against a driver
+  /// account's VERIFIED email (D24, D63).
+  email       String                 @db.Citext
+  firstName   String
+  lastName    String
+  /// The company's own payroll/employee reference, if it uses one.
+  payrollRef  String?
+  status      DriverInvitationStatus @default(pending)
+  createdAt   DateTime               @default(now())
+  expiresAt   DateTime
+  updatedAt   DateTime               @updatedAt
+  /// When SES accepted the invitation email, and its message id — recorded
+  /// here, never in the account email records (D56, D63). Null: no email was
+  /// sent (suppressed, over the per-address cap, or email disabled).
+  emailSentAt  DateTime?
+  sesMessageId String?               @unique
+
+  company     Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// The company's list, newest first, and its 24-hour cap.
+  @@index([companyId, createdAt])
+  /// The per-address cap across companies, and (stage 3) a verified driver's invitations.
+  @@index([email, createdAt])
+}
+
 model Shift {
   id           String   @id @default(cuid())
 

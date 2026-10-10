@@ -29,6 +29,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 import type { MembershipRole } from "../generated/enums.js";
+import type { DriverInvitationDatabase } from "../repositories/driverInvitationRepository.js";
 
 // env.ts validates process.env at import time and exits on failure, so these
 // must be set BEFORE app.js is loaded — the pattern app.test.ts established.
@@ -174,6 +175,8 @@ function otherUserRow(): UserRow {
 }
 
 interface AuthReads {
+  /** Driver invitations (D63) — never reached by these tests. */
+  driverInvitation: DriverInvitationDatabase["driverInvitation"];
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   session: {
     // Broadened for the refresh boundary: a credential is looked up by its
@@ -207,7 +210,7 @@ interface AuthReads {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
-  company: { findUnique(): Promise<{ timezone: string } | null> };
+  company: { findUnique(): Promise<{ timezone: string; name: string } | null> };
   // Every WRITE rejects: no case in this file may reach persistence, so a
   // call landing here is itself the failure rather than a setup gap.
   // Company registration's (D51). No case here registers a company.
@@ -248,7 +251,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       create:    () => Promise.reject(new Error("no case in routes/auth.test.ts may reach shift persistence")),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    company: { findUnique: () => Promise.resolve({ timezone: "Europe/London", name: "Test Haulage" }) },
     pendingCompanyRegistration: {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),
@@ -257,6 +260,14 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
     emailSuppression: { findMany: () => Promise.resolve([]) },
     emailMessage: { create: () => Promise.reject(new Error("emailMessage.create is not part of this test")) },
     emailDeliveryEvent: { findUnique: () => Promise.resolve(null) },
+    // Driver invitations (D63): not part of this test.
+    driverInvitation: {
+      create:     () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findFirst:  () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      findMany:   () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      updateMany: () => Promise.reject(new Error("driverInvitation is not part of this test")),
+      count:      () => Promise.reject(new Error("driverInvitation is not part of this test")),
+    },
     accountToken: {
       upsert:     () => Promise.reject(new Error("accountToken.upsert is not part of this test")),
       findUnique: () => Promise.resolve(null),
