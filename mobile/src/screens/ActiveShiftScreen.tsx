@@ -245,6 +245,7 @@ export function ActiveShiftScreen({
           { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.xxl },
         ]}
       >
+        {shift.recoveredAt === undefined ? null : <Text accessibilityLiveRegion="polite">Recovered from an unacknowledged save. Review the shift details.</Text>}
         {/* Discard sits up here, as far from Finish Shift as the screen
             allows. They are the two ways a day ends and they must never be
             neighbours: one files the driver's work, the other destroys it,

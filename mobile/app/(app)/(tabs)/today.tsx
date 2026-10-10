@@ -10,6 +10,7 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { HomeScreen } from "../../../src/screens/HomeScreen";
+import { InterruptedRecovery } from "../../../src/components/InterruptedRecovery";
 import { useAuth } from "../../../src/auth/AuthContext";
 import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShift } from "../../../src/shift/localShift";
@@ -47,6 +48,8 @@ export default function TodayRoute() {
   if (account === null) return null;
 
   return (
+    <>
+    <InterruptedRecovery scope={scope} onRecovered={() => { router.replace("/today"); }} />
     <HomeScreen
       user={account.user}
       biometrics={biometrics}
@@ -62,5 +65,6 @@ export default function TodayRoute() {
       // By the day's id — never its date, employer or place in the list.
       onOpenTimesheet={id => { router.push({ pathname: "/timesheet", params: { id } }); }}
     />
+    </>
   );
 }

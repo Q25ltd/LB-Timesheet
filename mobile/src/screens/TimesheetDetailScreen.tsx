@@ -87,6 +87,7 @@ export function TimesheetDetailScreen({ shift, onBack, ...actions }: TimesheetDe
         ]}
       >
         <BackButton testID="timesheet-back" onPress={onBack} />
+        {shift?.recoveredAt === undefined ? null : <Text>Recovered from an unacknowledged save. Review the timesheet details.</Text>}
         <Text style={formStyles.title} testID="screen-title" accessibilityRole="header">Timesheet</Text>
         {shift === null ? (
           <Text style={styles.missing} testID="timesheet-missing">

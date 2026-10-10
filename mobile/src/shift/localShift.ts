@@ -277,6 +277,8 @@ export function normalisePlate(raw: string): string {
 export const LOCAL_SHIFT_STATUS = { open: "open", completed: "completed" } as const;
 
 export interface LocalShift {
+  /** Explicitly recovered from an interrupted, unacknowledged save (F-37). */
+  recoveredAt?: string;
   /**
    * The account this day belongs to — the server-confirmed `user.id` of the
    * driver who started it (F-31). Written once, when the day starts, and
@@ -355,9 +357,8 @@ export const OPEN_SHIFT_TEMP_FILE = "logisticbay-open-shift.next.json";
 
 /**
  * Every file kept for recovery starts with this, followed by why it was kept
- * (`unreadable-` or `unfinished-`), the time and a random id. Nothing in the
- * app reads these back; they exist so bytes the app could not use are never
- * destroyed. There is no recovery screen.
+ * (`unreadable-` or `unfinished-`), the time and a random id. Unfinished copies may be offered for explicit owner-confirmed recovery
+ * under D62; no copy is silently accepted. Other recovery bytes are retained.
  */
 export const RECOVERY_FILE_PREFIX = "logisticbay-open-shift.recovery-";
 
@@ -413,7 +414,8 @@ function writeVerified(scope: AccountScope, serialised: string): File {
  * never a half-written one. That file is not promoted, because nothing can
  * prove from the disk alone that the write it belonged to was ever confirmed
  * to the driver; the next write moves it aside for recovery instead
- * (`preserveForRecovery`), so it is kept and never mistaken for the day.
+ * (`preserveForRecovery`), so it is kept and never mistaken for the day. D62 permits explicit
+ * owner-confirmed recovery only while the destination is missing.
  *
  * A failed move throws, so no caller reports the change as saved. The
  * temporary file is then left in place, because the move may have got as far
@@ -497,6 +499,8 @@ function asLocalShiftContent(value: unknown): Omit<LocalShift, "ownerUserId"> | 
   const record = value as Record<string, unknown>;
 
   const { id, startedAt, createdAt, status, workingFor, vehicle } = record;
+  const recoveredAt = record["recoveredAt"];
+  if (recoveredAt !== undefined && !isInstant(recoveredAt)) return null;
   if (typeof id !== "string" || id === "") return null;
   if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
   if (typeof createdAt !== "string" || Number.isNaN(Date.parse(createdAt))) return null;
@@ -525,7 +529,7 @@ function asLocalShiftContent(value: unknown): Omit<LocalShift, "ownerUserId"> | 
   // says otherwise was not written by this app, and is not guessed at.
   if (trailers.trailer !== null && (asVehicle === null || !towsTrailers(asVehicle.vehicleClass))) return null;
 
-  return { id, workingFor: context, startedAt, vehicle: asVehicle, previousVehicles: previous, ...trailers, status: LOCAL_SHIFT_STATUS.open, createdAt };
+  return { id, workingFor: context, startedAt, vehicle: asVehicle, previousVehicles: previous, ...trailers, status: LOCAL_SHIFT_STATUS.open, createdAt, ...(typeof recoveredAt === "string" ? { recoveredAt } : {}) };
 }
 
 /**
@@ -2021,6 +2025,7 @@ export const SHIFT_NOTES_MAX_LENGTH = 500;
  * lists, the same shapes, the same meaning as on the open day.
  */
 export interface CompletedShift {
+  recoveredAt?: string;
   /** The account this day belongs to, carried from the open day (F-31). */
   ownerUserId: string;
   id: string;
@@ -2266,6 +2271,7 @@ export function completedFrom(open: LocalShift, { finalMileage, endedAt, nightOu
       : [...open.previousTrailers, { ...open.trailer, endedAt: at, endedBy: USE_ENDED_BY.finish }],
     status:           LOCAL_SHIFT_STATUS.completed,
     createdAt:        open.createdAt,
+    ...(open.recoveredAt === undefined ? {} : { recoveredAt: open.recoveredAt }),
   };
 }
 
@@ -2451,6 +2457,8 @@ function asCompletedShiftContent(value: unknown): Omit<CompletedShift, "ownerUse
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
   const { id, startedAt, endedAt, createdAt, status, workingFor, nightOut, notes } = record;
+  const recoveredAt = record["recoveredAt"];
+  if (recoveredAt !== undefined && !isInstant(recoveredAt)) return null;
   if (typeof id !== "string" || id === "") return null;
   if (!isInstant(startedAt) || !isInstant(endedAt) || !isInstant(createdAt)) return null;
   if (status !== LOCAL_SHIFT_STATUS.completed) return null;
@@ -2475,6 +2483,7 @@ function asCompletedShiftContent(value: unknown): Omit<CompletedShift, "ownerUse
     id, workingFor: context, startedAt, endedAt, nightOut, notes,
     previousVehicles: vehicles, previousTrailers: trailers.previousTrailers,
     status: LOCAL_SHIFT_STATUS.completed, createdAt,
+    ...(typeof recoveredAt === "string" ? { recoveredAt } : {}),
   };
   // ABSENT means none — a day finished before corrections existed, never
   // rewritten by being read. PRESENT must be exactly a list of corrections.
@@ -2759,6 +2768,7 @@ function viewOfFinished(done: CompletedShift): LocalShift {
     previousTrailers: uses.previousTrailers,
     status: LOCAL_SHIFT_STATUS.open,
     createdAt: done.createdAt,
+    ...(done.recoveredAt === undefined ? {} : { recoveredAt: done.recoveredAt }),
   };
   finishedBehind.set(view, done);
   return view;
@@ -2878,6 +2888,81 @@ function stillThere(file: File): boolean {
   } catch {
     return false;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Interrupted writes: explicit, owner-confirmed recovery (F-37, D62)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** An offer, never an accepted record. Its exact bytes bind confirmation. */
+export interface InterruptedWriteOffer {
+  key: string;
+  bytes: string;
+  kind: "open" | "completed";
+  shiftId: string;
+  startedAt: string;
+}
+
+function interruptedCandidate(scope: AccountScope, key: string): { file: File; bytes: string; day: LocalShift | CompletedShift; target: File } | null {
+  if (!/^[A-Za-z0-9._-]+$/.test(key)) return null;
+  if (key !== OPEN_SHIFT_TEMP_FILE && !(key.startsWith(`${RECOVERY_FILE_PREFIX}unfinished-`) && key.endsWith(".json"))) return null;
+  const file = new File(accountDirectory(scope), key);
+  if (!file.exists) return null;
+  try {
+    const bytes = file.textSync();
+    const parsed: unknown = JSON.parse(bytes);
+    const day = asLocalShift(parsed) ?? asCompletedShift(parsed);
+    if (day === null || day.ownerUserId !== scope.userId) return null;
+    const target = day.status === LOCAL_SHIFT_STATUS.open ? openShiftFile(scope) : completedShiftFile(scope, day.id);
+    // An existing destination, including an unreadable one, is never replaced.
+    if (target === null || target.exists) return null;
+    if (day.status === LOCAL_SHIFT_STATUS.open && readCompletedSync(scope, day.id) !== null) return null;
+    return { file, bytes, day, target };
+  } catch { return null; }
+}
+
+/** Only an authenticated account's live scope can inspect its own candidates. */
+export function findInterruptedWrites(scope: AccountScope): Promise<InterruptedWriteOffer[]> {
+  return scopedRead(scope, () => {
+    const offers: InterruptedWriteOffer[] = [];
+    for (const file of accountDirectory(scope).list()) {
+      if (!(file instanceof File)) continue;
+      const candidate = interruptedCandidate(scope, file.name);
+      if (candidate === null) continue;
+      offers.push({ key: file.name, bytes: candidate.bytes, kind: candidate.day.status, shiftId: candidate.day.id, startedAt: candidate.day.startedAt });
+    }
+    return offers;
+  });
+}
+
+/** No overwrite; the original stays intact across failure, retry and Not now. */
+export function recoverInterruptedWrite(scope: AccountScope, offer: InterruptedWriteOffer, confirmation: { confirmedByDriver: boolean }): Promise<"recovered" | "refused"> {
+  return queued(scope, () => {
+    if (confirmation.confirmedByDriver !== true) return Promise.resolve("refused" as const);
+    const candidate = interruptedCandidate(scope, offer.key);
+    if (candidate === null || candidate.bytes !== offer.bytes || candidate.day.id !== offer.shiftId || candidate.day.status !== offer.kind) return Promise.resolve("refused" as const);
+    const recovered = { ...candidate.day, recoveredAt: new Date().toISOString() };
+    // A recovered completed copy has no accepted declaration: review again.
+    if ("declaration" in recovered) delete recovered.declaration;
+    const serialised = JSON.stringify(recovered);
+    // Installed only if the store's own reader accepts it, for this owner.
+    const reread: unknown = JSON.parse(serialised);
+    const readable = candidate.day.status === LOCAL_SHIFT_STATUS.open ? asLocalShift(reread) : asCompletedShift(reread);
+    if (readable === null || readable.ownerUserId !== scope.userId) return Promise.resolve("refused" as const);
+    const stage = new File(accountDirectory(scope), `${RECOVERY_FILE_PREFIX}install-${newLocalId()}.json`);
+    try {
+      stage.create();
+      stage.write(serialised);
+      if (stage.textSync() !== serialised) throw new Error("Recovery write was incomplete");
+      assertLiveScope(scope);
+      if (candidate.target.exists) return Promise.resolve("refused" as const);
+      stage.moveSync(candidate.target, { overwrite: false });
+      // Accepted source bytes remain as an archive, never a fresh offer
+      // after the driver later deletes the recovered record.
+      candidate.file.moveSync(new File(accountDirectory(scope), `${RECOVERY_FILE_PREFIX}accepted-${newLocalId()}.json`), { overwrite: false });
+    } catch (error: unknown) { throw new SafeSaveFailedError(error); }
+    return Promise.resolve("recovered" as const);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
