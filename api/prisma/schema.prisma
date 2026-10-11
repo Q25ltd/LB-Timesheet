@@ -353,8 +353,13 @@ model CompanyMembership {
   user       User     @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)
 
   shifts     Shift[]
+  /// The invitations that brought this driver in (D63).
+  acceptedInvitations DriverInvitation[]
 
   @@unique([companyId, userId])
+  /// Target for DriverInvitation's composite foreign key: an accepted
+  /// invitation is bound to a membership of its OWN company.
+  @@unique([id, companyId])
   /// Target for Shift's composite foreign key. Referencing (id, companyId,
   /// userId) as one unit is what makes the database — not application code —
   /// guarantee that a shift's denormalised companyId and userId agree with the
@@ -371,12 +376,14 @@ model CompanyMembership {
 /// One driver's working day for ONE company.
 /// Where a company's driver invitation stands (D63). An invitation past its
 /// `expiresAt` that is still `pending` is SHOWN as expired; it is marked
-/// `expired` when the company invites the same address again. Accepted and
-/// declined arrive with the driver's side of D63 (stage 3).
+/// `expired` when the company invites the same address again. `accepted` and
+/// `declined` are the driver's answers (stage 3).
 enum DriverInvitationStatus {
   pending
   cancelled
   expired
+  accepted
+  declined
 }
 
 /// A company's invitation of a driver, by email address (D63). The company's
@@ -403,8 +410,15 @@ model DriverInvitation {
   /// sent (suppressed, over the per-address cap, or email disabled).
   emailSentAt  DateTime?
   sesMessageId String?               @unique
+  /// When the driver accepted or declined; null until they answer.
+  respondedAt  DateTime?
+  /// The membership an ACCEPTED invitation created or reactivated — of this
+  /// same company, which the composite foreign key makes the database's
+  /// guarantee. Null for every other status (a CHECK).
+  membershipId String?
 
   company     Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  membership  CompanyMembership?     @relation(fields: [membershipId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
 
   /// The company's list, newest first, and its 24-hour cap.
   @@index([companyId, createdAt])

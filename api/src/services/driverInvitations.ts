@@ -17,7 +17,7 @@ import type { AuthContext } from "../lib/auth.js";
 import { authorizeCompanyAdmin } from "../lib/authorization.js";
 import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
-import { DriverInvitationStatus as STATUS } from "../generated/enums.js";
+import { DriverInvitationStatus as STATUS, type DriverInvitationStatus } from "../generated/enums.js";
 import type { Mailer } from "../lib/mailer.js";
 import type { BackgroundWork } from "../lib/backgroundWork.js";
 import { driverInvitationEmail } from "../lib/invitationEmail.js";
@@ -67,7 +67,8 @@ export interface InvitationView {
   lastName: string;
   email: string;
   payrollRef: string | null;
-  status: "pending" | "cancelled" | "expired";
+  /** Lapsed pending invitations read as expired; accepted and declined are the driver's answers (stage 3). */
+  status: DriverInvitationStatus;
   createdAt: string;
   expiresAt: string;
 }
