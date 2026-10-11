@@ -69,6 +69,7 @@ const notUsedHere = (): Promise<never> => Promise.reject(new Error("not used her
 export const unusedD66Delegates = {
   companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: notUsedHere, updateMany: notUsedHere },
   shiftStartReceipt: { findUnique: () => Promise.resolve(null), count: () => Promise.resolve(0), create: notUsedHere },
+  membershipEvent: { findFirst: () => Promise.resolve(null) },
 };
 
 export type UnusedD66Delegates = typeof unusedD66Delegates;

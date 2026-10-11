@@ -192,6 +192,12 @@ model User {
   membershipEventsActed MembershipEvent[]
   /// The report-address confirmations this administrator asked for (D66).
   reportEmailTokensRequested CompanyReportEmailToken[]
+  /// Timesheet revisions this driver declared and submitted (D66).
+  timesheetsDeclared TimesheetSubmission[]
+  /// Review decisions this administrator made (D66).
+  timesheetDecisions TimesheetReviewDecision[]
+  /// Timesheet events this account caused (D66).
+  timesheetEvents    TimesheetEvent[]
   accountTokens AccountToken[]
   pendingCompanyRegistration PendingCompanyRegistration?
   emailMessages EmailMessage[]
@@ -542,6 +548,7 @@ model ShiftStartReceipt {
   companyTimezone   String
 
   membership CompanyMembership @relation(fields: [membershipId, companyId, userId], references: [id, companyId, userId], onDelete: Restrict, onUpdate: NoAction)
+  shifts     Shift[]
 
   @@unique([membershipId, clientEventId])
   @@index([membershipId, receivedAt])
@@ -612,9 +619,35 @@ model Shift {
   /// belongs to this user, and it belongs to this company. No onDelete — the
   /// default Restrict is deliberate, so a membership carrying history cannot be
   /// deleted out from under its shifts.
+  /// A SUBMITTED timesheet's facts (D66) — all present together, or none for a
+  /// shift that never went through submission (a CHECK). `reference` is the
+  /// stable reference every email and PDF carries (`TS-…`).
+  reference             String?               @unique
+  /// The latest revision submitted, and the one the company currently relies
+  /// on (an amendment of an accepted timesheet is not authoritative until the
+  /// company accepts it).
+  currentRevision       Int?
+  authoritativeRevision Int?
+  /// How the day's start was evidenced, and where it stands with the company.
+  verification          TimesheetVerification?
+  standing              TimesheetStanding?
+  /// The start receipt that verified it, when that is how it was verified.
+  receiptId             String?
+  nightOut              Boolean?
+  /// Server-derived at submission: the company's own payroll reference for
+  /// the driver and its name, as they were. (The zone is not here — D18: the
+  /// zone a revision was filed in is recorded with that revision.)
+  payrollRef            String?
+  companyName           String?
+
   membership   CompanyMembership @relation(fields: [membershipId, companyId, userId], references: [id, companyId, userId])
+  receipt      ShiftStartReceipt? @relation(fields: [receiptId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   segments     ShiftSegment[]
   submitJobs   ShiftSubmitJob[]
+  submissions  TimesheetSubmission[]
+  decisions    TimesheetReviewDecision[]
+  events       TimesheetEvent[]
+  deliveries   TimesheetDelivery[]
 
   /// Lets children key on (shiftId, companyId) so the DATABASE — not a code
   /// convention — guarantees a child can never sit under a different company
@@ -644,6 +677,7 @@ model Shift {
   @@index([userId, shiftDate])
   @@index([userId, status])
   @@index([membershipId, shiftDate])
+  @@index([companyId, standing])
 }
 
 /// An ASSET-USE segment: which truck + trailer, between which times (PRODUCT.md).
@@ -798,3 +832,142 @@ model EmailSuppression {
   @@id([email, reason])
 }
 
+
+/// How a submitted timesheet's start was evidenced (D66).
+enum TimesheetVerification {
+  /// The membership was active when the server received the submission.
+  membership_active
+  /// A start receipt received while it was active, before its withdrawal.
+  start_receipt
+  /// Neither: waits for the company's review, never accepted automatically.
+  unverified
+}
+
+/// Where a submitted timesheet stands with the company (D66).
+enum TimesheetStanding {
+  accepted
+  pending_review
+  correction_requested
+  rejected
+}
+
+enum TimesheetDecisionKind {
+  accept
+  request_correction
+  reject
+}
+
+/// The append-only audit trail of a submitted timesheet (D66).
+enum TimesheetEventKind {
+  submitted
+  accepted_automatically
+  review_requested
+  accepted
+  correction_requested
+  rejected
+  delivery_queued
+}
+
+enum TimesheetDeliveryStatus {
+  queued
+  waiting_for_address
+  sending
+  sent
+  failed
+}
+
+/// One revision of a submitted timesheet (D66): the declared snapshot exactly
+/// as validated, with its SHA-256 and declaration. IMMUTABLE — a database
+/// trigger refuses any update or deletion (the one future exception being an
+/// approved retention purge).
+model TimesheetSubmission {
+  id              String                @id @default(cuid())
+  companyId       String
+  shiftId         String
+  revision        Int
+  schemaVersion   Int
+  payload         Json
+  payloadSha256   String
+  declaredVersion String
+  declaredAt      DateTime
+  declaredBy      String
+  receivedAt      DateTime              @default(now())
+  verification    TimesheetVerification
+  /// The company's zone when this revision arrived — what its date was filed
+  /// under and its times are shown in. A record of what was used, never an
+  /// authority: Company.timezone is the only one (D18).
+  filedInTimezone String
+
+  shift      Shift                     @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
+  declarer   User                      @relation(fields: [declaredBy], references: [id], onDelete: Restrict)
+  decision   TimesheetReviewDecision?
+  delivery   TimesheetDelivery?
+
+  @@unique([shiftId, revision])
+  @@index([companyId, receivedAt])
+  @@index([declaredBy])
+}
+
+/// The company's decision on ONE revision (D66). One per revision; immutable.
+model TimesheetReviewDecision {
+  id        String                @id @default(cuid())
+  companyId String
+  shiftId   String
+  revision  Int
+  decision  TimesheetDecisionKind
+  /// Required for a request for correction or a rejection — shown to the driver.
+  reason    String?
+  decidedBy String?
+  decidedAt DateTime              @default(now())
+
+  submission TimesheetSubmission @relation(fields: [shiftId, revision], references: [shiftId, revision], onDelete: Cascade, onUpdate: NoAction)
+  shift      Shift               @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
+  decider    User?               @relation(fields: [decidedBy], references: [id], onDelete: SetNull)
+
+  @@unique([shiftId, revision])
+  @@index([companyId])
+  @@index([decidedBy])
+}
+
+/// What happened to a submitted timesheet, and who did it (D66). Append-only.
+model TimesheetEvent {
+  id          String             @id @default(cuid())
+  companyId   String
+  shiftId     String
+  revision    Int?
+  kind        TimesheetEventKind
+  actorUserId String?
+  occurredAt  DateTime           @default(now())
+
+  shift Shift @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([shiftId, occurredAt])
+  @@index([companyId, occurredAt])
+  @@index([actorUserId])
+}
+
+/// The report email for one authoritative revision (D66): queued in the SAME
+/// transaction as the acceptance, claimed by the delivery worker with a
+/// lease. One per revision.
+model TimesheetDelivery {
+  id            String                  @id @default(cuid())
+  companyId     String
+  shiftId       String
+  revision      Int
+  status        TimesheetDeliveryStatus
+  attempts      Int                     @default(0)
+  nextAttemptAt DateTime                @default(now())
+  leaseToken    String?
+  leaseUntil    DateTime?
+  lastErrorCode String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  submission TimesheetSubmission @relation(fields: [shiftId, revision], references: [shiftId, revision], onDelete: Cascade, onUpdate: NoAction)
+  shift      Shift               @relation(fields: [shiftId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([shiftId, revision])
+  @@index([status, nextAttemptAt])
+  @@index([companyId])
+}

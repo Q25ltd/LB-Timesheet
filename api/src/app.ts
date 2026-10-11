@@ -40,6 +40,7 @@ import { registerCompanySettingsRoutes } from "./routes/companySettings.js";
 import { reportEmailRepository, type ReportEmailDatabase } from "./repositories/reportEmailRepository.js";
 import { startReceiptRepository, submissionMembershipLookup, type StartReceiptDatabase } from "./repositories/startReceiptRepository.js";
 import { registerDriverTimesheetRoutes } from "./routes/driverTimesheets.js";
+import { timesheetSubmissionRepository, type TimesheetSubmissionDatabase } from "./repositories/timesheetSubmissionRepository.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
 import { sendThrottle } from "./lib/sendThrottle.js";
 
@@ -59,7 +60,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & CompanySettingsDatabase & ReportEmailDatabase & StartReceiptDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & CompanySettingsDatabase & ReportEmailDatabase & StartReceiptDatabase & TimesheetSubmissionDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -345,7 +346,7 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
 
   // The driver's own timesheet work with a company (D66): identity posture,
   // through `authorizeTimesheetSubmission` — never tenant authority.
-  registerDriverTimesheetRoutes(app, submissionMembershipLookup(prisma), startReceiptRepository(prisma));
+  registerDriverTimesheetRoutes(app, submissionMembershipLookup(prisma), startReceiptRepository(prisma), timesheetSubmissionRepository(prisma));
 
   // A company's settings (D66): its measurement units. Tenant posture; the
   // service applies the company-admin gate (D54).

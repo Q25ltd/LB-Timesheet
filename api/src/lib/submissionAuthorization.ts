@@ -27,7 +27,7 @@ function forbidden(): AppError {
   return new AppError(403, "Not allowed", "FORBIDDEN");
 }
 
-async function authorizeTimesheetSubmission(
+export async function authorizeTimesheetSubmission(
   identity: IdentityContext,
   membershipId: string,
   memberships: SubmissionMembershipLookup,
