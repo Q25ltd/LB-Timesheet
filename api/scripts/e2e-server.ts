@@ -69,6 +69,11 @@ const server = spawn("npx", ["tsx", "src/server.ts"], {
     WEB_ORIGIN:       webOrigin,
     WEB_APP_URL:      webOrigin,
     MAIL_TRANSPORT:   "outbox",
+    // As production behind Railway's edge (F-15): the client is the one
+    // X-Real-IP names, and a request without it is keyed by its socket. A
+    // spec that registers its own company states its own address, so the
+    // suite's registrations are not one client's 5 per hour.
+    CLIENT_IP_SOURCE: "x-real-ip",
     JWT_SECRET:       "e2e-only-7c1f9a3b5d2e8046b1c7a9f3e5d20b84",
   },
 });

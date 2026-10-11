@@ -110,18 +110,20 @@ test("a company registers, confirms its email, reaches its company, signs out an
   expect(page.url()).toBe(`${WEB}/verify-email`);
   await page.getByRole("link", { name: "Continue", exact: true }).click();
 
-  // The company's Home: its real name, Home current, the four areas — only
-  // Home a link — and the onboarding with only "Company created" done.
+  // The company's Home: its real name, Home current, the four areas — Home
+  // and Drivers links (D63) — and the onboarding with only "Company created"
+  // done and adding drivers the available next step.
   await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
   const nav = page.getByRole("navigation", { name: "Company" });
   await expect(nav.getByRole("listitem")).toHaveCount(4);
   await expect(nav.locator("[data-nav-label]")).toHaveText(["Home", "Drivers", "Timesheets", "Settings"]);
-  await expect(nav.getByRole("link")).toHaveCount(1);
+  await expect(nav.getByRole("link")).toHaveText(["Home", "Drivers"]);
   const steps = page.getByRole("region", { name: "Getting started" }).getByRole("listitem");
   await expect(steps).toHaveCount(4);
   await expect(steps.first()).toHaveAttribute("data-state", "done");
-  for (const index of [1, 2, 3]) await expect(steps.nth(index)).toHaveAttribute("data-state", "unavailable");
-  await expect(steps.getByRole("link")).toHaveCount(0);
+  await expect(steps.nth(1)).toHaveAttribute("data-state", "available");
+  for (const index of [2, 3]) await expect(steps.nth(index)).toHaveAttribute("data-state", "unavailable");
+  await expect(steps.getByRole("link")).toHaveText(["Go to Drivers"]);
   await expect(steps.getByRole("button")).toHaveCount(0);
   // Nothing fabricated: apart from the company's own name ("E2E…"), the
   // page's main content holds no figures at all.
