@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-10-11 — D65: a company deactivates, reactivates and removes its drivers
+
+**Decided first** (D65, owner answers): keep `active` as the one access
+switch and add `removedAt`; a deactivated driver cannot be re-invited —
+the company reactivates them; for Option A, record the rule and build no
+workaround, because submission and offline sync do not exist.
+
+**Inspected before building.** No shift reaches the server from the app:
+a day is started and finished on the phone, and `ShiftSubmitJob` is
+unused. So nothing today can tell a day started before a withdrawal from
+one started after — the limitation D65 records rather than works around.
+Nothing weakens authorisation.
+
+**Built.**
+- API: `GET /company/drivers` and `POST /company/drivers/:membershipId/`
+  `deactivate|reactivate|remove`, through D54's admin gate and a new
+  `companyDriverRepository` (TenantContext; driver memberships of the
+  admin's own company, not removed). Each transition is a conditional
+  write plus a `MembershipEvent` row, in one transaction.
+- D63 changed where D65 says: inviting a deactivated driver is
+  `409 DRIVER_INACTIVE` (`isActiveDriver` became `driverStanding`);
+  accepting brings a REMOVED membership back (clearing `removedAt`),
+  refuses a deactivated one, and records `joined` / `rejoined`.
+- Migration `20261011140000_membership_management`, additive. The
+  tenant-model check-rule now covers `membershipEvent`.
+- Website: Drivers splits into **Your drivers** (with the actions,
+  Deactivate and Remove asked first) and **Invitations** (accepted ones
+  leave it). Two defects found by the new tests and fixed: the outcome
+  message lived inside a table that disappears when its last row goes
+  (removing the last driver; an invitation accepted meanwhile) — it is
+  now said above the lists.
+- App: Home's existing `GET /auth/me` read now also refreshes the
+  account's companies (`refreshAccount`), so Start Shift keeps its
+  zero-request property and still stops offering a withdrawn company. A
+  company withdrawn while Start Shift is open falls back to Personal.
+  Active Shift says when its company no longer lists the driver; the day
+  is finished as any other. The route reads the companies through a new
+  `useActiveMemberships` hook — its own module, as `useAccountScope` is —
+  and the ten screen suites that render the route without signing in mock
+  it beside their `useAccountScope` mock (the first gate run caught them).
+
+**Evidence.** 16 DB tests (`companyDriverManagement.test.ts`: list,
+deactivate/reactivate, remove/re-invite/accept, isolation, admin and
+driver tokens, no body, concurrency, the database's CHECK and composite
+key, withdrawal during an open shift, a stale invitation); DI6 and DR8
+updated to D65. 10 new web tests, plus DP3, DP4 and DP13 updated, and one
+new Playwright flow against the real API. 6 app tests. 21 mutations: 19
+killed, 2 equivalent. Full `npm run check` green (api 246, mobile 1498,
+web 170, db 338, backup 12, build and smoke); Playwright 7/7.
+
+**Open.** Submission and sync must prove that a day began before
+withdrawal (D65). The orphaned server sessions from F-38 are untouched
+and still need a separate decision. Not deployed by this entry.
+
+---
+
 ## 2026-10-11 — F-38: the app's bodyless requests were refused; sign-out never revoked its server session
 
 **Reported:** Expo Go said "The email could not be sent. Try again shortly."
