@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-10-11 — D66 stage S2: the verified report email address
+
+**Built.** Company admin sets one report address (Settings); it stays
+unconfirmed until the link sent to it from `timesheets@` is opened
+(`/confirm-report-email`, public, the token is the credential). Links are
+single-use, 72-hour, hashed, bound to the exact address; a new request
+retires every outstanding link. Suppressed addresses are refused (D56's
+code); 5 links per company per hour. Additive migration.
+
+**Found by the tests and fixed before commit.** The first version DELETED
+outstanding links when a new one was asked for — which also deleted what
+the hourly cap counts, so the cap never triggered (RE11). Links are now
+RETIRED (`retiredAt`), which keeps both the cap and the record true.
+
+**Evidence.** 13 DB tests (incl. concurrency-safe retiring, expiry,
+single use, address binding, isolation between companies sharing an
+address, suppression, the cap, the database CHECK); 8 web + 1 Playwright
+(through the development outbox). 9 mutations: 7 killed, 2 equivalent —
+then RE13 was added so the address binding is proven on its own (killed).
+
+---
+
 ## 2026-10-11 — D66 stage S1: measurement units
 
 **Built.**
