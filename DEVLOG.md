@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-10-11 — D66 stage S4: the submission API
+
+**Built.** `POST /driver/timesheets` — revision 1. Server-side validation
+of the whole snapshot (schema v1, shape and meaning), evidence from server
+time only, one transaction for header + immutable snapshot + events +
+delivery job, idempotency by SHA-256 of canonical JSON, a daily cap that
+never counts replays, and database triggers that make submitted records
+immutable. Additive migration.
+
+**Decisions taken inside the approved design, recorded for review:**
+- The API keeps its own copy of the checklist KEYS (labels travel in the
+  snapshot); a test runs the phone's checklist module in a separate process
+  and proves the copy equal, so a new phone checklist version fails the gate
+  until the API knows it.
+- Registrations are capped at 16 characters (CLAUDE.md) and trailer numbers
+  at 64 on the server — the phone currently caps neither. Stage S6 must add
+  the same caps at entry; an existing longer value is "action needed", never
+  dropped.
+- Legacy towing gaps (a trailer with no vehicle for part of its use) are
+  NOT refused, because D42 keeps them readable.
+- Refusal bounds (50 uses of a kind, 200 fills, 30 checks, 80 items, 50
+  revisions) are abuse limits, not product rules.
+- The full gate caught a conflict with D18: the first draft put the
+  company's zone on the `Shift` header, which D18's invariant test forbids
+  (one timezone authority, on Company). The test was right and is
+  unchanged. The zone a revision was filed and shown in is recorded on the
+  immutable revision instead (`filedInTimezone`), as a record of what was
+  used, never an authority — needed so a re-rendered PDF matches the one
+  emailed.
+
+**Evidence.** 17 DB tests (acceptance and its one transaction; confirmed vs
+unconfirmed report address; replay; mismatch; five concurrent; deactivated
+and removed with and without a receipt; a declared start a week early is not
+evidence; a receipt for another day is not this day's; isolation of drivers,
+administrators and two companies; token kinds; 16 validation refusals; a
+legacy day; immutability; the cap) + the checklist drift guard. 13
+mutations, all killed (one after its test case was isolated).
+
+**Security review.** The new authority and this route are the change
+AGENT_WORKFLOW §20 says needs an independent reviewer. Recommended now,
+against this committed baseline, before the app starts sending (S6).
+
+---
+
 ## 2026-10-11 — D66 stage S3: start receipts and the phone's sync runner
 
 **Built.**
