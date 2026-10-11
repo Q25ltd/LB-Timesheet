@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-10 (D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
+> Last updated: 2026-10-11 (D65 — a company deactivates, reactivates and removes its drivers. D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -2514,3 +2514,47 @@ Owner decisions taken while building D63's stage 2.
   lists is still the phone's own — and asks the server only for the
   account's own status (here, whether the email is confirmed; D63's stage 5,
   invitations). The tests assert exactly that list.
+
+### D65 — A company deactivates, reactivates and removes its drivers (2026-10-11)
+
+Owner decision. Builds on D63 (how a driver joins) and AUTH.md "Deactivated
+membership — limited authority".
+
+**The state, on the existing membership — no parallel system.**
+`CompanyMembership.active` stays the ONE access switch every check already
+reads (requireAuth loads the row on every request), so authentication is
+unchanged. A new `removedAt` marks a soft removal; a database CHECK makes
+removed always inactive.
+
+| Action (company administrator, D54) | From | To |
+|---|---|---|
+| Deactivate | active, not removed | inactive — kept in the list, said to be inactive |
+| Reactivate | inactive, not removed | active |
+| Remove | not removed (active or inactive) | inactive + `removedAt` — hidden from the list |
+| Accept a new invitation (D63) | removed, or no membership | active, `removedAt` cleared — the SAME row |
+
+Never deleted: the membership, the driver's global account and every record
+made under it stay. Only DRIVER memberships of the administrator's own
+company can be changed — never an administrator's, never another company's,
+and one company's change never touches the driver's other companies. Each
+transition is one conditional write, so concurrent requests make it once,
+and is recorded in `MembershipEvent` (what, when, by whom) with the D63
+joins and rejoins.
+
+**Re-inviting** (owner-confirmed): a company cannot invite a driver it has
+DEACTIVATED — it reactivates them instead (`409 DRIVER_INACTIVE`); an
+invitation never undoes a deactivation. A removed driver, or one who never
+joined, is invited as D63 describes. This narrows D63's "a former driver may
+be invited again" to removed drivers.
+
+**Option A — mandatory:** withdrawing access never prevents a driver from
+finishing and submitting a shift already started. Today a working day is
+started and finished on the phone with no server call, so it is unaffected;
+Start Shift stops offering the company as soon as the app reads the
+account again, and the server's tenant routes refuse an inactive membership
+on its next request. **Submission and offline sync do not exist yet**, and
+the owner decided (2026-10-11) to record the rule rather than build a
+workaround: the submission design MUST let a day started before withdrawal
+be submitted, and MUST prove that it started before withdrawal — a
+driver-declared start time (D20) is not proof, and a day started offline has
+no server record. Until then nothing is weakened.
