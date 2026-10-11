@@ -2,7 +2,7 @@
 
 > Read this file first, every session, no exceptions. Then AGENT_WORKFLOW.md.
 > This file owns the product and the code rules; AGENT_WORKFLOW.md owns the process.
-> Last updated: 2026-09-12
+> Last updated: 2026-10-11 (D66: what the company may receive)
 
 ---
 
@@ -266,8 +266,11 @@ pay rates, earnings) is **private to the driver** and must **never** appear in
 the company PDF or any company-facing screen or export, unless the user
 explicitly authorises it.
 
-The company sees: start/finish times, assets used, checks, defects, declaration.
-Nothing else.
+The company sees: start/finish times, assets used, checks, defects, declaration
+— and, by owner decision D66, the day's fuel, AdBlue / DEF and fridge-diesel
+events, the payroll reference it gave, and the finish notes of a COMPANY day,
+which the app labels as company-facing. Nothing else: never the private diary,
+never the driver's email address on a PDF.
 
 This is not merely a product preference — it is a **legal boundary**. For
 timesheet and check data the customer company is the data **controller** and

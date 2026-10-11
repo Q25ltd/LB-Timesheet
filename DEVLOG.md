@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-10-11 — D66 stage S0: submission, review, PDF and email decided and recorded
+
+**Investigated first** (no code changed): the phone's finished days,
+corrections and declarations are mature; the server has a `Shift` header,
+an unused truck-plus-trailer `ShiftSegment` and an unused one-job-per-shift
+`ShiftSubmitJob`; `pdfkit` is installed but unused; the SES mailer sends no
+attachments and D58 ignores events it cannot attribute; `Company.reportEmail`
+exists unverified and unwritten; company units (D52) do not exist; the
+phone has always SHOWN odometer readings as "mi" — though the number is
+whatever the vehicle's dashboard said — and labelled fuel quantities LITRES.
+
+**Decided by the owner** in three rounds (the investigation, a revised plan,
+final decisions): recorded as D66, with "Amended by D66" notes on D28,
+D39–D42, D52, D56, D58 and D65, and O6 closed.
+
+**Architecture and security documents reconciled:**
+- AUTH.md: the deactivated-membership exception is no longer a tenant
+  capability; a new "Driver timesheet submission (D66)" section defines
+  `authorizeTimesheetSubmission` and its `SubmissionContext` (never a
+  `TenantContext`); contract tests 21–25 rewritten to match.
+- CLAUDE.md privacy boundary: the company may also receive fuel, AdBlue /
+  DEF, fridge diesel, the payroll reference and a company day's finish
+  notes; never the private diary, never the driver's email on a PDF.
+- PRODUCT.md: the company PDF's contents.
+- FINDINGS.md: F-16 and F-20 are `AUTHORIZED` — decided, not yet proven.
+
+**Process note.** AUTH.md is frozen and AGENT_WORKFLOW.md §20 asks for an
+independent security review of a new authority path; that review is
+recommended against S4's committed baseline, before submission is exposed.
+
+---
+
 ## 2026-10-11 — D65: a company deactivates, reactivates and removes its drivers
 
 **Decided first** (D65, owner answers): keep `active` as the one access

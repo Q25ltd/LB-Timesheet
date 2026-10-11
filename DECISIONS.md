@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-11 (D65 — a company deactivates, reactivates and removes its drivers. D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
+> Last updated: 2026-10-11 (D66 — submission, company review, PDF and email delivery, and the decisions it amends. D65 — a company deactivates, reactivates and removes its drivers. D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -752,6 +752,8 @@ are **deliberately not connected** to the mobile flow. How they fit this model i
 an open architecture question for a later increment, not something to settle by
 quietly wiring them up. STATUS.md owns what is built.
 
+*Amended by D66 (2026-10-11):* Start Shift for a company still creates nothing on the server and tells the company nothing — but the phone now QUEUES a start receipt, sent when there is a connection, never blocking an offline start. It is evidence for a later submission, not company-visible and not a server Shift.
+
 ### D29 — Start Shift is minimal, a vehicle is optional, and the day is created locally (2026-09-13)
 
 Owner decision, settled while Start Shift was built. It follows D28's
@@ -1413,6 +1415,8 @@ only the name changes — the use keeps its identity, class or type, mileage,
 fills and checks. Changing to another vehicle or trailer is still Change
 Unit / Change Trailer.
 
+*Amended by D66 (2026-10-11):* a company's timesheet is LOCKED once queued to send. A submitted one is corrected only by an explicit amendment — a new immutable revision — and a submitted local record is kept in V1 (not deletable).
+
 ### D40 — The finish is declared; a corrected finish moves what the finish ended; names correct by exact use (2026-09-29)
 
 Owner decisions, correcting D38 and D39.
@@ -1473,6 +1477,8 @@ rewrite it, and a correction after sending needs its own auditable
 correction or resubmission — a separate company-facing snapshot beside the
 driver's local record (D28).
 
+*Amended by D66 (2026-10-11):* "what a company receives will be immutable" is now the design — per-revision snapshots on the server; an amendment re-uses these corrections inside an explicitly opened amendment.
+
 ### D41 — The Finish Review is the final verification point; the declaration and the final action (2026-09-29)
 
 Owner decision. LOCAL only: nothing is sent.
@@ -1519,6 +1525,8 @@ never rebuilt from later edits. Once sent it cannot be edited or deleted by
 the ordinary screens; a later correction is an explicit amendment or
 resubmission. A day merely labelled for a company, never sent, is not
 locked.
+
+*Amended by D66 (2026-10-11):* sending exists in design: the declared version is queued and sent as revision 1; once queued the day is locked; a correction after sending is an amendment revision, reviewed by the company when the timesheet was already accepted.
 
 ### D42 — A use has a stable identity; its times are correctable; a company's timesheet is declared again after any change (2026-09-29)
 
@@ -1618,6 +1626,8 @@ submission to a company; nothing says a timesheet was sent. A company's
 timesheet changed on a use's page is saved before it is re-declared rather
 than held as a draft until the Review — staging use-level edits is a
 separate decision.
+
+*Amended by D66 (2026-10-11):* every revision sent to a company carries its own declaration. The version fingerprint stays a local tool; the server's integrity is the SHA-256 of the canonical snapshot.
 
 ### D43 — The Timesheets web application lives at `timesheets.logisticbay.com`; `/` is the public product homepage (2026-09-30)
 
@@ -1978,7 +1988,7 @@ roster + active/inactive, subscription, download copies) is confirmed to exist.
 Undecided: does it live at `timesheets.logisticbay.com` alongside the driver-
 facing surface, or its own subdomain?
 
-### O6 — Fuel / AdBlue modelling — 🔶 PARTLY CLOSED 2026-09-20
+### O6 — Fuel / AdBlue modelling — ✅ CLOSED 2026-10-11 (D66)
 User asked for fuel and AdBlue **per unit**. In the TMS these are shift-level
 `String @default("")`, which cannot express which truck was fuelled after a
 mid-day swap.
@@ -1988,6 +1998,8 @@ optional quantity, addable and correctable against any use of the open day**
 — see D31. The original question ("one value per segment,
 or a list of events?") is answered: a list. Events belong to the use, not to
 the registration, and `litres` may be absent when the driver does not know it.
+
+*Closed by D66 (2026-10-11): fills travel as events in the submitted snapshot, each with its quantity and recorded unit or none, and the PDF prints them as recorded.*
 
 **Still open: how this reaches the server.** No Prisma model, migration,
 segment mapping or submission format exists for fills, and D31 claims none.
@@ -2088,6 +2100,8 @@ computes may assume one country.
 - **Company time zone:** `Company.timezone` already holds any IANA zone
   (D18); `Europe/London` is only the schema default. Choosing a company's
   zone at registration belongs to company registration (increment 4).
+
+*Amended by D66 (2026-10-11):* "records made before the setting exists are miles and litres" no longer holds for distance — historical odometer readings have NO known unit and are never labelled. Historical fuel quantities are litres, because the form said LITRES, with that provenance kept. New company registrations must choose both units; existing companies are prompted; Personal days use the driver's preference; units are stored with every value and never converted.
 
 ### D53 — A company chooses its operational timezone: an IANA place (2026-10-03)
 
@@ -2234,6 +2248,8 @@ Owner decision (requirements given 2026-10-08), building on D55.
   suppression list (a support act in AWS), and a correction screen in the
   phone app.
 
+*Amended by D66 (2026-10-11):* a company's timesheet report delivery keeps its recipient address (company data, for audit), unlike an account's email.
+
 ### D57 — The first deployment: independent, private, and safe by configuration (2026-10-08)
 
 Owner decision.
@@ -2294,6 +2310,8 @@ of bounces and complaints about ITS mail and nothing else.
   suppresses; a transient bounce does not) are unchanged.
 - **Not decided:** recording sends, deliveries or rejects; reputation
   alarms on the configuration set.
+
+*Amended by D66 (2026-10-11):* an SES event is also attributable to a timesheet report delivery (its recorded SES message id) — recorded against that delivery, and suppressing as before.
 
 ### D59 — Backups: a nightly encrypted pg_dump to locked S3, outside Railway (2026-10-08)
 
@@ -2558,3 +2576,153 @@ workaround: the submission design MUST let a day started before withdrawal
 be submitted, and MUST prove that it started before withdrawal — a
 driver-declared start time (D20) is not proof, and a day started offline has
 no server record. Until then nothing is weakened.
+
+*Amended by D66 (2026-10-11):* the proof is a server start receipt received while the membership was active and before its withdrawal. A day without that proof is not refused: it is submitted into Pending company review, accepted only by the company's decision.
+
+### D66 — Submission, company review, PDF and email delivery (2026-10-11)
+
+Owner decisions, given in three rounds on 2026-10-11 after an investigation
+of what exists (DEVLOG). They complete the paper → phone → PDF → company
+email workflow. **This records what is decided; STATUS.md owns what is
+built.** Implementation is staged (S1–S11) and each stage is its own
+commit. Amends D28, D39–D42, D52, D56, D58, D65, AUTH.md and CLAUDE.md's
+privacy boundary as stated under "Amended by D66" in each, and settles
+F-20 and the design of F-16.
+
+**THE RECORD A COMPANY RECEIVES.** A company's timesheet on the server is
+the existing `Shift` row as its header, plus an immutable, versioned
+SNAPSHOT per revision (`TimesheetSubmission`). Revision 1 is the
+submission; revisions 2, 3, … are amendments. A snapshot is never updated or
+deleted: the database refuses it (a trigger), the one future exception being
+an approved retention purge. Each revision carries its own declaration
+("I confirm all details are correct", when, by whom), the server's receipt
+time, and a SHA-256 over its canonical JSON (RFC 8785). The server
+re-validates every snapshot itself — chronology, uses, checks, fills, field
+bounds — and derives everything a client must not supply: the driver's name,
+the payroll reference, the company's name, time zone and units. The unused
+`ShiftSegment` and `ShiftSubmitJob` stay as they are until a separate,
+approved migration retires them.
+
+**WHAT IS IN A SNAPSHOT.** The day's FINAL declared facts (start, finish,
+night out, company-facing notes) — not the driver's earlier corrections of
+them; every vehicle and trailer use with its identity, type, registration or
+number, times and odometer readings with their recorded unit; every fuel,
+AdBlue / DEF and fridge-diesel event with its quantity and recorded unit (or
+none); and every check — completed or draft — with the checklist id and
+version and the labels the driver saw, and every revision of a certified
+check (their history is kept). Never anything of the driver's private
+diary. Never the driver's email address on a PDF.
+
+**IDEMPOTENCY.** One company timesheet per `(membershipId, clientEventId)` —
+the local day's id (D19's scope, deliberately not per user: a per-user key
+would tell company B a day exists for company A). One row per
+`(shiftId, revision)`. The same key with the same payload hash is a replay
+(the stored answer); with a different hash it is `409 SUBMISSION_MISMATCH`
+and nothing changes. An amendment names its `baseRevision`; anything but the
+current latest is `409 REVISION_CONFLICT`.
+
+**AUTHORITY — narrow, identity-token based.** Submission, amendment and the
+driver's own history use the identity token, through ONE separately named
+authorisation (`authorizeTimesheetSubmission`) that validates the named
+membership against the signed-in driver — active, deactivated or removed —
+and yields a dedicated submission context, never a `TenantContext`. It
+grants exactly: submit or amend this driver's own timesheet for that
+membership, and read this driver's own submissions. AUTH.md records it.
+
+**HOW A START IS EVIDENCED, AND WHAT THAT MEANS.**
+- **Start receipt.** When a company day is started — or a day is made a
+  company's — the phone records it locally and QUEUES a start receipt,
+  sent when there is a connection; it never blocks starting work offline.
+  The server records its own `receivedAt` and refuses a receipt for a
+  membership that is not active (generic 403, D17). Receipts are not
+  company-visible.
+- A submission is **verified** when the membership is ACTIVE when the
+  server receives it, or when a receipt for that day was received while the
+  membership was active and before its latest withdrawal (`MembershipEvent`,
+  server time). Verified submissions are accepted automatically.
+- Otherwise it is **unverified** and goes to **Pending company review** —
+  never discarded, never rejected automatically, never accepted
+  automatically, never treated as company-approved. **No submission
+  cut-off.**
+- Device clocks are never evidence of eligibility. Only server
+  `receivedAt` and `MembershipEvent.occurredAt` are.
+
+**SHIFT DATE.** `shiftDate` is the local date of the driver's DECLARED start
+instant in the company's recorded time zone (D18). Server receipt and
+authorisation times are evidence only — never the shift's date.
+
+**COMPANY REVIEW.** An administrator (D54) of the company the membership
+belongs to — and no other — decides a revision that needs review:
+**Accept**, **Request correction** (reason required, shown to the driver)
+or **Reject** (reason required, shown to the driver). A decision names the
+revision the administrator saw; a decision on any other revision, or a
+second decision on the same one, is refused (`409`). Every decision is
+kept with who and when. A rejected or returned timesheet may be corrected
+and resubmitted by the driver as a new revision. The driver's own records
+are always kept, whatever the company decides.
+
+**AMENDMENTS.** A driver corrects a submitted timesheet by a new immutable
+revision with its own declaration — on the phone through the existing D40
+corrections and D42 re-declaration, opened explicitly as an amendment. For
+an ACCEPTED timesheet, an amendment must itself be reviewed and accepted by
+the company; until then the previously accepted revision stays
+AUTHORITATIVE. The company sees the whole revision history.
+
+**UNITS (D52).** Companies choose a distance unit (kilometre or mile) and a
+volume unit (litre, US gallon or imperial gallon); new registrations must
+choose them, existing companies are prompted. Personal days use the
+driver's own preference. Every odometer reading and every quantity is
+stored WITH its unit; units are never converted or relabelled. Historical
+odometer readings have NO known unit. Historical fuel quantities are litres
+— the form said LITRES — and keep that provenance (`legacy-litres-label`).
+
+**PRIVACY.** The company may receive fuel, AdBlue / DEF, fridge diesel, the
+payroll reference and the day's finish notes — which the app labels as
+seen by the company on a company's day (settles F-20 for `Shift.notes`;
+`ShiftSegment.notes` stays unused). Nothing of the private diary, and no
+company learns of another.
+
+**REPORT EMAIL.** One verified report address per company, set only by an
+administrator. Verification is a single-use, expiring token bound to the
+exact address; changing the address voids it. No report is delivered to an
+unverified address. A company is told by email when a timesheet needs
+review — with no PDF. Sent from `timesheets@logisticbay.com` through the
+existing SES setup; no SES change.
+
+**DELIVERY.** Database-backed delivery jobs, one per authoritative revision,
+created in the SAME transaction as the acceptance; claimed safely under
+concurrency with a lease, retried with exponential backoff, then failed and
+visible, retryable by an administrator. The recipient address and the PDF's
+SHA-256 are kept for audit; PDF files are not stored (D7). Bounces are
+attributed to the delivery. An accepted timesheet never depends on its
+email. Rare duplicates after an ambiguous SES answer are accepted; every
+email carries the stable reference and revision. A timesheet pending review
+is never sent as a report.
+
+**PDF.** A4. Versioned templates, never changed once released, so a
+re-download reproduces the emailed PDF from stored data. International text
+as stored — font shaping, right-to-left scripts and CJK are investigated
+before the renderer is finalised; no character is knowingly replaced by a
+missing glyph, and the stored Unicode is never altered. It distinguishes
+completed checks, draft (not certified) checks, defects, corrected results
+and their history; says nothing about working time the app does not record;
+and states the reference, revision, and any review or late-verification
+status.
+
+**THE PHONE.** A persistent, account-isolated queue (F-31) for receipts and
+submissions that survives crashes, restarts and sign-out; retries reuse the
+same key; an unknown outcome is reconciled by replay. Retries happen in the
+foreground and when the connection returns (a connectivity dependency is
+approved subject to the usual checks); background sending is not promised.
+States: waiting to send, sending, submitted, pending review, correction
+requested, rejected, action needed. A day is LOCKED once queued. Personal
+days are never submitted. Submitted local records are kept in V1, and a
+driver can recover their own server-stored submissions — including from
+companies they have left — subject to the future retention policy.
+
+**LIMITS.** About 50 submissions per membership per day; replays of an
+already-accepted request are never counted or refused by it.
+
+**RETENTION.** Storage supports holds and future policy; nothing is deleted
+automatically. The retention policy and its legal / privacy implications
+are presented for approval before public release (O1 stays open).

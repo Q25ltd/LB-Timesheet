@@ -2,7 +2,7 @@
 
 > What this product is and where its edges are.
 > For what is actually built, see **STATUS.md**. For settled/open decisions, see **DECISIONS.md**.
-> Last updated: 2026-10-10 (onboarding no longer names an activation code — F-18)
+> Last updated: 2026-10-11 (the company PDF — D66; earlier: onboarding no longer names an activation code — F-18)
 
 ---
 
@@ -141,9 +141,13 @@ scheduling, parts, PMI scheduling or VOR fleet management.
 
 A professional PDF replicating the paper form: company name; driver name and
 payroll identifier if configured; date, start, finish, elapsed duration; all
-trucks and trailers used with change times; initial truck check, initial trailer
-check, and any additional checks caused by asset changes; defects and evidence;
-driver declaration/signature.
+trucks and trailers used with change times, and their odometer readings and
+distance in the unit they were recorded in; every check of each — completed,
+draft (never shown as certified) and corrected, with the corrections' history;
+defects; fuel, AdBlue / DEF and fridge diesel; night out; the day's
+company-facing notes; the driver's declaration; the submission reference and
+revision, and any review status (DECISIONS.md D66). Never the driver's email
+address, and never anything from the private diary.
 
 **Do not invent additional operational information.**
 

@@ -16,7 +16,10 @@
 > `clientKind`, the 7-day browser lifetime) and D49 (password reset/change
 > session revocation, see "Logout"), and by D51: driver accounts (phone) and
 > company accounts (website) are separate accounts; each surface
-> authenticates only its own kind.**
+> authenticates only its own kind. Amended 2026-10-11 by D66: the
+driver's timesheet submission authority ("Driver timesheet submission"
+below), which replaces the mechanism — not the intent — of the
+deactivated-membership exception; tenant authority is unchanged.**
 >
 > **This file states what is DECIDED, not what is BUILT.** STATUS.md is the
 > only file allowed to say which parts exist. Do not read a section here as
@@ -139,6 +142,11 @@ algorithm, issuer, audience, required claims, `0 < exp - iat <= 900`, the
 future-`iat` bound below — then the Session (present, `userId === sub`, not
 revoked, not expired). It produces user + session identity and **stops there**:
 no membership read, no `AuthContext`, no `TenantContext`, no route to one.
+*(D66:* a SERVICE behind an identity route may read the signed-in user's own
+membership by id where its decision says so — accepting an invitation (D63),
+and timesheet submission through `authorizeTimesheetSubmission` (below). The
+pipeline itself still stops at the Session, and neither yields a
+`TenantContext`.*
 
 **The separation is symmetric and structural.**
 
@@ -515,17 +523,20 @@ A membership that has been deactivated does **not** immediately erase an
 unsubmitted day. The work happened; the company should still receive the record.
 
 `AuthContext.membershipStatus` is `"active" | "inactive"`. **Default is deny:**
-every route requires an active membership unless it explicitly opts in.
+every TENANT route requires an active membership — `authorizeTenant` has no
+inactive exception and must never grow one.
 
-Permitted with an inactive membership:
+*Amended by D66 (2026-10-11).* Work happens on the phone and reaches the
+server only when it is SUBMITTED, so the exception is not a tenant
+capability at all. A deactivated or removed driver keeps exactly one
+capability, through the identity token: submitting and amending their own
+timesheets for that membership, and reading their own submissions — see
+"Driver timesheet submission (D66)". Whether such a submission is accepted
+automatically or waits for the company's review is decided by server-side
+evidence, never by the phone's clock.
 
-- read the driver's own open shift
-- update and submit that shift
-
-Denied:
-
-- starting a new shift
-- everything else
+Denied, always, with an inactive membership: a tenant token's authority,
+starting a shift, a start receipt, and everything else.
 
 ### Company-web authority (D54)
 
@@ -600,6 +611,49 @@ Tenant authority enters only through `AuthContext`.
   isolation. The rules raise the cost of the mistake; they do not replace the
   tests.
 
+## Driver timesheet submission (D66)
+
+The one place an identity token acts on a membership's work. Structural,
+like the other gates:
+
+```
+identity token (aud: timesheets-identity) → user + session        (unchanged)
+ ↓ body names membershipId — a claim to validate, never authority
+ ↓ authorizeTimesheetSubmission(identity, membershipId):
+ ↓   load the membership BY ITS ID AND the signed-in user's id
+ ↓   none, or not a `driver` membership       → 404 (identical to nonexistent)
+ ↓
+SubmissionContext { userId, membershipId, companyId, membershipActive }
+ ↓ the submission repository only — never a TenantContext
+```
+
+- **What it grants:** create or amend THIS driver's own timesheet for that
+  membership (its `clientEventId` scoped to it, D19), and read THIS driver's
+  own submissions. Nothing else: no other driver's record, no company data,
+  no tenant route.
+- **`SubmissionContext` is not `TenantContext`.** It is a separate nominal
+  type, constructed only by `authorizeTimesheetSubmission`, accepted only by
+  the submission repository. A route holding one cannot reach a tenant
+  repository, and a `TenantContext` cannot be made from one.
+- **`companyId` comes from the membership row**, never from the request
+  (`no-client-tenant` still applies). `membershipId` arrives in the body and
+  is validated against the signed-in user, as switch-company does.
+- **Active, deactivated and removed memberships are all reachable here** —
+  that is the point (D65 Option A). What differs is the evidence: an active
+  membership, or a start receipt received (server time) while active and
+  before the latest withdrawal (`MembershipEvent`), makes a submission
+  VERIFIED; anything else is UNVERIFIED and waits for the company's review.
+  A device timestamp is never evidence.
+- **Start receipts** (`POST /driver/shift-receipts`, identity posture) use
+  the same authorisation but require an ACTIVE membership — a withdrawn one
+  is refused with the generic 403 (D17), so a removed driver can never
+  create a verified start.
+- **Driver history** (`GET /driver/timesheets…`, identity posture) returns
+  only rows whose membership belongs to the signed-in user — across all of
+  that user's memberships, to that user alone. No company learns of another.
+- **Company review** of these timesheets is company-web authority (D54) and
+  goes through `authorizeCompanyAdmin`, never through this context.
+
 ## Contract tests — write these before the implementation
 
 Login and selection:
@@ -637,14 +691,18 @@ Refresh:
 18. valid refresh → new access token and a rotated refresh token
 19. the previous refresh token still works inside the grace window
 20. the previous refresh token fails after the grace window, and revokes the session
-21. refresh for a deactivated membership → limited-authority token, not a full one
+21. refresh for a deactivated membership → the session refreshes; the
+    membership's tenant authority is refused (403) on every tenant route
 
-Deactivated membership:
+Deactivated or removed membership (amended by D66):
 
-22. can read own open shift
-23. can submit own open shift
-24. cannot start a new shift
-25. cannot read anything else
+22. cannot start a shift, obtain a start receipt or use any tenant route
+23. CAN submit and amend its own timesheet through the identity token — as
+    verified with a pre-withdrawal start receipt, otherwise pending company
+    review; never accepted on a device timestamp
+24. can read only its own submissions, never another driver's or a company's
+25. a membership of another user, or an administrator's, named in a
+    submission → 404, identical to one that does not exist
 
 Registration (D21–D24):
 
