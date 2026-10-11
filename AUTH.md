@@ -276,9 +276,18 @@ validation and tenant derivation all remain this API's, exactly as specified
 above. The browser changes how the refresh credential is carried, never who
 decides. The web application duplicates none of it.
 
+**The company's token in the browser (D63, 2026-10-11).** A company page
+calls the API with the TENANT token, in memory only. When that answers 401
+the website asks for the company again — `POST /auth/switch-company` with
+the membership it holds, through the identity renewal it already has — ONCE,
+and retries the call once. The server re-validates the membership on that
+request exactly as on any other; a refusal is shown, never worked around.
+
 **CORS.** Credentialed requests will need credentialed CORS, still on the
 **explicit origin allowlist** — no wildcard, no reflected origin, no trust for
-sibling subdomains.
+sibling subdomains. The allowed methods are stated: GET, HEAD, POST and PATCH
+(PATCH since 2026-10-11, D63 — the plugin's default left it out, and the
+browser refused the company website's correction at the preflight).
 
 **CSRF.** Because the cookie is attached automatically, the endpoints that act
 on it — refresh and logout — require explicit CSRF protection: **strict

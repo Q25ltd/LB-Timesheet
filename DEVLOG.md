@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-10-11 — D63 stage 4: the website's Drivers page
+
+**Built.**
+- **`/company/drivers`:** add a driver; list them as Invited / Joined /
+  Declined / Expired / Cancelled; correct or cancel an open invitation. A
+  phone-width card layout.
+- **Navigation:** Drivers is a link; Timesheets and Settings are still not
+  available.
+- **Home:** "Add your first driver" is the available next step, linking to
+  Drivers, and the workspace guide marks Drivers available.
+- **`withCompany`** in the website's AuthProvider: calls with the tenant
+  token in memory; on 401 selects the company again once (switch-company,
+  through the existing identity renewal) and retries. The company ref is set
+  with the state, the stage-2 lesson. `apiRequest` gains PATCH.
+- **Home's tests (5, 8, 9a, 9b) and the e2e menu expectations** are
+  rewritten to the new truth, still exact.
+
+**Found and fixed: a defect stage 1 shipped.** `@fastify/cors` 11 defaults
+to GET, HEAD and POST, so a real browser refused the company's PATCH
+(correcting an invitation) at the preflight. Unit tests against a fake API
+cannot see that. Now PATCH is allowed, for the allowed origins only; a
+foreign preflight is still refused.
+- 2 app tests, RED then GREEN.
+- A new Playwright flow (`drivers.spec.ts`) fails at the correction with
+  the old CORS setting and passes with the new one.
+
+**Found and fixed: the e2e suite would exceed one client's 5
+registrations per hour** with the new flow (6 in all). The e2e API now keys
+clients by `X-Real-IP` like production (F-15), and the new spec names its
+own address. Playwright passed 6/6, twice.
+
+**Visual check** (Playwright screenshots, not committed):
+- The actions cell was a flex box, misaligning rows, so the flex moved to
+  an inner wrapper.
+- The edit row showed no context, so it now says whose invitation it
+  edits.
+- 390 px width has no horizontal overflow.
+
+**Evidence.**
+- RED: 16/16 page tests failed first; DP17 was added after mutation w13
+  survived.
+- GREEN: 17/17; web 160 in total.
+- Mutation: 13 mutants, all killed.
+- Gate: exit 0 in one run — api 246, mobile 1465 + 7, web 160, db 318,
+  backup 12, build, smoke.
+
+**Next (stage 5, awaiting approval):** the app's invitation screen and Start
+Shift's company list.
+
+---
+
 ## 2026-10-11 — D63 stage 3: a driver lists, accepts and declines invitations (API)
 
 **Owner decision first:** declining is visible to the company as Declined.
