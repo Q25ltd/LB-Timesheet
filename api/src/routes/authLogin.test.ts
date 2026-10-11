@@ -32,6 +32,7 @@
  * Frozen by AUTH.md ("Login flow", "Route postures"), DECISIONS D13, D17,
  * D21 and D22.
  */
+import { unusedD66Delegates, type UnusedD66Delegates } from "../tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -90,7 +91,7 @@ interface StubMembershipRow {
   active: boolean;
 }
 
-interface StubDatabase {
+interface StubDatabase extends UnusedD66Delegates {
   /** Driver invitations (D63) — never reached by these tests. */
   driverInvitation: DriverInvitationDatabase["driverInvitation"] & DriverInvitationAnswerDatabase["driverInvitation"];
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
@@ -118,7 +119,6 @@ interface StubDatabase {
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<{ timezone: string; name: string; distanceUnit: null; volumeUnit: null; reportEmail: null; reportEmailVerifiedAt: null } | null>; update(): Promise<never>; updateMany(): Promise<never> };
-  companyReportEmailToken: { count(): Promise<number>; findFirst(): Promise<null>; create(): Promise<never>; updateMany(): Promise<never> };
   // Company registration's (D51). No case here registers a company.
   pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
   emailSuppression: { findMany(): Promise<never[]> };
@@ -160,7 +160,7 @@ function noRows(): StubDatabase {
       findFirst: () => Promise.resolve(null),
     },
     company:      { findUnique: () => Promise.resolve({ timezone: "Europe/London", name: "Test Haulage", distanceUnit: null, volumeUnit: null, reportEmail: null, reportEmailVerifiedAt: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    ...unusedD66Delegates,
     pendingCompanyRegistration: {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),

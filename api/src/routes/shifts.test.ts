@@ -14,6 +14,7 @@
  * authenticate (the same injection pattern as src/lib/auth.test.ts), so a RED
  * failure here names the missing route and not a missing session.
  */
+import { unusedD66Delegates } from "../tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
@@ -94,7 +95,7 @@ function fixtures(options: { active?: boolean } = {}) {
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE, name: "Test Haulage", distanceUnit: null, volumeUnit: null, reportEmail: null, reportEmailVerifiedAt: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    ...unusedD66Delegates,
     // D22: the two canonical halves. `startContext` derives the snapshot name
     // from them, so DRIVER_NAME below is the DERIVED value, not a column.
     user: {

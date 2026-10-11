@@ -393,6 +393,8 @@ model CompanyMembership {
   user       User     @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)
 
   shifts     Shift[]
+  /// Evidence that a day existed while this membership was active (D66).
+  startReceipts ShiftStartReceipt[]
   /// The invitations that brought this driver in (D63).
   acceptedInvitations DriverInvitation[]
   /// Every transition of this membership (D65).
@@ -521,6 +523,29 @@ model DriverInvitation {
   @@index([companyId, createdAt])
   /// The per-address cap across companies, and (stage 3) a verified driver's invitations.
   @@index([email, createdAt])
+}
+
+/// A start receipt (D66): the server's OWN evidence that a company's day
+/// existed while the membership was active — `receivedAt` is this server's
+/// clock, never the phone's. A submission whose membership has since been
+/// withdrawn is VERIFIED only by a receipt received before that withdrawal.
+/// Never company-visible. Issued only to an active membership.
+model ShiftStartReceipt {
+  id                String   @id @default(cuid())
+  companyId         String
+  membershipId      String
+  userId            String
+  clientEventId     String
+  declaredStartedAt DateTime
+  receivedAt        DateTime @default(now())
+  shiftDate         DateTime @db.Date
+  companyTimezone   String
+
+  membership CompanyMembership @relation(fields: [membershipId, companyId, userId], references: [id, companyId, userId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([membershipId, clientEventId])
+  @@index([membershipId, receivedAt])
+  @@index([companyId])
 }
 
 model Shift {

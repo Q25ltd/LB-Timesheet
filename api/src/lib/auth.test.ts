@@ -23,6 +23,7 @@
  * `session.userId === sub` and `membership.userId === sub` are cases 17 and 18
  * below, added for F-24 against an implementation that already performs them.
  */
+import { unusedD66Delegates, type UnusedD66Delegates } from "../tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
@@ -143,7 +144,7 @@ interface MembershipRow {
   active: boolean;
 }
 
-interface IdentityReads {
+interface IdentityReads extends UnusedD66Delegates {
   /** Driver invitations (D63) — never reached by these tests. */
   driverInvitation: DriverInvitationDatabase["driverInvitation"] & DriverInvitationAnswerDatabase["driverInvitation"];
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
@@ -175,7 +176,6 @@ interface IdentityReads {
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<null>; update(): Promise<never>; updateMany(): Promise<never> };
-  companyReportEmailToken: { count(): Promise<number>; findFirst(): Promise<null>; create(): Promise<never>; updateMany(): Promise<never> };
   user: {
     findUnique(): Promise<null>;
     // Login's credential read. Declared because `AppDatabase` requires it;
@@ -214,7 +214,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null): Id
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    ...unusedD66Delegates,
     user: {
       findUnique: () => Promise.resolve(null),
       findFirst:  () => Promise.resolve(null),

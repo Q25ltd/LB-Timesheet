@@ -24,6 +24,7 @@
  *
  * Frozen by AUTH.md (2026-09-10 amendment) and DECISIONS D21–D24.
  */
+import { unusedD66Delegates, type UnusedD66Delegates } from "../tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
@@ -175,7 +176,7 @@ function otherUserRow(): UserRow {
   };
 }
 
-interface AuthReads {
+interface AuthReads extends UnusedD66Delegates {
   /** Driver invitations (D63) — never reached by these tests. */
   driverInvitation: DriverInvitationDatabase["driverInvitation"] & DriverInvitationAnswerDatabase["driverInvitation"];
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
@@ -212,7 +213,6 @@ interface AuthReads {
     findFirst(): Promise<null>;
   };
   company: { findUnique(): Promise<{ timezone: string; name: string; distanceUnit: null; volumeUnit: null; reportEmail: null; reportEmailVerifiedAt: null } | null>; update(): Promise<never>; updateMany(): Promise<never> };
-  companyReportEmailToken: { count(): Promise<number>; findFirst(): Promise<null>; create(): Promise<never>; updateMany(): Promise<never> };
   // Every WRITE rejects: no case in this file may reach persistence, so a
   // call landing here is itself the failure rather than a setup gap.
   // Company registration's (D51). No case here registers a company.
@@ -254,7 +254,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve({ timezone: "Europe/London", name: "Test Haulage", distanceUnit: null, volumeUnit: null, reportEmail: null, reportEmailVerifiedAt: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    ...unusedD66Delegates,
     pendingCompanyRegistration: {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),

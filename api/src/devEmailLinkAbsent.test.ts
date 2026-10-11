@@ -12,6 +12,7 @@
  * The transport rule itself is proven for every environment below, because
  * the environment is read once per process.
  */
+import { unusedD66Delegates } from "./tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -55,7 +56,7 @@ const db = {
     findFirst: () => Promise.resolve(null),
   },
   company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-  companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+  ...unusedD66Delegates,
   user: {
     findUnique: () => Promise.resolve(null),
     // Login's credential read. Declared because `AppDatabase` requires it;

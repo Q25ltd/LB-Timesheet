@@ -28,7 +28,7 @@ export function emptyDatabase() {
       findFirst: () => Promise.resolve(null),
     },
     company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    ...unusedD66Delegates,
     user: {
       findUnique: () => Promise.resolve(null),
       findFirst:  () => Promise.resolve(null),
@@ -58,3 +58,17 @@ export function emptyDatabase() {
   };
   return { db, counters };
 }
+
+const notUsedHere = (): Promise<never> => Promise.reject(new Error("not used here"));
+
+/**
+ * D66's delegates, for app-level tests that never reach them: every read
+ * finds nothing, every write REJECTS. Spread into a fake — and its type
+ * extended — so each later D66 model is one change here, not one per fake.
+ */
+export const unusedD66Delegates = {
+  companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: notUsedHere, updateMany: notUsedHere },
+  shiftStartReceipt: { findUnique: () => Promise.resolve(null), count: () => Promise.resolve(0), create: notUsedHere },
+};
+
+export type UnusedD66Delegates = typeof unusedD66Delegates;

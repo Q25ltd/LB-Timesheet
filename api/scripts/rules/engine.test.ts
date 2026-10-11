@@ -46,6 +46,7 @@ const EXPECTED_BAD = [
   "route-declares-auth  src/routes/leaky.ts:17",
   "route-registered  src/routes/leaky.ts:1",
   "schema-nullable  prisma/schema.prisma:3",
+  "submission-context-trust-sites  src/services/svc.ts:6",
   "tenant-context-trust-sites  src/services/svc.ts:4",
   "tenant-models-via-repository  src/routes/leaky.ts:9",
   "tenant-models-via-repository  src/services/svc.ts:5",
@@ -65,7 +66,7 @@ test("every rule in the engine fires at least once on the bad tree", () => {
     "no-any", "no-console", "error-envelope", "jwt-centralised", "zod-max",
     "no-empty-catch", "schema-nullable", "tenant-scoped", "no-client-tenant",
     "no-company-id-in-dto", "no-raw-request-past-route", "no-request-in-services",
-    "tenant-models-via-repository", "tenant-context-trust-sites",
+    "tenant-models-via-repository", "tenant-context-trust-sites", "submission-context-trust-sites",
     "no-prisma-in-routes", "route-registered", "route-declares-auth",
     "migration-additive",
   ];

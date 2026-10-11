@@ -4,6 +4,7 @@
  * tests/snsSigning.ts; the network is a stand-in that records every URL the
  * app asks for — so "never fetched" is observable.
  */
+import { unusedD66Delegates } from "./tests/fakeDatabase.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOPIC, SUBSCRIBE_URL, bounceEvent, bounceNotification, fakeSns, sign, subscriptionConfirmation } from "./tests/snsSigning.js";
@@ -49,7 +50,7 @@ const db = {
     findFirst: () => Promise.resolve(null),
   },
   company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
-  companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+  ...unusedD66Delegates,
   user: {
     findUnique: () => Promise.resolve(null),
     // Login's credential read. Declared because `AppDatabase` requires it;

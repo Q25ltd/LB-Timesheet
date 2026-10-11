@@ -278,8 +278,8 @@ scan(
 // is src/tests/db/repositoryTenantBoundary.test.ts.
 scan(
   "tenant-models-via-repository",
-  "Shift/ShiftSegment/ShiftSubmitJob/DriverInvitation/MembershipEvent/CompanyReportEmailToken queries live in src/repositories — use their repository with a TenantContext.",
-  line => /\bprisma\s*\.\s*(?:shift|shiftSegment|shiftSubmitJob|driverInvitation|membershipEvent|companyReportEmailToken)\s*\./.test(line.replace(/\/\/.*$/, "")),
+  "Shift/ShiftSegment/ShiftSubmitJob/DriverInvitation/MembershipEvent/CompanyReportEmailToken/ShiftStartReceipt queries live in src/repositories — use their repository with a TenantContext.",
+  line => /\bprisma\s*\.\s*(?:shift|shiftSegment|shiftSubmitJob|driverInvitation|membershipEvent|companyReportEmailToken|shiftStartReceipt)\s*\./.test(line.replace(/\/\/.*$/, "")),
   file => !/[/\\](?:repositories|tests|generated)[/\\]/.test(file) && !file.endsWith(".test.ts"),
 );
 
@@ -293,6 +293,16 @@ scan(
   line => /\bTenantContext\s*\.\s*trust\s*\(/.test(line.replace(/\/\/.*$/, "")),
   file => !/[/\\](?:tests|plugins)[/\\]|lib[/\\]auth|lib[/\\]tenantContext\.ts$|scripts[/\\]seed/.test(file)
        && !file.endsWith(".test.ts"),
+);
+
+// ── SubmissionContext.trust: ONE call site (D66) ─────────────────────────────
+// The driver's submission authority is made only where the membership was
+// loaded by its id AND the signed-in user's id (lib/submissionAuthorization).
+scan(
+  "submission-context-trust-sites",
+  "SubmissionContext.trust() may only be called from lib/submissionAuthorization.ts or tests. See AUTH.md, Driver timesheet submission.",
+  line => /\bSubmissionContext\s*\.\s*trust\s*\(/.test(line.replace(/\/\/.*$/, "")),
+  file => !/[/\\]tests[/\\]|lib[/\\]submissionAuthorization\.ts$/.test(file) && !file.endsWith(".test.ts"),
 );
 
 scan(
