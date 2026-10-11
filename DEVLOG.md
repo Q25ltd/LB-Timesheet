@@ -45,6 +45,13 @@ slightly different moments; a company registration in that window can be
 refused once (private deployment — no customers). The driver's app
 gains units only when it reads the account again (Home's read).
 
+**Deployed.** `d52e257` (fast-forward); CI run `38156615104`, `ci` and
+`e2e` success; Railway applied the additive migration —
+`/company/settings/units` answers 401 without a token. Migration reviewed
+before the push: two enums, four nullable columns, no back-fill, no
+constraint on existing rows. No infrastructure setting or production data
+changed by hand.
+
 ---
 
 ## 2026-10-11 — D66 stage S0: submission, review, PDF and email decided and recorded
