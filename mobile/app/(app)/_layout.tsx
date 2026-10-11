@@ -32,6 +32,7 @@ import { Redirect, Stack } from "expo-router";
 import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
 import { colors } from "../../src/theme/index";
+import { SyncDriver } from "../../src/sync/SyncDriver";
 
 export default function AppLayout() {
   const { status } = useAuth();
@@ -40,25 +41,29 @@ export default function AppLayout() {
   if (status !== "authenticated") return <Redirect href="/sign-in" />;
 
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="start-shift" />
-      <Stack.Screen name="active-shift" />
-      <Stack.Screen name="add-vehicle" />
-      <Stack.Screen name="vehicle-check" />
-      <Stack.Screen name="change-vehicle" />
-      <Stack.Screen name="vehicle-fill" />
-      <Stack.Screen name="vehicle-usage" />
-      <Stack.Screen name="add-trailer" />
-      <Stack.Screen name="change-trailer" />
-      <Stack.Screen name="trailer-diesel" />
-      <Stack.Screen name="trailer-check" />
-      <Stack.Screen name="trailer-usage" />
-      <Stack.Screen name="finish-shift" />
-      <Stack.Screen name="timesheet" />
-      <Stack.Screen name="edit-timesheet" />
-      <Stack.Screen name="correct-name" />
-      <Stack.Screen name="edit-shift" />
-    </Stack>
+    <>
+      {/* Sends what this account has queued, while the app is open (D66). */}
+      <SyncDriver />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="start-shift" />
+        <Stack.Screen name="active-shift" />
+        <Stack.Screen name="add-vehicle" />
+        <Stack.Screen name="vehicle-check" />
+        <Stack.Screen name="change-vehicle" />
+        <Stack.Screen name="vehicle-fill" />
+        <Stack.Screen name="vehicle-usage" />
+        <Stack.Screen name="add-trailer" />
+        <Stack.Screen name="change-trailer" />
+        <Stack.Screen name="trailer-diesel" />
+        <Stack.Screen name="trailer-check" />
+        <Stack.Screen name="trailer-usage" />
+        <Stack.Screen name="finish-shift" />
+        <Stack.Screen name="timesheet" />
+        <Stack.Screen name="edit-timesheet" />
+        <Stack.Screen name="correct-name" />
+        <Stack.Screen name="edit-shift" />
+      </Stack>
+    </>
   );
 }

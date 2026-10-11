@@ -278,3 +278,19 @@ export function logoutSession(identityToken: string): Promise<ApiResult<unknown>
 export function switchCompany(identityToken: string, membershipId: string): Promise<ApiResult<SwitchedCompany>> {
   return checked(postJson<unknown>("/auth/switch-company", { membershipId }, identityToken), isSwitchedCompany);
 }
+
+/** A start receipt as the server kept it (D66): ITS time, the evidence. */
+export interface StartReceipt {
+  receivedAt: string;
+}
+
+function isStartReceipt(value: unknown): value is { receipt: StartReceipt } {
+  const r = record(value);
+  const receipt = r === null ? null : record(r["receipt"]);
+  return receipt !== null && text(receipt["receivedAt"]) && !Number.isNaN(Date.parse(String(receipt["receivedAt"])));
+}
+
+/** `POST /driver/shift-receipts` — the identity token; the membership named is checked against the account. */
+export function sendStartReceipt(identityToken: string, body: { membershipId: string; clientEventId: string; startedAt: string }): Promise<ApiResult<{ receipt: StartReceipt }>> {
+  return checked(postJson<unknown>("/driver/shift-receipts", body, identityToken), isStartReceipt);
+}

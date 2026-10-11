@@ -19,6 +19,7 @@ import { useAuth } from "../../src/auth/AuthContext";
 import { readOpenShift, startLocalShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
 import { useUnitResolver } from "../../src/shift/recordingUnits";
+import { requestSync } from "../../src/sync/SyncDriver";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 
 export default function StartShiftRoute() {
@@ -61,7 +62,11 @@ export default function StartShiftRoute() {
         // the phone's own storage — an unreadable earlier day that could not
         // be moved aside, or a failed save (D37) — and the driver is told.
         void startLocalShift(scope, input).then(
-          () => { router.replace("/active-shift"); },
+          () => {
+            // A company's day: its start receipt goes as soon as it can (D66).
+            requestSync();
+            router.replace("/active-shift");
+          },
           (error: unknown) => { Alert.alert("Couldn't start the shift", saveFailureMessage(error)); },
         );
       }}

@@ -61,3 +61,27 @@ beforeEach(() => {
   mockLocalAuth.supportedAuthenticationTypesAsync.mockResolvedValue([]);
   mockLocalAuth.authenticateAsync.mockResolvedValue({ success: false, error: "not_available" });
 });
+
+/**
+ * expo-network is a NATIVE module (D66: the sync runner retries when the
+ * connection returns). Mocked at the module boundary with a controllable
+ * stand-in: `__emit(state)` delivers a network state to every listener, so a
+ * test can say "the connection came back" — and `__listeners` shows that a
+ * listener was removed when the app stopped listening.
+ */
+const mockNetworkListeners = new Set();
+
+jest.mock("expo-network", () => ({
+  __esModule: true,
+  addNetworkStateListener: jest.fn(listener => {
+    mockNetworkListeners.add(listener);
+    return { remove: () => { mockNetworkListeners.delete(listener); } };
+  }),
+  getNetworkStateAsync: jest.fn(() => Promise.resolve({ isConnected: true, isInternetReachable: true })),
+  __emit: state => { for (const listener of [...mockNetworkListeners]) listener(state); },
+  __listeners: mockNetworkListeners,
+}));
+
+afterEach(() => {
+  mockNetworkListeners.clear();
+});

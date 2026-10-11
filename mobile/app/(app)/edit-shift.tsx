@@ -11,6 +11,7 @@ import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
 import { saveFailureMessage } from "../../src/screens/format";
 import { TimesheetBoundsError, correctOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
+import { requestSync } from "../../src/sync/SyncDriver";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
@@ -45,6 +46,8 @@ async function save(scope: AccountScope, shiftId: string, edit: ShiftStartEdit):
   try {
     const day = await correctOpenShift(scope, { shiftId, ...edit });
     if (day === null) Alert.alert("Nothing was saved", "This shift is no longer the one open.");
+    // Made a company's day: the runner queues and sends its receipt (D66).
+    else requestSync();
     router.back();
   } catch (error: unknown) {
     Alert.alert(

@@ -20,12 +20,15 @@ import { saveFailureMessage } from "../../src/screens/format";
 import {
   TimesheetBoundsError,
   correctCompletedShift,
+  effectiveFacts,
   newLocalId,
   readCompletedShift,
   type CompletedShift,
   type Declared,
 } from "../../src/shift/localShift";
 import { REVIEW_TO_DECLARE } from "../../src/navigation/useScreenDay";
+import { requestSync } from "../../src/sync/SyncDriver";
+import { queueStartReceipt } from "../../src/sync/receiptQueue";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
@@ -86,6 +89,8 @@ async function save(scope: AccountScope,
     const day = await correctCompletedShift(scope, { ...by, correctedAt: new Date(), ...edit, declared });
     if (day === null) {
       Alert.alert("Nothing was saved", "This timesheet changed after you opened it, or is no longer on this phone. Open it again to make your correction.");
+    } else {
+      queueReceiptFor(scope, day);
     }
     router.back();
   } catch (error: unknown) {
@@ -98,4 +103,22 @@ async function save(scope: AccountScope,
 function failureMessage(error: unknown): string {
   if (error instanceof TimesheetBoundsError) return "The times don't hold everything recorded in this shift. Check the start and finish.";
   return saveFailureMessage(error);
+}
+
+/**
+ * A finished day now a company's: queue its start receipt (D66) — evidence
+ * that the day existed while the membership was active. The correction is
+ * already saved; a receipt that could not be queued costs only that
+ * evidence (an active membership verifies its own submission anyway), so it
+ * never turns a saved correction into a failure.
+ */
+function queueReceiptFor(scope: AccountScope, day: CompletedShift): void {
+  const facts = effectiveFacts(day);
+  if (facts.workingFor.kind !== "company") return;
+  try {
+    queueStartReceipt(scope, { dayId: day.id, membershipId: facts.workingFor.membershipId, startedAt: facts.startedAt });
+    requestSync();
+  } catch {
+    // See above: the correction stands; only the receipt is not queued.
+  }
 }
