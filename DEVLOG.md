@@ -56,7 +56,13 @@ web 170, db 338, backup 12, build and smoke); Playwright 7/7.
 
 **Open.** Submission and sync must prove that a day began before
 withdrawal (D65). The orphaned server sessions from F-38 are untouched
-and still need a separate decision. Not deployed by this entry.
+and still need a separate decision.
+
+**Deployed.** Pushed `de5c788` (fast-forward from `ce6bd96`); CI run
+`38147327083`, `ci` and `e2e` success; Railway deployed it with the
+additive migration — production's `/company/drivers` answers 401 without
+a token. No Railway, Vercel or SES setting, database record or session
+was changed by hand.
 
 ---
 
