@@ -188,13 +188,16 @@ test("the greeting carries one salutation, and it is one of exactly three", asyn
 /**
  * What Home may ask the server (owner decision, 2026-10-11, narrowing the
  * earlier "Home asks the server nothing"): ONLY the account's own status —
- * `GET /auth/me`, for whether the email address is confirmed (D63). Never
- * anything about shifts, timesheets or mileage, which Home shows from the
- * phone or not at all.
+ * `GET /auth/me`, for whether the email address is confirmed, and
+ * `GET /driver/invitations`, the companies inviting it (D63). Never anything
+ * about shifts, timesheets or mileage, which Home shows from the phone or
+ * not at all.
  */
+const ACCOUNT_STATUS_READS: readonly string[] = ["GET /auth/me", "GET /driver/invitations"];
+
 function onlyAccountStatusReads(fetchSpy: jest.SpyInstance): void {
   const asked = fetchSpy.mock.calls.map(([input, init]: [unknown, RequestInit | undefined]) => `${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
-  expect(asked.filter(request => request !== "GET /auth/me")).toEqual([]);
+  expect(asked.filter(request => !ACCOUNT_STATUS_READS.includes(request))).toEqual([]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -346,4 +349,35 @@ test("the biometric offer appears only on a device that can actually do it", asy
   // driver learns to distrust the app (D26).
   const view = await homeSignedInAs(NERIJUS);
   expect(view.queryByTestId("biometric-opt-in")).toBeNull();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D. Invitations on Home (D63, stage 5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("Home: invitations wait for a confirmed email — and appear the moment the driver confirms it here", async () => {
+  let verified = false;
+  jest.spyOn(global, "fetch").mockImplementation(((input: string) => {
+    const path = new URL(String(input)).pathname;
+    const answer = (status: number, body: unknown) => Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(body) } as Response);
+    if (path === "/auth/me") return answer(200, { user: NERIJUS.user, memberships: [], emailVerified: verified });
+    if (path === "/auth/email-verification") return answer(204, null);
+    if (path === "/driver/invitations") {
+      return verified
+        ? answer(200, { invitations: [{ id: "inv-1", companyName: "Northgate Logistics", firstName: "Nerijus", lastName: "Kuizinas", expiresAt: "2026-11-10T08:00:00.000Z" }] })
+        : answer(403, { error: "Confirm your email address to see invitations", code: "EMAIL_NOT_VERIFIED" });
+    }
+    throw new Error(`unexpected request to ${path}`);
+  }) as unknown as typeof fetch);
+  const view = await homeSignedInAs(NERIJUS);
+
+  await waitFor(() => { expect(view.getByTestId("email-confirmation")).toBeTruthy(); });
+  expect(view.queryByTestId("invitations")).toBeNull();
+
+  await act(async () => { await fireEvent.press(view.getByTestId("email-confirmation-send")); });
+  verified = true;
+  await act(async () => { await fireEvent.press(view.getByTestId("email-confirmation-recheck")); });
+
+  await waitFor(() => { expect(view.getByTestId("invitation-inv-1")).toBeTruthy(); });
+  expect(view.queryByTestId("email-confirmation")).toBeNull();
 });

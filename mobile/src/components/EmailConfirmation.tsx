@@ -12,10 +12,10 @@ import { useEmailConfirmation } from "../auth/useEmailConfirmation";
 import { colors, radius, spacing, typography } from "../theme";
 import { PrimaryButton } from "./PrimaryButton";
 
-export function EmailConfirmation({ variant }: { variant: "home" | "settings" }) {
+export function EmailConfirmation({ variant, onConfirmed }: { variant: "home" | "settings"; onConfirmed?: () => void }) {
   const { account } = useAuth();
   const email = account?.user.email ?? "";
-  const confirmation = useEmailConfirmation(email);
+  const confirmation = useEmailConfirmation(email, onConfirmed);
   const { state, sent, message, busy, send, recheck } = confirmation;
 
   if (account === null) return null;

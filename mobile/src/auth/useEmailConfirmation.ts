@@ -36,7 +36,7 @@ function sendFailure(result: ApiResult<unknown>): string {
   return "The email could not be sent. Try again shortly.";
 }
 
-export function useEmailConfirmation(email: string): EmailConfirmation {
+export function useEmailConfirmation(email: string, onConfirmed?: () => void): EmailConfirmation {
   const { withIdentity } = useAuth();
   const [state, setState] = useState<ConfirmationState>("checking");
   const [sent, setSent] = useState(false);
@@ -86,9 +86,13 @@ export function useEmailConfirmation(email: string): EmailConfirmation {
       setState(found);
       if (found === "unconfirmed") setMessage("Not confirmed yet. Open the link in the email, then try again.");
       else if (found === "unknown") setMessage("No connection. Try again when you have signal.");
-      else setMessage(null);
+      else {
+        setMessage(null);
+        // Invitations wait for a confirmed address (D63): whoever shows them reads them again now.
+        onConfirmed?.();
+      }
     });
-  }, [read]);
+  }, [onConfirmed, read]);
 
   return { state, sent, message, busy, send, recheck };
 }

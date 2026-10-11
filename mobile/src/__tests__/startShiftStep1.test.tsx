@@ -150,8 +150,8 @@ test("pressing Start Shift opens the workflow — one tap, no picker, no dialog"
 test("pressing Start Shift sends NOTHING to the server", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
   const view = await signedIn(<Today />, [NORTHGATE]);
-  // Home's own account-status read (D63) happens on arrival; the press adds nothing.
-  await waitFor(() => { expect(fetchSpy).toHaveBeenCalledTimes(1); });
+  // Home's own account-status reads (D63: email confirmation, invitations) happen on arrival; the press adds nothing.
+  await waitFor(() => { expect(fetchSpy).toHaveBeenCalledTimes(2); });
   const before = fetchSpy.mock.calls.length;
 
   await act(async () => { await fireEvent.press(view.getByTestId("start-shift")); });

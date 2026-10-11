@@ -12,6 +12,7 @@ import { router, useFocusEffect } from "expo-router";
 import { HomeScreen } from "../../../src/screens/HomeScreen";
 import { InterruptedRecovery } from "../../../src/components/InterruptedRecovery";
 import { EmailConfirmation } from "../../../src/components/EmailConfirmation";
+import { Invitations } from "../../../src/components/Invitations";
 import { useAuth } from "../../../src/auth/AuthContext";
 import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShift } from "../../../src/shift/localShift";
@@ -25,6 +26,8 @@ export default function TodayRoute() {
     account, biometrics, biometricUnlockEnabled, enableBiometricUnlock,
   } = useAuth();
   const [recent, setRecent] = useState<readonly CompletedShift[] | "loading" | "unreadable">("loading");
+  /** Bumped when the email is confirmed here, so the invitations are read again (D63). */
+  const [invitationsRead, setInvitationsRead] = useState(0);
 
   // Read again EVERY time Home comes into view — after Finish Shift returns
   // here, a finished day is listed without a restart. The phone's own files:
@@ -66,7 +69,13 @@ export default function TodayRoute() {
       // By the day's id — never its date, employer or place in the list.
       onOpenTimesheet={id => { router.push({ pathname: "/timesheet", params: { id } }); }}
       // D63: companies add drivers by email; invitations need it confirmed.
-      notice={<EmailConfirmation variant="home" />}
+      // Once it is, the invitations are read again — a new key, a fresh read.
+      notice={
+        <>
+          <EmailConfirmation variant="home" onConfirmed={() => { setInvitationsRead(n => n + 1); }} />
+          <Invitations key={invitationsRead} />
+        </>
+      }
     />
     </>
   );
