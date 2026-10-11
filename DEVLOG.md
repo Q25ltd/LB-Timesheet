@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-10-11 — The day's housekeeping: production, CI and the local database
+
+- **Production carries all of D63.** Railway deployed every push after CI
+  (`51eb635`, `b2509b5`, `fbb6203`, `d4f361b`) and applied
+  `20261011100000_driver_invitation_response` in its pre-deploy step
+  (yesterday's `df220f1` applied `20261010150000_driver_invitation`).
+  Checked live:
+  - `/health` answers 200;
+  - the new routes refuse an unsigned request with the canonical 401;
+  - an allowed origin's PATCH preflight is granted (`GET, HEAD, POST,
+    PATCH`);
+  - `/company/drivers` is served by the portal.
+
+  Public onboarding is still not open (no backups, D59).
+- **CI:** five runs today and yesterday evening, `ci` and `e2e` both green
+  on the first attempt every time (STATUS, the CI row).
+- **The local development database** (`localhost:5544/lb_timesheet`) was
+  migrated by another session: the three newest migrations — email delivery
+  status and the two D63 ones — all additive, nothing deleted, no file in
+  the repo changed. Confirmed read-only here: all 19 applied, none rolled
+  back. The gate and Playwright build their own databases
+  (`lb_timesheet_check`, `lb_timesheet_e2e`) and were not affected.
+- **Machine load** again made some full local runs time out in untouched
+  suites (a FamFusion dev server at up to 256% CPU). Each was rerun green;
+  no timeout was raised. A split test file (`driverInvitationRecords.test.ts`)
+  is the one lasting change it caused.
+- **Not done:** nothing of D63 has been tried on a physical phone, and the
+  owner has not reviewed its screens; invitation bounce handling and
+  removing a driver from the website are not built.
+
+---
+
 ## 2026-10-11 — D63 stage 5: invitations in the app; the company at Start Shift — D63 complete
 
 **Built.**
