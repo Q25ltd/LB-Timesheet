@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { reportEmailTokenSentTo } from "./mailbox";
 
 /**
  * D66, stage S1 — Settings in a real browser against the real API on another
@@ -54,4 +55,29 @@ test("D66: the units chosen at registration are the company's; Settings changes 
   await page.reload();
   await expect(page.getByLabel("Distance unit")).toHaveValue("mile");
   await expect(page.getByLabel("Fuel unit")).toHaveValue("us_gallon");
+});
+
+test("D66: a report address is set in Settings, confirmed through its emailed link, and shown as where reports go", async ({ page }) => {
+  await registeredCompany(page, `e2e-${RUN}-report-admin@example.com`);
+  await page.goto("/company/settings");
+  const report = page.getByRole("region", { name: "Report email" });
+  await expect(report).toContainText("No report address yet");
+
+  const address = `e2e-${RUN}-payroll@example.com`;
+  await report.getByLabel("Report email address").fill(address);
+  await report.getByRole("button", { name: "Save address" }).click();
+  await expect(report).toContainText(`sent a confirmation link to ${address}`);
+  await expect(report).toContainText("waiting for confirmation");
+
+  const token = await reportEmailTokenSentTo(address);
+  await page.goto(`/confirm-report-email#token=${token}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Report address confirmed" })).toBeVisible();
+  await expect(page.getByText("E2E Units Haulage UAB")).toBeVisible();
+
+  await page.goto("/company/settings");
+  await expect(page.getByRole("region", { name: "Report email" })).toContainText(`Reports are emailed to ${address}`);
+
+  // Used once.
+  await page.goto(`/confirm-report-email#token=${token}`);
+  await expect(page.getByRole("heading", { level: 1, name: "This link cannot be used" })).toBeVisible();
 });

@@ -37,6 +37,7 @@ import { companyDriverRepository, type CompanyDriverDatabase } from "./repositor
 import { registerCompanyDriverMembershipRoutes } from "./routes/companyDriverMemberships.js";
 import { companySettingsRepository, type CompanySettingsDatabase } from "./repositories/companySettingsRepository.js";
 import { registerCompanySettingsRoutes } from "./routes/companySettings.js";
+import { reportEmailRepository, type ReportEmailDatabase } from "./repositories/reportEmailRepository.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
 import { sendThrottle } from "./lib/sendThrottle.js";
 
@@ -56,7 +57,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & CompanySettingsDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & CompanySettingsDatabase & ReportEmailDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -342,7 +343,12 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
 
   // A company's settings (D66): its measurement units. Tenant posture; the
   // service applies the company-admin gate (D54).
-  registerCompanySettingsRoutes(app, companySettingsRepository(prisma));
+  registerCompanySettingsRoutes(app, companySettingsRepository(prisma), reportEmailRepository(prisma), {
+    mailer:       mail.mailer,
+    webAppUrl:    mail.webAppUrl,
+    log:          app.log,
+    isSuppressed: async email => (await delivery.suppressionReasons(email)).length > 0,
+  });
 
   // LIVENESS: the process is up and answering. Touches nothing else, so a
   // database outage never makes a supervisor restart a healthy process.

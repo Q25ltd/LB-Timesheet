@@ -9,6 +9,7 @@ import { RegisterPage } from "./pages/account/RegisterPage";
 import { RequireAccount } from "./pages/account/RequireAccount";
 import { ResetPasswordPage } from "./pages/account/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/account/VerifyEmailPage";
+import { ConfirmReportEmailPage } from "./pages/account/ConfirmReportEmailPage";
 import { CompanyHome } from "./pages/company/CompanyHome";
 import { CompanyShell } from "./pages/company/CompanyShell";
 import { DriversPage } from "./pages/company/DriversPage";
@@ -36,6 +37,7 @@ export const routes: RouteObject[] = [
       { path: "verify-email", element: <VerifyEmailPage /> },
       { path: "forgot-password", element: <ForgotPasswordPage /> },
       { path: "reset-password", element: <ResetPasswordPage /> },
+      { path: "confirm-report-email", element: <ConfirmReportEmailPage /> },
       { path: "account", element: <RequireAccount><AccountPage /></RequireAccount> },
       { path: "*", element: <NotFoundPage /> },
     ],

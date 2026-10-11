@@ -14,6 +14,7 @@ export const PATHS = {
   verifyEmail: "/verify-email",
   forgotPassword: "/forgot-password",
   resetPassword: "/reset-password",
+  confirmReportEmail: "/confirm-report-email",
   account: "/account",
   company: "/company",
   companyDrivers: "/company/drivers",

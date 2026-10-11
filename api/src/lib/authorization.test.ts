@@ -280,7 +280,8 @@ interface IdentityReads {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
-  company: { findUnique(): Promise<null>; update(): Promise<never> };
+  company: { findUnique(): Promise<null>; update(): Promise<never>; updateMany(): Promise<never> };
+  companyReportEmailToken: { count(): Promise<number>; findFirst(): Promise<null>; create(): Promise<never>; updateMany(): Promise<never> };
   user: {
     findUnique(): Promise<null>;
     // Login's credential read. Declared because `AppDatabase` requires it;
@@ -347,7 +348,8 @@ function activeIdentity(): IdentityReads {
       create:    () => Promise.reject(new Error("shift.create is not part of this test")),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
     user: {
       findUnique: () => Promise.resolve(null),
       findFirst:  () => Promise.resolve(null),

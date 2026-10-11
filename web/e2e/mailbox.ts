@@ -54,3 +54,20 @@ export async function verificationTokenSentTo(to: string): Promise<string> {
   }
   throw new Error(`no email-verification link was sent to ${to}`);
 }
+
+/** The token in the newest report-address confirmation link sent to one address (D66). */
+export async function reportEmailTokenSentTo(to: string): Promise<string> {
+  const pattern = /\/confirm-report-email#token=([A-Za-z0-9_-]+)/;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const names = await readdir(OUTBOX).catch(() => [] as string[]);
+    let token: string | undefined;
+    for (const name of names.sort()) {
+      const parsed: unknown = JSON.parse(await readFile(`${OUTBOX}${name}`, "utf8"));
+      if (!isMessage(parsed) || parsed.to !== to) continue;
+      token = pattern.exec(parsed.text)?.[1] ?? token;
+    }
+    if (token !== undefined) return token;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`no report-address link was sent to ${to}`);
+}

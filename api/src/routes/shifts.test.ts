@@ -93,7 +93,8 @@ function fixtures(options: { active?: boolean } = {}) {
       findMany:  () => Promise.resolve([]),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE, name: "Test Haulage", distanceUnit: null, volumeUnit: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    company: { findUnique: () => Promise.resolve({ timezone: TIMEZONE, name: "Test Haulage", distanceUnit: null, volumeUnit: null, reportEmail: null, reportEmailVerifiedAt: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
+    companyReportEmailToken: { count: () => Promise.resolve(0), findFirst: () => Promise.resolve(null), create: (): Promise<never> => Promise.reject(new Error("not used here")), updateMany: (): Promise<never> => Promise.reject(new Error("not used here")) },
     // D22: the two canonical halves. `startContext` derives the snapshot name
     // from them, so DRIVER_NAME below is the DERIVED value, not a column.
     user: {

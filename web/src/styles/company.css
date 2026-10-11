@@ -761,3 +761,18 @@
     margin-inline: var(--gutter);
   }
 }
+
+/* Report email (D66). */
+.settings__status {
+  margin: var(--space-4) 0 0;
+  font-weight: 600;
+}
+
+.settings__status[data-state="confirmed"] { color: var(--success); }
+.settings__status[data-state="waiting"] { color: var(--amber-ink); }
+
+.settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

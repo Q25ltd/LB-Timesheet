@@ -100,8 +100,13 @@ enum ShiftStatus {
 model Company {
   id           String    @id @default(cuid())
   name         String
-  /// Where completed timesheet PDFs are emailed.
+  /// Where completed timesheet PDFs are emailed (D66): ONE address, set by an
+  /// administrator, trimmed and lower-cased. A report is delivered only once
+  /// it is confirmed (`reportEmailVerifiedAt`); changing it clears that.
   reportEmail  String?
+  /// When the report address was confirmed through its emailed link. Null:
+  /// not confirmed — no report is sent (a CHECK keeps it null with no address).
+  reportEmailVerifiedAt DateTime?
   /// trial | active | past_due | cancelled
   status       String    @default("trial")
 
@@ -133,6 +138,7 @@ model Company {
 
   memberships  CompanyMembership[]
   driverInvitations DriverInvitation[]
+  reportEmailTokens CompanyReportEmailToken[]
 
   @@index([status])
 }
@@ -184,6 +190,8 @@ model User {
   sessions      Session[]
   /// The membership transitions this account made (D65).
   membershipEventsActed MembershipEvent[]
+  /// The report-address confirmations this administrator asked for (D66).
+  reportEmailTokensRequested CompanyReportEmailToken[]
   accountTokens AccountToken[]
   pendingCompanyRegistration PendingCompanyRegistration?
   emailMessages EmailMessage[]
@@ -401,6 +409,28 @@ model CompanyMembership {
   @@unique([id, companyId, userId])
   @@index([userId, active])
   @@index([companyId, active])
+}
+
+/// A link that confirms a company's report address (D66): single-use,
+/// expiring, and bound to the exact address it was sent to. Only the token's
+/// SHA-256 is stored. A new request for the company RETIRES every outstanding
+/// one (`retiredAt`) — kept, never deleted.
+model CompanyReportEmailToken {
+  id              String    @id @default(cuid())
+  companyId       String
+  email           String
+  tokenHash       String    @unique
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  retiredAt       DateTime?
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([createdByUserId])
 }
 
 /// What happened to a membership (D65). `joined` and `rejoined` are the

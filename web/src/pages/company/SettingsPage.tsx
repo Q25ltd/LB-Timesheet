@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import type { ApiResult } from "../../auth/http";
-import { FormMessage, SelectField } from "../../components/Field";
+import { Field, FormMessage, SelectField } from "../../components/Field";
 import { DISTANCE_UNITS, VOLUME_UNITS, isDistanceUnit, isVolumeUnit } from "../../units";
 import { usePageTitle } from "../../usePageTitle";
-import { readUnits, saveUnits, unitsMissing, type CompanyUnits } from "./companySettingsApi";
+import { readReportEmail, readUnits, saveReportEmail, saveUnits, unitsMissing, type CompanyUnits, type ReportEmail } from "./companySettingsApi";
 
 /**
  * SETTINGS — the company's configuration (`/company/settings`, D66).
@@ -14,6 +14,10 @@ import { readUnits, saveUnits, unitsMissing, type CompanyUnits } from "./company
  * choose; nothing is preselected for it. Changing them affects what is
  * recorded from then on — every reading already recorded keeps the unit it
  * was recorded in, and nothing is converted.
+ *
+ * Report email (D66): the ONE address the company's timesheet reports are
+ * emailed to. It is used only once confirmed through the link sent to it;
+ * changing it means confirming the new address.
  */
 export function SettingsPage() {
   usePageTitle("Settings");
@@ -54,6 +58,7 @@ export function SettingsPage() {
           {typeof units === "object" ? <UnitsForm units={units} onSaved={setUnits} /> : null}
         </section>
       )}
+      {units === "forbidden" ? null : <ReportEmailSection />}
     </div>
   );
 }
@@ -112,5 +117,88 @@ function UnitsForm({ units, onSaved }: { units: CompanyUnits; onSaved: (units: C
       {message === null ? null : <FormMessage tone={message.tone}>{message.text}</FormMessage>}
       <button className="button button--primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save units"}</button>
     </form>
+  );
+}
+
+function reportRefusal(result: Exclude<ApiResult<unknown>, { kind: "ok" }>): string {
+  if (result.kind === "refused") {
+    if (result.code === "EMAIL_UNDELIVERABLE") return "Email cannot be delivered to this address. Check it, or use another.";
+    if (result.status === 429) return "You have asked for several confirmation emails. Wait a while and try again.";
+    if (result.status === 400) return "Enter a valid email address.";
+    if (result.status === 403) return "Your account is not allowed to change this company's settings.";
+    if (result.code === "EMAIL_UNAVAILABLE") return "The confirmation email could not be sent just now. Try again shortly.";
+  }
+  return "We could not save the address just now. Try again in a moment.";
+}
+
+function ReportEmailSection() {
+  const { withCompany } = useAuth();
+  const [report, setReport] = useState<ReportEmail | "loading" | "failed">("loading");
+  const [draft, setDraft] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const result = await readReportEmail(withCompany);
+    if (result.kind !== "ok") { setReport("failed"); return; }
+    setReport(result.value);
+    setDraft(result.value.address ?? "");
+  }, [withCompany]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function save(email: string) {
+    if (busy) return;
+    const typed = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed)) { setProblem("Enter a valid email address."); return; }
+    setProblem(null);
+    setMessage(null);
+    setBusy(true);
+    const result = await saveReportEmail(withCompany, typed);
+    setBusy(false);
+    if (result.kind !== "ok") { setMessage({ tone: "error", text: reportRefusal(result) }); return; }
+    setReport(result.value);
+    setMessage(result.value.verified
+      ? { tone: "success", text: "This address is already confirmed." }
+      : { tone: "success", text: `We have sent a confirmation link to ${result.value.address ?? typed}. Reports are emailed there once it is confirmed.` });
+  }
+
+  return (
+    <section className="settings__section" aria-labelledby="report-email-title">
+      <h2 id="report-email-title" className="company-section-title">Report email</h2>
+      <p className="settings__text">
+        The address your drivers&apos; timesheets are emailed to, as PDFs. One address; it is used only once it is confirmed through the link we send to it.
+      </p>
+      {report === "loading" ? <p className="settings__notice" role="status">Loading…</p> : null}
+      {report === "failed" ? (
+        <p className="settings__notice" role="alert">
+          We could not load the report address just now.
+          {" "}<button className="button button--secondary" type="button" onClick={() => void load()}>Try again</button>
+        </p>
+      ) : null}
+      {typeof report === "object" ? (
+        <>
+          <p className="settings__status" data-state={report.address === null ? "none" : report.verified ? "confirmed" : "waiting"}>
+            {report.address === null
+              ? "No report address yet — timesheets are not emailed until one is confirmed."
+              : report.verified
+                ? `Reports are emailed to ${report.address}.`
+                : `${report.address} is waiting for confirmation. Nothing is emailed to it until the link we sent is opened.`}
+          </p>
+          <form className="auth-form settings__form" onSubmit={(event: FormEvent) => { event.preventDefault(); void save(draft); }} noValidate>
+            <Field label="Report email address" type="email" autoComplete="email" maxLength={320} value={draft} error={problem}
+              onChange={event => { setDraft(event.target.value); }} />
+            {message === null ? null : <FormMessage tone={message.tone}>{message.text}</FormMessage>}
+            <div className="settings__actions">
+              <button className="button button--primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save address"}</button>
+              {report.address !== null && !report.verified ? (
+                <button className="button button--secondary" type="button" disabled={busy} onClick={() => void save(report.address ?? "")}>Send the link again</button>
+              ) : null}
+            </div>
+          </form>
+        </>
+      ) : null}
+    </section>
   );
 }
