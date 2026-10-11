@@ -101,6 +101,13 @@ interface AuthValue {
    * and answers `network`. Never renews for any status but 401.
    */
   withIdentity: <T>(call: (identityToken: string) => Promise<ApiResult<T>>) => Promise<ApiResult<T>>;
+  /**
+   * Read the account again — its companies changed (D63: an invitation was
+   * accepted). Start Shift's Working for follows `account.memberships`, so
+   * the new company is offered at once. False when it could not be read;
+   * the account shown is then left as it was.
+   */
+  reloadAccount: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -387,6 +394,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return call(renewed);
   }, [renewIdentity]);
 
+  const reloadAccount = useCallback(async (): Promise<boolean> => {
+    const attempt = generation.current;
+    const state = await withIdentity(token => fetchAccount(token));
+    if (state.kind !== "ok" || attempt !== generation.current) return false;
+    setAccount({ user: state.value.user, memberships: state.value.memberships });
+    return true;
+  }, [withIdentity]);
+
   /** App start: read the device's capability and preference, then restore. */
   useEffect(() => {
     let cancelled = false;
@@ -501,11 +516,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       disableBiometricUnlock,
       chooseCompany,
       withIdentity,
+      reloadAccount,
     }),
     [
       logoutCleanupError, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
       biometricUnlockEnabled, signIn, signOut, unlock, enableBiometricUnlock,
-      disableBiometricUnlock, chooseCompany, withIdentity,
+      disableBiometricUnlock, chooseCompany, withIdentity, reloadAccount,
     ],
   );
 

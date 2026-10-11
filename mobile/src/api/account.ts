@@ -192,6 +192,49 @@ export function requestEmailVerification(identityToken: string): Promise<ApiResu
 }
 
 /**
+ * A company's invitation, as the driver sees it (D63): who invited, the
+ * names the company typed, and until when. Nothing else of the company.
+ */
+export interface DriverInvitation {
+  id: string;
+  companyName: string;
+  firstName: string;
+  lastName: string;
+  expiresAt: string;
+}
+
+function isDriverInvitation(value: unknown): value is DriverInvitation {
+  const r = record(value);
+  return r !== null && text(r["id"]) && typeof r["companyName"] === "string" && typeof r["firstName"] === "string"
+    && typeof r["lastName"] === "string" && text(r["expiresAt"]) && !Number.isNaN(Date.parse(String(r["expiresAt"])));
+}
+
+function isInvitationList(value: unknown): value is { invitations: DriverInvitation[] } {
+  const r = record(value);
+  return r !== null && Array.isArray(r["invitations"]) && r["invitations"].every(isDriverInvitation);
+}
+
+function isJoined(value: unknown): value is { membership: AccountMembership } {
+  const r = record(value);
+  return r !== null && isAccountMembership(r["membership"]);
+}
+
+/** The open invitations to the account's VERIFIED email — `403 EMAIL_NOT_VERIFIED` until it is (D63). */
+export function listInvitations(identityToken: string): Promise<ApiResult<{ invitations: DriverInvitation[] }>> {
+  return checked(getJson<unknown>("/driver/invitations", identityToken), isInvitationList);
+}
+
+/** Accept: the server creates (or reactivates) the membership and answers it. */
+export function acceptInvitation(identityToken: string, id: string): Promise<ApiResult<{ membership: AccountMembership }>> {
+  return checked(postEmpty(`/driver/invitations/${encodeURIComponent(id)}/accept`, identityToken), isJoined);
+}
+
+/** Decline: no membership; the company sees Declined (owner decision, 2026-10-11). */
+export function declineInvitation(identityToken: string, id: string): Promise<ApiResult<unknown>> {
+  return postEmpty(`/driver/invitations/${encodeURIComponent(id)}/decline`, identityToken);
+}
+
+/**
  * Revoke this device's Session server-side.
  *
  * No body: the session revoked is the one the token names. A logout that
