@@ -156,7 +156,7 @@ test("DL2. opening it goes through the normal confirmation: verified, Company, i
 
   const confirmed = await confirm(link);
   assert.equal(confirmed.statusCode, 200);
-  assert.deepEqual(confirmed.body, { companyRegistered: true });
+  assert.deepEqual(confirmed.body, { companyRegistered: true, accountKind: "company" });
   const user = await account(email);
   assert.notEqual(user.emailVerifiedAt, null);
   const memberships = await prisma.companyMembership.findMany({ where: { userId: user.id }, include: { company: true } });

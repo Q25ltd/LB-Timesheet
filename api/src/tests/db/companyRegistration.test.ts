@@ -305,7 +305,7 @@ test("CV1. the link completes the registration in one act: email verified, Compa
 
   const res = await confirm(token);
   assert.equal(res.statusCode, 200, `the link completes it — got ${res.raw}`);
-  assert.deepEqual(res.body, { companyRegistered: true });
+  assert.deepEqual(res.body, { companyRegistered: true, accountKind: "company" });
 
   assert.notEqual((await companyAccount(email)).emailVerifiedAt, null);
   const memberships = await membershipsOf(account.id);
@@ -437,7 +437,7 @@ test("CV7. a DRIVER account's verification link confirms its email and creates N
 
   const res = await confirm(verificationTokenSentTo(email));
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { companyRegistered: false });
+  assert.deepEqual(res.body, { companyRegistered: false, accountKind: "driver" });
   assert.notEqual((await prisma.user.findUniqueOrThrow({ where: { id: driver.userId } })).emailVerifiedAt, null);
   assert.equal(await prisma.companyMembership.count({ where: { userId: driver.userId } }), 0);
 });

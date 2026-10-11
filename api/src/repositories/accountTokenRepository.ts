@@ -45,6 +45,7 @@ interface AccountTokenTransaction {
       where: { id: string; emailVerifiedAt: null };
       data: { emailVerifiedAt: Date };
     }): Promise<{ count: number }>;
+    findUnique(args: { where: { id: string }; select: { accountKind: true } }): Promise<{ accountKind: AccountKind } | null>;
   };
   pendingCompanyRegistration: {
     findUnique(args: { where: { userId_accountKind: { userId: string; accountKind: AccountKind } } }): Promise<{ id: string; companyName: string; timezone: string } | null>;
@@ -63,6 +64,12 @@ interface AccountTokenTransaction {
 /** What a redeemed verification link did: confirmed the email, and — for a company registration — created the company. */
 export interface EmailVerificationRedemption {
   companyRegistered: boolean;
+  /**
+   * Which kind of account the link confirmed (D63): the page a DRIVER lands
+   * on sends them back to the app, never to company sign-in. Told only to
+   * whoever holds the emailed token — the mailbox's owner.
+   */
+  accountKind: AccountKind;
 }
 
 export interface AccountTokenDatabase {
@@ -149,13 +156,15 @@ export function accountTokenRepository(db: AccountTokenDatabase) {
           where: { id: row.userId, emailVerifiedAt: null },
           data:  { emailVerifiedAt: now },
         });
+        const account = await tx.user.findUnique({ where: { id: row.userId }, select: { accountKind: true } });
+        if (account === null) throw new Error("a verification token outlived its account");
 
         // Only a COMPANY account can hold one (composite FK + CHECK), so a
         // driver account's link only ever confirms its email.
         const pending = await tx.pendingCompanyRegistration.findUnique({
           where: { userId_accountKind: { userId: row.userId, accountKind: "company" } },
         });
-        if (pending === null) return { companyRegistered: false };
+        if (pending === null) return { companyRegistered: false, accountKind: account.accountKind };
 
         const company = await tx.company.create({ data: { name: pending.companyName, timezone: pending.timezone } });
         await tx.companyMembership.create({
@@ -164,7 +173,7 @@ export function accountTokenRepository(db: AccountTokenDatabase) {
         // Exactly this row, or the whole completion is undone.
         const removed = await tx.pendingCompanyRegistration.deleteMany({ where: { id: pending.id } });
         if (removed.count !== 1) throw new Error("the pending company registration changed during its completion");
-        return { companyRegistered: true };
+        return { companyRegistered: true, accountKind: account.accountKind };
       });
     },
   };

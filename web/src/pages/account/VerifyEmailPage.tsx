@@ -6,7 +6,7 @@ import { useLinkToken } from "../../auth/useLinkToken";
 import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
 
-type Shown = { outcome: PublicOutcome; companyRegistered: boolean } | null;
+type Shown = { outcome: PublicOutcome; companyRegistered: boolean; driverAccount: boolean } | null;
 
 /**
  * The emailed link (B4, D51). Opening it confirms the address — and, for a
@@ -15,7 +15,8 @@ type Shown = { outcome: PublicOutcome; companyRegistered: boolean } | null;
  * every refused link (used, expired, superseded, tampered) is one message.
  *
  * Signing in is NOT automatic: a browser still signed in to the registration
- * continues to its account; any other is sent to sign in.
+ * continues to its account; any other is sent to sign in. A DRIVER's link
+ * (D63) sends them back to the app — the website has no driver sign-in.
  */
 export function VerifyEmailPage() {
   const auth = useAuth();
@@ -30,7 +31,7 @@ export function VerifyEmailPage() {
     if (token === undefined || sent.current) return;
     sent.current = true;
     if (token === null) {
-      setShown({ outcome: "invalid-link", companyRegistered: false });
+      setShown({ outcome: "invalid-link", companyRegistered: false, driverAccount: false });
       return;
     }
     void confirmEmail(token).then(setShown);
@@ -70,6 +71,18 @@ export function VerifyEmailPage() {
     );
   }
 
+  if (shown.outcome === "done" && shown.driverAccount) {
+    return (
+      <AuthCard
+        title="Your email address is confirmed"
+        intro="Thank you — this address is confirmed. Go back to the LogisticBay Timesheets app to carry on."
+        footer={home}
+      >
+        <p className="verify__line">You can close this page.</p>
+      </AuthCard>
+    );
+  }
+
   if (shown.outcome === "done") {
     return (
       <AuthCard title="Your email address is confirmed" intro="Thank you — this address is confirmed." footer={home}>
@@ -82,7 +95,7 @@ export function VerifyEmailPage() {
     return (
       <AuthCard
         title="This link has expired or was already used"
-        intro="Each link works once, for 24 hours, and a newer link replaces an older one. Sign in to your company account to send a new link."
+        intro="Each link works once, for 24 hours, and a newer link replaces an older one. Sign in to your company account to send a new link — or, if you are a driver, ask for a new one in the LogisticBay Timesheets app."
         footer={home}
       >
         <Link className="button button--primary button--large verify__next" to={signedIn ? PATHS.account : PATHS.login}>

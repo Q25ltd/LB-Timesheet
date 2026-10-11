@@ -17,10 +17,10 @@ function outcome(result: ApiResult<unknown>): PublicOutcome {
 }
 
 /** Confirm an emailed link. For a company registration, confirming it completes it (D51). */
-export async function confirmEmail(token: string): Promise<{ outcome: PublicOutcome; companyRegistered: boolean }> {
+export async function confirmEmail(token: string): Promise<{ outcome: PublicOutcome; companyRegistered: boolean; driverAccount: boolean }> {
   const result = await apiRequest("/auth/email-verification/confirm", { body: { token } }, parseConfirmation);
-  if (result.kind === "ok") return { outcome: "done", companyRegistered: result.value.companyRegistered };
-  return { outcome: outcome(result), companyRegistered: false };
+  if (result.kind === "ok") return { outcome: "done", ...result.value };
+  return { outcome: outcome(result), companyRegistered: false, driverAccount: false };
 }
 
 /** Always answered the same way by the API, whether or not the address has an account. */

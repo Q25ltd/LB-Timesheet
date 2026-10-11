@@ -128,10 +128,18 @@ export function parseAccount(value: unknown): Account | null {
 }
 
 /** What confirming an emailed link did (D51): whether it completed a company registration. */
-export function parseConfirmation(value: unknown): { companyRegistered: boolean } | null {
+/**
+ * The confirmed link's answer. `accountKind` (D63) says whether a DRIVER
+ * confirmed — absent from an API deployed before it, which only company
+ * accounts used, so absent reads as a company's.
+ */
+export function parseConfirmation(value: unknown): { companyRegistered: boolean; driverAccount: boolean } | null {
   if (!isRecord(value)) return null;
   const companyRegistered = value["companyRegistered"];
-  return typeof companyRegistered === "boolean" ? { companyRegistered } : null;
+  const accountKind = value["accountKind"];
+  if (typeof companyRegistered !== "boolean") return null;
+  if (accountKind !== undefined && accountKind !== "driver" && accountKind !== "company") return null;
+  return { companyRegistered, driverAccount: accountKind === "driver" };
 }
 
 export function parseCompanySelection(value: unknown): CompanySelection | null {

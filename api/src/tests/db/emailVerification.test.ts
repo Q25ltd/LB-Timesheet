@@ -319,3 +319,18 @@ test("V10. a token of ANOTHER purpose cannot verify an email, even when live", a
     SELECT "consumedAt" IS NOT NULL AS consumed FROM "AccountToken" WHERE "userId" = ${account.userId} AND purpose = 'password_reset'`;
   assert.equal(reset[0]?.consumed, false, "and it is not consumed by the attempt");
 });
+
+test("V11. the confirmation says WHICH kind of account it confirmed — so a driver is sent back to the app, never to company sign-in (D63) — and nothing else", async () => {
+  const email = freshEmail();
+  const registered = await inject({ url: "/auth/register", origin: false, payload: { firstName: "Mo", lastName: "Bile", email, password: PASSWORD } });
+  assert.equal(registered.statusCode, 201);
+  await inject({ url: "/auth/email-verification", token: stringField(registered.body, "identityToken"), origin: false });
+
+  const driver = await confirm(tokenSentTo(email));
+  assert.equal(driver.statusCode, 200, `got ${driver.raw}`);
+  assert.deepEqual(driver.body, { companyRegistered: false, accountKind: "driver" });
+
+  const company = await webRegistered();
+  const companyConfirmed = await confirm(company.token);
+  assert.deepEqual(companyConfirmed.body, { companyRegistered: true, accountKind: "company" });
+});

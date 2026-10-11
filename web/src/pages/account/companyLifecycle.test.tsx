@@ -190,6 +190,35 @@ describe("the emailed link", () => {
     await screen.findByRole("heading", { level: 1, name: "Your email address is confirmed" });
   });
 
+  test("a DRIVER's link (D63) says it is confirmed and sends them back to the app — never to company sign-in", async () => {
+    api.on("POST /auth/email-verification/confirm", { status: 200, body: { companyRegistered: false, accountKind: "driver" } });
+    renderRoute(`${PATHS.verifyEmail}#token=tok_ok`);
+    await screen.findByRole("heading", { level: 1, name: "Your email address is confirmed" });
+    expect(main().textContent).toMatch(/go back to the LogisticBay Timesheets app/i);
+    expect(within(main()).queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(within(main()).queryByRole("link", { name: "Continue" })).toBeNull();
+  });
+
+  test("an answer from an API that does not yet name the account kind is read as before — a company's", async () => {
+    api.on("POST /auth/email-verification/confirm", { status: 200, body: { companyRegistered: false } });
+    renderRoute(`${PATHS.verifyEmail}#token=tok_ok`);
+    await screen.findByRole("heading", { level: 1, name: "Your email address is confirmed" });
+    expect(within(main()).getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe(PATHS.login);
+  });
+
+  test("an answer naming an account kind the website does not know is malformed — never read as a confirmation", async () => {
+    api.on("POST /auth/email-verification/confirm", { status: 200, body: { companyRegistered: false, accountKind: "admin" } });
+    renderRoute(`${PATHS.verifyEmail}#token=tok_ok`);
+    await screen.findByRole("heading", { level: 1, name: "We could not confirm your email just now" });
+  });
+
+  test("an expired link tells a driver to ask the app for a new one, and a company to sign in", async () => {
+    api.on("POST /auth/email-verification/confirm", { status: 400, body: { error: "This link is invalid or has expired", code: "TOKEN_INVALID" } });
+    renderRoute(`${PATHS.verifyEmail}#token=tok_old`);
+    await screen.findByRole("heading", { level: 1, name: "This link has expired or was already used" });
+    expect(main().textContent).toMatch(/LogisticBay Timesheets app/i);
+  });
+
   test("an invalid, used or expired link is one honest message, pointing at a new link", async () => {
     api.on("POST /auth/email-verification/confirm", { status: 400, body: { error: "This link is invalid or has expired", code: "TOKEN_INVALID" } });
     renderRoute(`${PATHS.verifyEmail}#token=tok_old`);
