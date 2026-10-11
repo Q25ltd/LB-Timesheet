@@ -233,6 +233,17 @@ clients" below. **The driver's daily
 "login" is a biometric unlock, not an email-and-password screen.** Do not
 build a credentials form for every morning.
 
+**Renewal mid-session on the phone (D64, 2026-10-10).** The phone's identity
+token lives 15 minutes and was only minted at sign-in and start-up restore.
+An identity-authenticated call that the server answers `401` renews it ONCE
+through this same `/auth/refresh` — one renewal at a time, queued with
+sign-in, restore and sign-out, the stored secret replaced before anything
+uses the new token — and is retried once. Exactly as restore: the server's
+`401` to the secret signs the driver out (F-34); any other failure keeps the
+secret and signs nobody out; a sign-out while a renewal is in flight wins,
+and nothing is restored. No server change, nothing new stored, and the
+renewal grants identity only — never tenant authority.
+
 **Reconciled 2026-09-11 (D26).** Earlier wording here said "not a server round
 trip", and that must NOT be read as permission to trust a local unlock. A
 biometric success grants permission to USE the stored refresh credential; the

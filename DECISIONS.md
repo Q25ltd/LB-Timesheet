@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-10 (D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
+> Last updated: 2026-10-10 (D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -2480,3 +2480,27 @@ driver's list, accept and decline API; (4) the website's Drivers page;
 **Not decided here:** which name a submitted timesheet prints when the
 company's typed name and the driver's account name differ (decided with
 submission); invitation bounce handling; the removal screen.
+
+### D64 — The app confirms the driver's email, renews its token, and Home may read the account's own status (2026-10-10)
+
+Owner decisions taken while building D63's stage 2.
+
+- **Driver email confirmation in the app.** Phone registration still sends
+  no email (D47). The app asks for the confirmation email through the
+  existing identity-posture `POST /auth/email-verification` and re-reads
+  `GET /auth/me` when the driver says they have confirmed it. Home shows a
+  card only while the address is unconfirmed; Settings always says where it
+  stands. The emailed link opens the website, whose confirmation answer now
+  also names the account's kind (`accountKind`), so a DRIVER is told to go
+  back to the app and is never sent to company sign-in. The answer is told
+  only to the holder of the emailed token.
+- **Renew once and retry** (approved over a full restore on expiry, or a
+  separate redesign). An identity call answered `401` renews the identity
+  token once through `/auth/refresh` and is retried once — the website's
+  existing behaviour, now on the phone. AUTH.md, "Refresh token", has the
+  rules.
+- **Home's server rule, narrowed.** Was: Home asks the server nothing. Now:
+  Home shows no server data about shifts, timesheets or mileage — what it
+  lists is still the phone's own — and asks the server only for the
+  account's own status (here, whether the email is confirmed; D63's stage 5,
+  invitations). The tests assert exactly that list.

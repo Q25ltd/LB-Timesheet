@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-10-11 — D63 stage 2: drivers confirm their email in the app
+
+**Two problems found before building**, both decided by the owner (D64):
+
+- **The app could not renew its token.** The identity token lives 15
+  minutes and was only minted at sign-in and start-up, because nothing in
+  the app had called the server mid-session. Owner: renew once and retry,
+  as the website already does.
+- **Home's "asks the server nothing" rule** (load-bearing in two tests)
+  would be broken by the card. Owner: narrow it — no server data about
+  shifts, timesheets or mileage; only the account's own status.
+
+**Built.**
+
+- **App:**
+  - `withIdentity` in `AuthContext`: renews on 401 only, once, single
+    flight, queued with the other credential transitions; a refused secret
+    signs out; other failures keep it; a sign-out mid-renewal wins.
+  - `useEmailConfirmation` and the `EmailConfirmation` card, with optional
+    slots in Home (`notice`) and Settings (`emailStatus`).
+  - `fetchEmailVerification` / `requestEmailVerification` in the API client.
+- **Server:** the confirmation answer names `accountKind`.
+- **Website:** a driver's confirmation says "go back to the app" with no
+  company sign-in; an unknown kind is treated as malformed; an older API's
+  answer reads as a company's; the expired-link copy mentions the app.
+- **Contract assertions:** three exact-body assertions (CV1, CV7, the dev
+  email link) were updated to the new answer, so they still assert the
+  whole body.
+
+**Found and fixed while building:**
+- The identity ref was synced by an effect. A screen mounted by the sign-in
+  runs its effects first, so the card's first read found no token. The
+  token is now set together with the state (`adoptIdentity`).
+- My new tests un-mounted without `await`. This version of the testing
+  library un-mounts asynchronously, which corrupted the next render; the
+  repo's own tests already await it.
+
+**Evidence:**
+- RED on all four fronts first.
+- GREEN:
+  - renewal 10/10, card 7/7;
+  - website 21 in its file, 143 in total;
+  - server email tests 36 (V11 included).
+- Mutation: 15 mutants. 14 were killed — each by the test written for it,
+  confirmed by name. One is equivalent: a second sign-out check backs up
+  the first.
+  - One website kill first looked real but was a load timeout. A new test
+    (an unknown account kind is malformed) now kills it.
+- Gate, exit 0 in one run: api 244, mobile 1465 + 7 restart checks,
+  web 143, db 307, backup 12, build and start smoke.
+
+**Next (stage 3, awaiting approval):** the driver's invitation list, accept
+and decline API.
+
+---
+
 ## 2026-10-10 — D63 stage 1: a company adds its drivers (invitation API)
 
 Owner-approved design recorded as D63 (`de334a0`), then stage 1 only.
