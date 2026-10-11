@@ -4,6 +4,61 @@
 
 ---
 
+## 2026-10-11 — F-38: the app's bodyless requests were refused; sign-out never revoked its server session
+
+**Reported:** Expo Go said "The email could not be sent. Try again shortly."
+
+**Diagnosed read-only.**
+- Expo Go talks to the local API: there is no `EXPO_PUBLIC_API_URL`, and
+  21 live sessions for the account sit in the local database.
+- The local API writes to the outbox (development); no confirmation token
+  was ever issued for the account. Suppression and rate limits are ruled
+  out.
+- The same bodyless POST to the local and production API answers 400 with
+  `content-type: application/json` and 204 without it.
+- The app's client set that header on every request; Fastify refuses it
+  with an empty body (`FST_ERR_CTP_EMPTY_JSON_BODY`). The app shows its
+  generic message for a 400.
+
+So every bodyless POST from the app failed:
+- the D63 confirmation email, accept and decline;
+- **sign-out's server revocation, since the first logout build — silently**,
+  because its outcome was ignored (F-30's accepted path). That explains the
+  21 live sessions.
+
+**Fixed (owner-approved option A).**
+- The client sends `Content-Type` only with a JSON body, as the website's
+  already did; the API's strict parsing is unchanged.
+- Sign-out now keeps the server's answer (`serverSignOut`): the phone is
+  signed out at once and its secret deleted regardless. An unconfirmed
+  revocation (refused, failed, unreachable, or the request threw) is said
+  on Sign-in, with the advice to change the password. Nothing is retained
+  to retry with.
+- A token-less sign-out — a D61 cleanup retry — leaves the recorded outcome
+  alone (found by mutant x7, which survived the first pass).
+
+**Evidence.**
+- RED: 7 bodyless header cases and 6 sign-out-reporting cases failed.
+- GREEN: header 9/9, sign-out 8/8.
+- Real Fastify parsing (`mobileRequestShape.test.ts`, a real socket, the
+  real app and database): the old shape is refused and nothing changes; the
+  new shape revokes the session, issues the token, joins and declines —
+  4/4.
+- Mutation: 7 mutants, all killed after SO5/SO6 were added.
+- Gate: every stage green — api 246, mobile 1492 + 7, web 160, db 322,
+  backup 12, build, smoke. Under machine load (FamFusion `next-server` at
+  ~117%, load average up to 15) the parallel database stage timed out
+  bcrypt-heavy files at 60 s twice, the second time only the untouched
+  `passwordRecovery`; on a fresh database, file by file, it passed 322/322.
+  No limit was raised.
+
+**F-38 is PARTIAL:** sessions already left live by earlier sign-outs —
+locally and in production — stay valid until they expire. Revoking them is
+a separate owner decision. Nothing on Railway, Vercel, SES, the databases or
+any session was changed.
+
+---
+
 ## 2026-10-11 — The day's housekeeping: production, CI and the local database
 
 - **Production carries all of D63.** Railway deployed every push after CI
