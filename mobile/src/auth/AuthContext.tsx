@@ -68,6 +68,8 @@ export type RestoreOutcome =
 
 interface AuthValue {
   logoutCleanupError: string | null;
+  /** The server's side of the last sign-out (F-38); the local side never waits for it. */
+  serverSignOut: ServerSignOut;
   registerAccessRevoker: (revoke: () => void) => () => void;
   status: AuthStatus;
   account: AuthenticatedState | null;
@@ -127,10 +129,13 @@ const RENEWAL_UNAVAILABLE: { kind: "network"; message: string; detail: null } = 
 
 const NO_BIOMETRICS: BiometricCapability = { available: false, label: "biometrics" };
 
-/** F-30: an unconfirmed server revocation never undoes the local sign-out. */
-function serverRevocationUnconfirmed(): undefined {
-  return undefined;
-}
+/**
+ * Whether the SERVER revoked the session the last sign-out ended (F-38):
+ * `pending` while asked, `confirmed` on its 2xx, `unconfirmed` otherwise —
+ * refused, failed, unreachable, or no token to ask with. `null` before any
+ * sign-out, and again after the next sign-in.
+ */
+export type ServerSignOut = "pending" | "confirmed" | "unconfirmed" | null;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("restoring");
@@ -165,6 +170,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const revokers = useRef(new Set<() => void>());
   const transitions = useRef<Promise<unknown>>(Promise.resolve());
   const [logoutCleanupError, setLogoutCleanupError] = useState<string | null>(null);
+  const [serverSignOut, setServerSignOut] = useState<ServerSignOut>(null);
+  /** Which sign-out an answer belongs to: a later sign-in or sign-out makes an earlier answer moot. */
+  const signOuts = useRef(0);
   const cleanupRequired = useRef(false);
   const renderedGeneration = generation.current;
   const registerAccessRevoker = useCallback((revoke: () => void) => {
@@ -193,6 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (authenticated: AuthenticatedAccount) => {
+    signOuts.current += 1;
+    setServerSignOut(null);
     endAccess();
     const attempt = generation.current;
     const commit = async () => {
@@ -437,10 +447,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try { markLogoutPending(); } catch { /* Cleanup still attempts both native removals. */ }
     const result = transitions.current.then(cleanup, cleanup);
     transitions.current = result.then(() => undefined, () => undefined);
-    // The captured token can revoke the server session after local access ends.
-    // Its outcome is deliberately not acted on: local access has already ended,
-    // and an unreachable server leaves the Session to expire (F-30, accepted).
-    if (token !== null) void logoutSession(token).catch(serverRevocationUnconfirmed);
+    // The captured token can revoke the server session after local access ends
+    // (F-38). Its outcome is KEPT and shown — never taken as done — but the
+    // phone is already signed out and nothing is retained to retry with: an
+    // unconfirmed revocation leaves the Session to expire (F-30).
+    // With no token there is no session of this sign-out to revoke — a retry
+    // of a failed cleanup (D61) — so the outcome already recorded stands.
+    if (token !== null) {
+      signOuts.current += 1;
+      const asked = signOuts.current;
+      const settle = (outcome: "confirmed" | "unconfirmed") => { if (asked === signOuts.current) setServerSignOut(outcome); };
+      setServerSignOut("pending");
+      void logoutSession(token).then(
+        revoked => { settle(revoked.kind === "ok" ? "confirmed" : "unconfirmed"); },
+        () => { settle("unconfirmed"); },
+      );
+    }
     await result;
   }, [identityToken, cleanup, endAccess]);
 
@@ -500,6 +522,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthValue>(
     () => ({
       logoutCleanupError,
+      serverSignOut,
       registerAccessRevoker,
       status,
       account,
@@ -519,7 +542,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       reloadAccount,
     }),
     [
-      logoutCleanupError, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
+      logoutCleanupError, serverSignOut, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
       biometricUnlockEnabled, signIn, signOut, unlock, enableBiometricUnlock,
       disableBiometricUnlock, chooseCompany, withIdentity, reloadAccount,
     ],

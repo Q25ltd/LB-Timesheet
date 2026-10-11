@@ -69,6 +69,8 @@ import { validateSignIn, type SignInFieldErrors, type SignInFields } from "./sig
 
 interface SignInScreenProps {
   logoutCleanup?: { message: string; retry: () => Promise<void> };
+  /** The last sign-out was not confirmed by the server (F-38): its session may still be live there. */
+  serverSignOutUnconfirmed?: boolean;
   /** Called with the server's response once sign-in succeeds. */
   onSignedIn: (account: AuthenticatedAccount) => Promise<void> | void;
   /** Navigate to registration. */
@@ -104,7 +106,7 @@ function stillShownAbove(): undefined {
   return undefined;
 }
 
-export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock, logoutCleanup }: SignInScreenProps) {
+export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock, logoutCleanup, serverSignOutUnconfirmed = false }: SignInScreenProps) {
   const insets = useSafeAreaInsets();
   // The hero is the first thing to go: it is decoration, and the form is not.
   const { keyboardVisible, showHero } = useAuthLayout();
@@ -233,6 +235,11 @@ export function SignInScreen({ onSignedIn, onCreateAccount, biometricUnlock, log
             at the same absolute position as before. Only the lockup moves. */}
         <View style={signInStyles.lockupAtTop}>
           <BrandLockup />
+          {serverSignOutUnconfirmed ? (
+            <Text style={typography.error} testID="server-sign-out-unconfirmed" accessibilityLiveRegion="polite">
+              You are signed out on this phone, but the server could not confirm it, so your session there may still be active until it expires. If someone else may have this phone, sign in and change your password: that ends every other session.
+            </Text>
+          ) : null}
           {logoutCleanup !== undefined ? (
             <View accessibilityLiveRegion="assertive">
               <Text style={typography.error}>{logoutCleanup.message}</Text>
