@@ -185,21 +185,34 @@ test("the greeting carries one salutation, and it is one of exactly three", asyn
     .toContain(text(view, "greeting-salutation"));
 });
 
+/**
+ * What Home may ask the server (owner decision, 2026-10-11, narrowing the
+ * earlier "Home asks the server nothing"): ONLY the account's own status —
+ * `GET /auth/me`, for whether the email address is confirmed (D63). Never
+ * anything about shifts, timesheets or mileage, which Home shows from the
+ * phone or not at all.
+ */
+function onlyAccountStatusReads(fetchSpy: jest.SpyInstance): void {
+  const asked = fetchSpy.mock.calls.map(([input, init]: [unknown, RequestInit | undefined]) => `${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+  expect(asked.filter(request => request !== "GET /auth/me")).toEqual([]);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // B. Home invents nothing
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("Home makes NO network request — what it shows comes from the phone or from nowhere", async () => {
+test("Home asks the server NOTHING about shifts — what it shows comes from the phone or from nowhere; its one request is the account's own status", async () => {
   const fetchSpy = jest.spyOn(global, "fetch");
 
   const view = await homeSignedInAs(NERIJUS);
   expect(view.getByTestId("greeting-name")).toBeTruthy();
 
-  // The load-bearing assertion of this whole file. Home asks no server
-  // anything: its Recent Timesheets are the phone's own finished days
+  // The load-bearing assertion of this whole file. Home asks no server about
+  // shifts: its Recent Timesheets are the phone's own finished days
   // (`timesheetHistory.test.tsx`), and nothing else about shifts,
-  // submissions or mileage can be shown without being fabricated.
-  expect(fetchSpy).not.toHaveBeenCalled();
+  // submissions or mileage can be shown without being fabricated. The one
+  // request allowed is the account's own status (D63's email confirmation).
+  onlyAccountStatusReads(fetchSpy);
 });
 
 test("Home does NOT claim there is no active shift — it cannot prove that", async () => {
@@ -310,9 +323,9 @@ test("pressing Start Shift opens the workflow and sends NOTHING", async () => {
   await act(async () => { await fireEvent.press(view.getByTestId("start-shift")); });
 
   expect(mockRouter.navigate).toHaveBeenCalledWith("/start-shift");
-  // Home still asks the server nothing, and neither does opening the workflow:
-  // the day is created locally and shared explicitly later.
-  expect(fetchSpy).not.toHaveBeenCalled();
+  // Home asks the server nothing about shifts, and neither does opening the
+  // workflow: the day is created locally and shared explicitly later.
+  onlyAccountStatusReads(fetchSpy);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

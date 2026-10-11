@@ -7,6 +7,7 @@
  */
 import { router } from "expo-router";
 import { SettingsScreen } from "../../../src/screens/SettingsScreen";
+import { EmailConfirmation } from "../../../src/components/EmailConfirmation";
 import { useAuth } from "../../../src/auth/AuthContext";
 
 /** A failed cleanup is shown, with its retry, on Sign-in (D61) — not dropped. */
@@ -32,6 +33,7 @@ export default function SettingsRoute() {
       biometricUnlockEnabled={biometricUnlockEnabled}
       onEnableBiometrics={enableBiometricUnlock}
       onDisableBiometrics={disableBiometricUnlock}
+      emailStatus={<EmailConfirmation variant="settings" />}
       // The auth gate redirects immediately. Cleanup errors remain visible
       // on Sign-in, where they can be retried without restoring the account.
       onSignOut={() => { void signOut().finally(() => { router.replace("/sign-in"); }).catch(cleanupShownOnSignIn); }}

@@ -42,11 +42,13 @@ interface SettingsScreenProps {
   onEnableBiometrics: () => Promise<boolean>;
   onDisableBiometrics: () => Promise<void>;
   onSignOut: () => void;
+  /** Where the account's email address stands (D63) — shown in Account, under the address. */
+  emailStatus?: React.ReactNode;
 }
 
 export function SettingsScreen({
   user, biometrics, biometricUnlockEnabled,
-  onEnableBiometrics, onDisableBiometrics, onSignOut,
+  onEnableBiometrics, onDisableBiometrics, onSignOut, emailStatus,
 }: SettingsScreenProps) {
   const [busy, setBusy] = useState(false);
 
@@ -64,7 +66,8 @@ export function SettingsScreen({
     <AppScreen title="Settings">
       <Section label="Account">
         <Row label="Name" value={`${user.firstName} ${user.lastName}`} valueTestID="account-name" />
-        <Row label="Email" value={user.email} valueTestID="account-email" last />
+        <Row label="Email" value={user.email} valueTestID="account-email" last={emailStatus === undefined} />
+        {emailStatus}
       </Section>
 
       <Section label="Security">

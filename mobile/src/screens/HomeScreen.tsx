@@ -39,6 +39,7 @@
  * is worked for happens ON that screen, and choosing a company there is a local
  * intention rather than an act of authority.
  */
+import type { ReactNode } from "react";
 import { View, Text, Image, ScrollView, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandLockup } from "../components/Brand";
@@ -70,6 +71,8 @@ interface HomeScreenProps {
   recent: readonly CompletedShift[] | "loading" | "unreadable";
   /** Opens one finished day, by its id. */
   onOpenTimesheet: (id: string) => void;
+  /** Something the driver should act on — the email confirmation card (D63) — shown between the date and the shift card. */
+  notice?: ReactNode;
 }
 
 /**
@@ -88,7 +91,7 @@ function initialsOf(user: AccountUser): string {
 }
 
 export function HomeScreen({
-  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift, recent, onOpenTimesheet,
+  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift, recent, onOpenTimesheet, notice,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
 
@@ -151,6 +154,8 @@ export function HomeScreen({
       </View>
 
       <Text style={styles.date} testID="today-date">{formatHomeDate(now)}</Text>
+
+      {notice}
 
       <View style={styles.shiftCard} testID="shift-card">
         {/* The photograph is the card's BACKGROUND, not a band above it: the

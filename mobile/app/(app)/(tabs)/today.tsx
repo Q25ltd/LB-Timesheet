@@ -11,6 +11,7 @@ import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { HomeScreen } from "../../../src/screens/HomeScreen";
 import { InterruptedRecovery } from "../../../src/components/InterruptedRecovery";
+import { EmailConfirmation } from "../../../src/components/EmailConfirmation";
 import { useAuth } from "../../../src/auth/AuthContext";
 import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShift } from "../../../src/shift/localShift";
@@ -64,6 +65,8 @@ export default function TodayRoute() {
       recent={recent}
       // By the day's id — never its date, employer or place in the list.
       onOpenTimesheet={id => { router.push({ pathname: "/timesheet", params: { id } }); }}
+      // D63: companies add drivers by email; invitations need it confirmed.
+      notice={<EmailConfirmation variant="home" />}
     />
     </>
   );

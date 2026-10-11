@@ -167,6 +167,30 @@ export function fetchAccount(identityToken: string): Promise<ApiResult<AccountSt
   return checked(getJson<unknown>("/auth/me", identityToken), isAccountState);
 }
 
+function isEmailVerification(value: unknown): value is EmailVerification {
+  const r = record(value);
+  return r !== null && typeof r["emailVerified"] === "boolean";
+}
+
+/** Whether the account has proved it owns its email address (D47) — what D63's invitations require. */
+export interface EmailVerification {
+  emailVerified: boolean;
+}
+
+/** Where the signed-in account's email address stands — read from `GET /auth/me`. */
+export function fetchEmailVerification(identityToken: string): Promise<ApiResult<EmailVerification>> {
+  return checked(getJson<unknown>("/auth/me", identityToken), isEmailVerification);
+}
+
+/**
+ * Ask for the confirmation email — to the account's OWN address, the only
+ * one this identity-posture route can send to (D47). 204 also when already
+ * confirmed, in which case nothing is sent.
+ */
+export function requestEmailVerification(identityToken: string): Promise<ApiResult<unknown>> {
+  return postEmpty("/auth/email-verification", identityToken);
+}
+
 /**
  * Revoke this device's Session server-side.
  *
