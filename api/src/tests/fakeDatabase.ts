@@ -27,7 +27,7 @@ export function emptyDatabase() {
       create:    refuse("shift.create"),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve(null) },
+    company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
     user: {
       findUnique: () => Promise.resolve(null),
       findFirst:  () => Promise.resolve(null),

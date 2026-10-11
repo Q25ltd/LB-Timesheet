@@ -81,15 +81,15 @@ function fill(fields: Record<string, string>) {
 }
 
 describe("reaching Drivers", () => {
-  test("DP1. Drivers is now a real place: a link in the company navigation, current on its page; Timesheets and Settings are still not available", async () => {
+  test("DP1. Drivers is now a real place: a link in the company navigation, current on its page; Timesheets is still not available", async () => {
     companyAdmin();
     await driversPage();
     const nav = screen.getByRole("navigation", { name: "Company" });
     const drivers = within(nav).getByRole("link", { name: /Drivers/ });
     expect(drivers.getAttribute("href")).toBe("/company/drivers");
     expect(drivers.getAttribute("aria-current")).toBe("page");
-    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home", "Drivers"]);
-    for (const name of ["Timesheets", "Settings"]) {
+    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home", "Drivers", "Settings"]);
+    for (const name of ["Timesheets"]) {
       const item = within(nav).getAllByRole("listitem").find(li => li.querySelector("[data-nav-label]")?.textContent === name);
       expect(item?.textContent, name).toMatch(/not available yet/i);
     }

@@ -7,11 +7,12 @@ import { PATHS } from "../../paths";
 import { AuthCard } from "./AuthCard";
 import { failureText } from "./failureText";
 import { isOfferedTimeZone, suggestedTimeZone, timeZoneGroups } from "./companyTimeZone";
+import { DISTANCE_UNITS, VOLUME_UNITS, isDistanceUnit, isVolumeUnit } from "../../units";
 
 /** The approved company-name rule (D51): trimmed, never empty, at most 200 characters. Not unique. */
 const COMPANY_NAME_MAX = 200;
 
-type FieldName = "companyName" | "timeZone" | "firstName" | "lastName" | "email" | "password" | "repeat";
+type FieldName = "companyName" | "timeZone" | "distanceUnit" | "volumeUnit" | "firstName" | "lastName" | "email" | "password" | "repeat";
 
 /**
  * Registering a COMPANY on LogisticBay Timesheets (D51): the company's
@@ -32,7 +33,7 @@ export function RegisterPage() {
   const zones = useMemo(timeZoneGroups, []);
   const [suggested] = useState(() => suggestedTimeZone(zones));
   const [form, setForm] = useState<Record<FieldName, string>>(() => ({
-    companyName: "", timeZone: suggested ?? "", firstName: "", lastName: "", email: "", password: "", repeat: "",
+    companyName: "", timeZone: suggested ?? "", distanceUnit: "", volumeUnit: "", firstName: "", lastName: "", email: "", password: "", repeat: "",
   }));
   const [problems, setProblems] = useState<Partial<Record<FieldName, string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
@@ -55,6 +56,11 @@ export function RegisterPage() {
     if (companyName === "") found.companyName = "Enter your company's name";
     else if (companyName.length > COMPANY_NAME_MAX) found.companyName = `Company name must be ${String(COMPANY_NAME_MAX)} characters or fewer`;
     if (!isOfferedTimeZone(form.timeZone, zones)) found.timeZone = "Choose your company's time zone";
+    // D66: both units are chosen — never defaulted, never guessed from the zone.
+    const distanceUnit = form.distanceUnit;
+    const volumeUnit = form.volumeUnit;
+    if (!isDistanceUnit(distanceUnit)) found.distanceUnit = "Choose the unit your vehicles' odometers show";
+    if (!isVolumeUnit(volumeUnit)) found.volumeUnit = "Choose the unit fuel is recorded in";
     if (form.firstName.trim() === "") found.firstName = "Enter the administrator's first name";
     if (form.lastName.trim() === "") found.lastName = "Enter the administrator's last name";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) found.email = "Enter a valid email address";
@@ -63,12 +69,14 @@ export function RegisterPage() {
     if (form.repeat !== form.password) found.repeat = "The passwords do not match";
     setProblems(found);
     setFailure(null);
-    if (Object.keys(found).length > 0) return;
+    if (Object.keys(found).length > 0 || !isDistanceUnit(distanceUnit) || !isVolumeUnit(volumeUnit)) return;
 
     setBusy(true);
     const outcome = await auth.registerCompany({
       companyName,
       timeZone:  form.timeZone,
+      distanceUnit,
+      volumeUnit,
       firstName: form.firstName.trim(),
       lastName:  form.lastName.trim(),
       email:     form.email.trim(),
@@ -95,7 +103,7 @@ export function RegisterPage() {
         {failure === null ? null : <FormMessage tone="error">{failure}</FormMessage>}
         <fieldset className="auth-section">
           <legend className="auth-section__legend">Company details</legend>
-          <p className="auth-section__hint">Your company&apos;s name, and the time zone it works in.</p>
+          <p className="auth-section__hint">Your company&apos;s name, the time zone it works in, and the units its timesheets are recorded in.</p>
           <div className="auth-section__fields">
             <Field label="Company name" name="companyName" autoComplete="organization" required maxLength={COMPANY_NAME_MAX}
               value={form.companyName} error={problems.companyName ?? null} onChange={event => update("companyName", event.target.value)} />
@@ -111,6 +119,20 @@ export function RegisterPage() {
                 </optgroup>
               ))}
             </SelectField>
+            <div className="auth-section__pair">
+              <SelectField label="Distance unit" name="distanceUnit" autoComplete="off" required
+                hint="What your vehicles' odometers show."
+                value={form.distanceUnit} error={problems.distanceUnit ?? null} onChange={event => update("distanceUnit", event.target.value)}>
+                <option value="" disabled>Choose a unit</option>
+                {DISTANCE_UNITS.map(unit => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+              </SelectField>
+              <SelectField label="Fuel unit" name="volumeUnit" autoComplete="off" required
+                hint="The unit fuel and AdBlue / DEF quantities are recorded in."
+                value={form.volumeUnit} error={problems.volumeUnit ?? null} onChange={event => update("volumeUnit", event.target.value)}>
+                <option value="" disabled>Choose a unit</option>
+                {VOLUME_UNITS.map(unit => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+              </SelectField>
+            </div>
           </div>
         </fieldset>
 

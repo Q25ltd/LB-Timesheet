@@ -36,7 +36,7 @@ const db = {
     create:    () => Promise.reject(new Error("shift.create is not part of this test")),
     findFirst: () => Promise.resolve(null),
   },
-  company: { findUnique: () => Promise.resolve(null) },
+  company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
   user: {
     findUnique: () => Promise.resolve(null),
     // Login's credential read. Declared because `AppDatabase` requires it;
@@ -134,6 +134,23 @@ test("an allowed origin's preflight for PATCH is granted — the company website
   assert.equal(res.headers["access-control-allow-origin"], ALLOWED);
   const methods = String(res.headers["access-control-allow-methods"] ?? "").split(",").map(m => m.trim());
   assert.ok(methods.includes("PATCH"), `PATCH must be an allowed method — got "${methods.join(",")}"`);
+  await app.close();
+});
+
+test("an allowed origin's preflight for PUT is granted — the company website sets its units with it (D66)", async () => {
+  const app = await buildApp(db);
+  const res = await app.inject({
+    method: "OPTIONS",
+    url: "/company/settings/units",
+    headers: {
+      origin: ALLOWED,
+      "access-control-request-method": "PUT",
+      "access-control-request-headers": "authorization,content-type",
+    },
+  });
+  assert.equal(res.headers["access-control-allow-origin"], ALLOWED);
+  const methods = String(res.headers["access-control-allow-methods"] ?? "").split(",").map(m => m.trim());
+  assert.ok(methods.includes("PUT"), `PUT must be an allowed method — got "${methods.join(",")}"`);
   await app.close();
 });
 

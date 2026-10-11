@@ -21,7 +21,7 @@
  *
  * Delegates are named individually, so widening this is a visible act.
  */
-import type { AccountKind, AccountTokenPurpose, MembershipRole } from "../generated/enums.js";
+import type { AccountKind, AccountTokenPurpose, DistanceUnit, MembershipRole, VolumeUnit } from "../generated/enums.js";
 
 interface AccountTokenRow {
   userId: string;
@@ -48,11 +48,13 @@ interface AccountTokenTransaction {
     findUnique(args: { where: { id: string }; select: { accountKind: true } }): Promise<{ accountKind: AccountKind } | null>;
   };
   pendingCompanyRegistration: {
-    findUnique(args: { where: { userId_accountKind: { userId: string; accountKind: AccountKind } } }): Promise<{ id: string; companyName: string; timezone: string } | null>;
+    findUnique(args: { where: { userId_accountKind: { userId: string; accountKind: AccountKind } } }): Promise<{
+      id: string; companyName: string; timezone: string; distanceUnit: DistanceUnit | null; volumeUnit: VolumeUnit | null;
+    } | null>;
     deleteMany(args: { where: { id: string } }): Promise<{ count: number }>;
   };
   company: {
-    create(args: { data: { name: string; timezone: string } }): Promise<{ id: string }>;
+    create(args: { data: { name: string; timezone: string; distanceUnit: DistanceUnit | null; volumeUnit: VolumeUnit | null } }): Promise<{ id: string }>;
   };
   companyMembership: {
     create(args: {
@@ -166,7 +168,11 @@ export function accountTokenRepository(db: AccountTokenDatabase) {
         });
         if (pending === null) return { companyRegistered: false, accountKind: account.accountKind };
 
-        const company = await tx.company.create({ data: { name: pending.companyName, timezone: pending.timezone } });
+        // The units it chose (D66) — null only for a registration made before
+        // units existed, which the company is then asked to choose; never guessed.
+        const company = await tx.company.create({
+          data: { name: pending.companyName, timezone: pending.timezone, distanceUnit: pending.distanceUnit, volumeUnit: pending.volumeUnit },
+        });
         await tx.companyMembership.create({
           data: { companyId: company.id, userId: row.userId, accountKind: "company", role: "admin", active: true },
         });

@@ -12,6 +12,7 @@ import { VerifyEmailPage } from "./pages/account/VerifyEmailPage";
 import { CompanyHome } from "./pages/company/CompanyHome";
 import { CompanyShell } from "./pages/company/CompanyShell";
 import { DriversPage } from "./pages/company/DriversPage";
+import { SettingsPage } from "./pages/company/SettingsPage";
 import "./styles/auth.css";
 
 /**
@@ -45,6 +46,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <CompanyHome /> },
       { path: "drivers", element: <DriversPage /> },
+      { path: "settings", element: <SettingsPage /> },
     ],
   },
 ];

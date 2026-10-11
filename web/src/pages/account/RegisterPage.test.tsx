@@ -62,6 +62,11 @@ function fillAdministrator() {
   fill("Repeat password", "correct-horse-battery-staple");
 }
 
+function chooseUnits(distance = "kilometre", volume = "litre") {
+  fill("Distance unit", distance);
+  fill("Fuel unit", volume);
+}
+
 function submit() {
   fireEvent.click(screen.getByRole("button", { name: "Register company" }));
 }
@@ -121,6 +126,7 @@ describe("company name rules", () => {
   test("required: an empty company name is refused with a message on the field", () => {
     renderRoute(PATHS.register);
     fillAdministrator();
+    chooseUnits();
     submit();
     expect(within(group("Company details")).getByText("Enter your company's name")).toBeTruthy();
     expect(screen.getByLabelText("Company name").getAttribute("aria-invalid")).toBe("true");
@@ -130,6 +136,7 @@ describe("company name rules", () => {
     renderRoute(PATHS.register);
     fill("Company name", "   \t ");
     fillAdministrator();
+    chooseUnits();
     submit();
     expect(screen.getByText("Enter your company's name")).toBeTruthy();
   });
@@ -138,6 +145,7 @@ describe("company name rules", () => {
     renderRoute(PATHS.register);
     fill("Company name", "x".repeat(201));
     fillAdministrator();
+    chooseUnits();
     submit();
     expect(screen.getByText("Company name must be 200 characters or fewer")).toBeTruthy();
 
@@ -151,6 +159,7 @@ describe("company name rules", () => {
     renderRoute(PATHS.register);
     fill("Company name", "  Acme  Road Haulage  ");
     fillAdministrator();
+    chooseUnits();
     submit();
     expect(screen.getByLabelText("Company name").getAttribute("aria-invalid")).toBeNull();
   });
@@ -161,6 +170,7 @@ describe("registering (D51)", () => {
     fill("Company name", "  Kuizinas Haulage Ltd  ");
     fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
     fillAdministrator();
+    chooseUnits();
   }
 
   test("the temporary 'not open yet' behaviour is gone", () => {
@@ -180,7 +190,7 @@ describe("registering (D51)", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.credentials).toBe("include");
     expect(sent[0]?.body).toEqual({
-      companyName: "Kuizinas Haulage Ltd", timeZone: "America/Chicago",
+      companyName: "Kuizinas Haulage Ltd", timeZone: "America/Chicago", distanceUnit: "kilometre", volumeUnit: "litre",
       firstName: "Nerijus", lastName: "Kuizinas", email: "owner@example.com", password: "correct-horse-battery-staple",
     });
     expect(api.calls.some(c => c.path === "/auth/register" || c.path === "/companies")).toBe(false);
@@ -262,12 +272,44 @@ describe("the company's time zone (D53)", () => {
     expect(timeZone().value).toBe("America/Chicago");
   });
 
+  test("D66: the company MUST choose both units — none is preselected or guessed, and nothing is sent until it has", async () => {
+    renderRoute(PATHS.register);
+    const distance = within(group("Company details")).getByLabelText<HTMLSelectElement>("Distance unit");
+    const volume = within(group("Company details")).getByLabelText<HTMLSelectElement>("Fuel unit");
+    expect([distance.value, volume.value]).toEqual(["", ""]);
+    expect([...distance.options].map(o => o.value).filter(v => v !== "")).toEqual(["kilometre", "mile"]);
+    expect([...volume.options].map(o => o.value).filter(v => v !== "")).toEqual(["litre", "us_gallon", "imperial_gallon"]);
+
+    fill("Company name", "Unitless Freight");
+    fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
+    fillAdministrator();
+    submit();
+
+    expect(await screen.findByText("Choose the unit your vehicles' odometers show")).toBeTruthy();
+    expect(screen.getByText("Choose the unit fuel is recorded in")).toBeTruthy();
+    expect(distance.getAttribute("aria-invalid")).toBe("true");
+    expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(false);
+  });
+
+  test("D66: the units chosen are what is sent — miles and US gallons as readily as kilometres and litres", async () => {
+    api.on("POST /auth/web/register", { status: 409, body: { error: "Email already registered", code: "EMAIL_IN_USE" } });
+    renderRoute(PATHS.register);
+    fill("Company name", "Chicago Freight LLC");
+    fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
+    fillAdministrator();
+    chooseUnits("mile", "us_gallon");
+    submit();
+    await waitFor(() => expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(true));
+    expect(api.calls.find(c => c.path === "/auth/web/register")?.body).toMatchObject({ distanceUnit: "mile", volumeUnit: "us_gallon" });
+  });
+
   test("a non-UK company's own zone is what is sent", async () => {
     api.on("POST /auth/web/register", { status: 409, body: { error: "Email already registered", code: "EMAIL_IN_USE" } });
     renderRoute(PATHS.register);
     fill("Company name", "Chicago Freight LLC");
     fireEvent.change(timeZone(), { target: { value: "America/Chicago" } });
     fillAdministrator();
+    chooseUnits();
     submit();
     await waitFor(() => expect(api.calls.some(c => c.path === "/auth/web/register")).toBe(true));
     expect(api.calls.find(c => c.path === "/auth/web/register")?.body).toMatchObject({ timeZone: "America/Chicago" });
@@ -283,6 +325,7 @@ describe("the company's time zone (D53)", () => {
 
       fill("Company name", "Somewhere Haulage");
       fillAdministrator();
+      chooseUnits();
       submit();
       expect(within(group("Company details")).getByText("Choose your company's time zone")).toBeTruthy();
       expect(timeZone().getAttribute("aria-invalid")).toBe("true");

@@ -17,7 +17,7 @@
  * loser's transaction rolls back whole. A DEACTIVATED membership is never
  * reactivated by an invitation (D65): only the company does that.
  */
-import type { DriverInvitationStatus, MembershipEventKind } from "../generated/enums.js";
+import type { DistanceUnit, DriverInvitationStatus, MembershipEventKind, VolumeUnit } from "../generated/enums.js";
 import { DriverInvitationStatus as STATUS, MembershipEventKind as EVENT } from "../generated/enums.js";
 import { prismaErrorCode, UNIQUE_VIOLATION_CODE } from "./startShiftRepository.js";
 
@@ -33,6 +33,8 @@ export interface JoinedMembership {
   membershipId: string;
   companyId: string;
   companyName: string;
+  distanceUnit: DistanceUnit | null;
+  volumeUnit: VolumeUnit | null;
 }
 
 export type AnswerOutcome<T> =
@@ -50,11 +52,12 @@ interface InvitationRow {
   status: DriverInvitationStatus;
   expiresAt: Date;
   payrollRef: string | null;
-  company: { name: string };
+  company: { name: string; distanceUnit: DistanceUnit | null; volumeUnit: VolumeUnit | null };
 }
 
 const INVITATION = {
-  id: true, companyId: true, status: true, expiresAt: true, payrollRef: true, company: { select: { name: true } },
+  id: true, companyId: true, status: true, expiresAt: true, payrollRef: true,
+  company: { select: { name: true, distanceUnit: true, volumeUnit: true } },
 } as const;
 
 interface AnswerWhere {
@@ -174,7 +177,13 @@ export function driverInvitationAnswerRepository(db: DriverInvitationAnswerDatab
             data:  { status: STATUS.accepted, respondedAt: now, membershipId },
           });
           if (count !== 1) throw new AnsweredMeanwhile();
-          return { kind: "done", value: { membershipId, companyId: invitation.companyId, companyName: invitation.company.name } } as const;
+          return {
+            kind: "done",
+            value: {
+              membershipId, companyId: invitation.companyId, companyName: invitation.company.name,
+              distanceUnit: invitation.company.distanceUnit, volumeUnit: invitation.company.volumeUnit,
+            },
+          } as const;
         });
       } catch (error) {
         // A concurrent acceptance (or company action) committed first: its

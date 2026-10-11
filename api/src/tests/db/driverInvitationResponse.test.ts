@@ -95,7 +95,7 @@ async function companyAdmin(name: string): Promise<{ companyId: string; token: s
   const email = freshEmail();
   const registered = await inject({
     url: "/auth/web/register", web: true,
-    payload: { companyName: `${TAG}-${name}`, timeZone: "Europe/Vilnius", firstName: "Ada", lastName: "Admin", email, password: PASSWORD },
+    payload: { companyName: `${TAG}-${name}`, timeZone: "Europe/Vilnius", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Ada", lastName: "Admin", email, password: PASSWORD },
   });
   assert.equal(registered.statusCode, 201, `registration — got ${registered.raw}`);
   const token = /#token=([A-Za-z0-9_-]+)/.exec(outbox.filter(m => m.to === email).at(-1)?.text ?? "")?.[1];

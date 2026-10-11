@@ -109,7 +109,7 @@ function stringField(body: unknown, key: string): string {
 
 function registration(email: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    companyName: "Tokyo Freight KK", timeZone: "Asia/Tokyo",
+    companyName: "Tokyo Freight KK", timeZone: "Asia/Tokyo", distanceUnit: "kilometre", volumeUnit: "litre",
     firstName: "Aiko", lastName: "Sato", email, password: PASSWORD, ...overrides,
   };
 }

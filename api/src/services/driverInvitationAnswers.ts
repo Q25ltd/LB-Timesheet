@@ -67,7 +67,10 @@ export async function acceptInvitation(
 ): Promise<AccountMembership> {
   const email = await verifiedDriverEmail(identity, accounts);
   const joined = settled(await answers.accept(identity.userId, email, id, now));
-  return { membershipId: joined.membershipId, companyId: joined.companyId, companyName: joined.companyName, role: "driver" };
+  return {
+    membershipId: joined.membershipId, companyId: joined.companyId, companyName: joined.companyName, role: "driver",
+    distanceUnit: joined.distanceUnit, volumeUnit: joined.volumeUnit,
+  };
 }
 
 export async function declineInvitation(

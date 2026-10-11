@@ -12,9 +12,9 @@ import "../../styles/company.css";
 /**
  * The COMPANY WORKSPACE's frame — every company page renders inside it.
  *
- * Four primary areas and no more: Home, Drivers, Timesheets, Settings. Home
- * and Drivers (D63, stage 4) exist. The other two are named, so the
- * workspace's shape is clear, but they are NOT links: an area that does not
+ * Four primary areas and no more: Home, Drivers, Timesheets, Settings. Home,
+ * Drivers (D63, stage 4) and Settings (D66) exist. Timesheets is named, so
+ * the workspace's shape is clear, but it is NOT a link: an area that does not
  * exist is not offered as a control. When one is built it becomes a `NavLink` here and a child route in
  * `routes.tsx` — nothing else in the frame changes.
  *
@@ -22,7 +22,7 @@ import "../../styles/company.css";
  * `RequireCompany` asks the API for the tenant context and shows nothing of a
  * company the API has not confirmed.
  */
-const AREAS_NOT_BUILT = ["Timesheets", "Settings"] as const;
+const AREAS_NOT_BUILT = ["Timesheets"] as const;
 
 export function CompanyShell() {
   const auth = useAuth();
@@ -64,6 +64,11 @@ export function CompanyShell() {
                     </span>
                   </li>
                 ))}
+                <li className="workspace-nav__item">
+                  <NavLink to={PATHS.companySettings} className="workspace-nav__link">
+                    <span className="workspace-nav__label" data-nav-label>Settings</span>
+                  </NavLink>
+                </li>
               </ul>
             </nav>
           ) : null}

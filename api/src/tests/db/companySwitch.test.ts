@@ -219,11 +219,12 @@ test("N2. TWO OR MORE active memberships: the list, and NO tenant token until an
   assert.deepEqual(ids, [a.membershipId, b.membershipId].sort(), "by membership id");
 
   // The minimum the UI needs, and nothing more: no `active`, no `joinedAt`,
-  // no payroll reference, no company email or timezone.
+  // no payroll reference, no company email or timezone. The company's units
+  // are needed: the phone records its readings in them (D66).
   for (const entry of list) {
     assert.deepEqual(
-      Object.keys(entry).sort(), ["companyId", "companyName", "membershipId", "role"],
-      `a membership summary is exactly these four fields — got ${Object.keys(entry).join(", ")}`,
+      Object.keys(entry).sort(), ["companyId", "companyName", "distanceUnit", "membershipId", "role", "volumeUnit"],
+      `a membership summary is exactly these six fields — the company's units added by D66 — got ${Object.keys(entry).join(", ")}`,
     );
   }
 });
@@ -293,8 +294,8 @@ test("P1. selecting an own ACTIVE membership yields a tenant token on the SAME s
   const membership = field(result.body, "membership");
   assert.deepEqual(
     Object.keys(membership as Record<string, unknown>).sort(),
-    ["companyId", "companyName", "membershipId", "role"],
-    "the echoed summary is the same narrow four fields",
+    ["companyId", "companyName", "distanceUnit", "membershipId", "role", "volumeUnit"],
+    "the echoed summary is the same narrow six fields (units: D66)",
   );
   assert.equal((membership as Record<string, unknown>)["companyName"], a.companyName, "read from the database");
 });

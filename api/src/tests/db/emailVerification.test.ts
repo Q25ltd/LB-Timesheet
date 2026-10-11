@@ -111,7 +111,7 @@ function tokenSentTo(to: string, nth = 0): string {
 
 async function webRegistered(): Promise<{ email: string; userId: string; identityToken: string; token: string }> {
   const email = freshEmail();
-  const res = await inject({ url: "/auth/web/register", payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Vera", lastName: "Fied", email, password: PASSWORD } });
   assert.equal(res.statusCode, 201, `web registration must succeed — got ${res.raw}`);
   // The website registers a COMPANY account (D51).
   const user = await prisma.user.findUniqueOrThrow({ where: { accountKind_email: { accountKind: "company", email } } });

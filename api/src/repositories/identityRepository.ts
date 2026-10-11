@@ -16,7 +16,7 @@
  * pattern — so widening what the account boundary can reach is a visible act
  * rather than a side effect of passing a bigger object.
  */
-import type { AccountKind, MembershipRole, SessionClientKind } from "../generated/enums.js";
+import type { AccountKind, DistanceUnit, MembershipRole, SessionClientKind, VolumeUnit } from "../generated/enums.js";
 
 /** Only the User columns anything above this boundary is allowed to see. */
 export interface AccountUser {
@@ -38,6 +38,9 @@ export interface AccountMembership {
   companyId: string;
   companyName: string;
   role: MembershipRole;
+  /** The company's units (D66) — what its drivers record in; null where it has chosen none. */
+  distanceUnit: DistanceUnit | null;
+  volumeUnit: VolumeUnit | null;
 }
 
 /**
@@ -85,6 +88,8 @@ export interface NewCompanyRegistration {
   passwordHash: string;
   companyName: string;
   timezone: string;
+  distanceUnit: DistanceUnit;
+  volumeUnit: VolumeUnit;
   sessionExpiresAt: Date;
   refreshTokenHash: string;
 }
@@ -134,7 +139,20 @@ interface MembershipRow {
   id: string;
   companyId: string;
   role: MembershipRole;
-  company: { name: string };
+  company: { name: string; distanceUnit: DistanceUnit | null; volumeUnit: VolumeUnit | null };
+}
+
+const MEMBERSHIP_COMPANY = { company: { select: { name: true, distanceUnit: true, volumeUnit: true } } } as const;
+
+function accountMembership(row: MembershipRow): AccountMembership {
+  return {
+    membershipId: row.id,
+    companyId:    row.companyId,
+    companyName:  row.company.name,
+    role:         row.role,
+    distanceUnit: row.company.distanceUnit,
+    volumeUnit:   row.company.volumeUnit,
+  };
 }
 
 /** The subset available inside the transaction callback. */
@@ -146,7 +164,7 @@ interface IdentityTransaction {
     create(args: { data: { userId: string; accountKind: AccountKind; clientKind: SessionClientKind; expiresAt: Date; refreshTokenHash: string } }): Promise<{ id: string }>;
   };
   pendingCompanyRegistration: {
-    create(args: { data: { userId: string; accountKind: AccountKind; companyName: string; timezone: string } }): Promise<{ id: string }>;
+    create(args: { data: { userId: string; accountKind: AccountKind; companyName: string; timezone: string; distanceUnit: DistanceUnit; volumeUnit: VolumeUnit } }): Promise<{ id: string }>;
   };
   /** Login's credential lock, and nothing else — see `createSession`. Parameterised by the tagged template. */
   $queryRaw(query: TemplateStringsArray, ...values: string[]): Promise<unknown>;
@@ -173,7 +191,7 @@ export interface IdentityDatabase extends IdentityTransaction {
   companyMembership: {
     findMany(args: {
       where: { userId: string; active: boolean };
-      include: { company: { select: { name: true } } };
+      include: typeof MEMBERSHIP_COMPANY;
       orderBy: { joinedAt: "asc" };
     }): Promise<MembershipRow[]>;
     // Company selection's read. The id AND the authenticated user AND
@@ -182,7 +200,7 @@ export interface IdentityDatabase extends IdentityTransaction {
     // checked — see `findActiveMembership`.
     findFirst(args: {
       where: { id: string; userId: string; active: boolean };
-      include: { company: { select: { name: true } } };
+      include: typeof MEMBERSHIP_COMPANY;
     }): Promise<MembershipRow | null>;
   };
   $transaction<T>(fn: (tx: IdentityTransaction) => Promise<T>): Promise<T>;
@@ -274,7 +292,10 @@ export function identityRepository(db: IdentityDatabase) {
           },
         });
         await tx.pendingCompanyRegistration.create({
-          data: { userId: user.id, accountKind: "company", companyName: registration.companyName, timezone: registration.timezone },
+          data: {
+            userId: user.id, accountKind: "company", companyName: registration.companyName, timezone: registration.timezone,
+            distanceUnit: registration.distanceUnit, volumeUnit: registration.volumeUnit,
+          },
         });
         const session = await tx.session.create({
           data: {
@@ -395,30 +416,19 @@ export function identityRepository(db: IdentityDatabase) {
     async findActiveMembership(userId: string, membershipId: string): Promise<AccountMembership | null> {
       const row = await db.companyMembership.findFirst({
         where:   { id: membershipId, userId, active: true },
-        include: { company: { select: { name: true } } },
+        include: MEMBERSHIP_COMPANY,
       });
-      if (row === null) return null;
-      return {
-        membershipId: row.id,
-        companyId:    row.companyId,
-        companyName:  row.company.name,
-        role:         row.role,
-      };
+      return row === null ? null : accountMembership(row);
     },
 
     /** The driver's ACTIVE memberships. An empty array is a valid answer (D21). */
     async listActiveMemberships(userId: string): Promise<AccountMembership[]> {
       const rows = await db.companyMembership.findMany({
         where:   { userId, active: true },
-        include: { company: { select: { name: true } } },
+        include: MEMBERSHIP_COMPANY,
         orderBy: { joinedAt: "asc" },
       });
-      return rows.map(row => ({
-        membershipId: row.id,
-        companyId:    row.companyId,
-        companyName:  row.company.name,
-        role:         row.role,
-      }));
+      return rows.map(accountMembership);
     },
   };
 }

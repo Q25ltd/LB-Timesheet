@@ -39,6 +39,8 @@ function completedCompany(membership: typeof MEMBERSHIP = MEMBERSHIP) {
       ? { status: 200, body: { tenantToken: TENANT, membership } }
       : { status: 403, body: { error: "Forbidden", code: "FORBIDDEN" } };
   });
+  // Units chosen (D66): Home asks, and has nothing to prompt for.
+  api.on("GET /company/settings/units", { status: 200, body: { units: { distanceUnit: "kilometre", volumeUnit: "litre" } } });
 }
 
 async function home(name = MEMBERSHIP.companyName) {
@@ -178,14 +180,15 @@ describe("the company application shell", () => {
     expect(current.getAttribute("href")).toBe(PATHS.company);
   });
 
-  test("9a. Home and Drivers (D63) are the only working areas; Timesheets and Settings are NOT controls — no link, no button, said to be not available", async () => {
+  test("9a. Home, Drivers (D63) and Settings (D66) are the working areas; Timesheets is NOT a control — no link, no button, said to be not available", async () => {
     completedCompany();
     renderRoute(PATHS.company);
     await home();
     const nav = companyNav();
-    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home", "Drivers"]);
+    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home", "Drivers", "Settings"]);
+    expect(within(nav).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(PATHS.companySettings);
     expect(within(nav).queryAllByRole("button")).toEqual([]);
-    for (const name of ["Timesheets", "Settings"]) {
+    for (const name of ["Timesheets"]) {
       const item = within(nav).getAllByRole("listitem").find(li => li.querySelector("[data-nav-label]")?.textContent === name);
       expect(item?.textContent, name).toMatch(/not available yet/i);
     }
@@ -260,8 +263,11 @@ describe("Home for a new company", () => {
     }
     for (const step of steps()) expect(within(step).queryAllByRole("button")).toEqual([]);
     await new Promise(resolve => setTimeout(resolve, 30));
-    // The account is read, the one company requested, and the account re-read with it — nothing else.
-    expect(api.calls.map(c => `${c.method} ${c.path}`)).toEqual(["POST /auth/web/refresh", "GET /auth/me", "POST /auth/switch-company", "GET /auth/me"]);
+    // The account is read, the one company requested, the account re-read with it, and the company's
+    // units read (D66: a company with none is asked to choose) — nothing else.
+    expect(api.calls.map(c => `${c.method} ${c.path}`).sort()).toEqual(
+      ["POST /auth/web/refresh", "GET /auth/me", "POST /auth/switch-company", "GET /auth/me", "GET /company/settings/units"].sort(),
+    );
   });
 
   test("10. no fabricated statistics: no numbers, no charts, no tables in the page", async () => {
@@ -271,6 +277,30 @@ describe("Home for a new company", () => {
     expect(main().textContent ?? "", "no counts, hours, distances or money").not.toMatch(/\d/);
     expect(main().querySelector("canvas, table, progress, meter, [role='img']")).toBeNull();
     expect(main().textContent).not.toMatch(/£|\$|€|\bmiles?\b|\bkm\b|\blitres?\b|\bdefects? found\b/i);
+  });
+
+  test("D66-H1. a company with NO units yet is asked to choose them, with the way to Settings", async () => {
+    completedCompany();
+    api.on("GET /company/settings/units", { status: 200, body: { units: { distanceUnit: null, volumeUnit: null } } });
+    renderRoute(PATHS.company);
+    await home();
+    const prompt = await screen.findByRole("region", { name: "Choose your measurement units" });
+    expect(within(prompt).getByRole("link", { name: "Go to Settings" }).getAttribute("href")).toBe(PATHS.companySettings);
+    expect(api.calls.find(c => c.path === "/company/settings/units")?.authorization).toBe(`Bearer ${TENANT}`);
+  });
+
+  test("D66-H2. no prompt when the units are chosen — or when they could not be read: Home never nags on a guess", async () => {
+    for (const answer of [{ status: 200, body: { units: { distanceUnit: "mile", volumeUnit: "us_gallon" } } }, { status: 503, body: { error: "x" } }]) {
+      document.body.innerHTML = "";
+      api = installFakeApi();
+      completedCompany();
+      api.on("GET /company/settings/units", answer);
+      renderRoute(PATHS.company);
+      await home();
+      await waitFor(() => { expect(api.calls.some(c => c.path === "/company/settings/units")).toBe(true); });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(screen.queryByRole("region", { name: "Choose your measurement units" })).toBeNull();
+    }
   });
 
   test("the workspace's areas are described honestly, as not available yet", async () => {

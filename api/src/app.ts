@@ -35,6 +35,8 @@ import { driverInvitationAnswerRepository, type DriverInvitationAnswerDatabase }
 import { registerDriverInvitationRoutes } from "./routes/driverInvitations.js";
 import { companyDriverRepository, type CompanyDriverDatabase } from "./repositories/companyDriverRepository.js";
 import { registerCompanyDriverMembershipRoutes } from "./routes/companyDriverMemberships.js";
+import { companySettingsRepository, type CompanySettingsDatabase } from "./repositories/companySettingsRepository.js";
+import { registerCompanySettingsRoutes } from "./routes/companySettings.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
 import { sendThrottle } from "./lib/sendThrottle.js";
 
@@ -54,7 +56,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & CompanySettingsDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -149,8 +151,9 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
         && typeof origin === "string" && origins.includes(origin);
       // The methods the API's routes use. The plugin's default is GET, HEAD
       // and POST only, which made a browser refuse the company website's
-      // PATCH (correcting a driver invitation, D63) at the preflight.
-      callback(null, { origin: origins, credentials: credentialed, methods: ["GET", "HEAD", "POST", "PATCH"] });
+      // PATCH (correcting a driver invitation, D63) at the preflight; PUT
+      // sets a company's settings (D66).
+      callback(null, { origin: origins, credentials: credentialed, methods: ["GET", "HEAD", "POST", "PATCH", "PUT"] });
     },
   });
 
@@ -336,6 +339,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // A company deactivates, reactivates and removes its drivers (D65). Tenant
   // posture; the service applies the company-admin gate (D54).
   registerCompanyDriverMembershipRoutes(app, companyDriverRepository(prisma));
+
+  // A company's settings (D66): its measurement units. Tenant posture; the
+  // service applies the company-admin gate (D54).
+  registerCompanySettingsRoutes(app, companySettingsRepository(prisma));
 
   // LIVENESS: the process is up and answering. Touches nothing else, so a
   // database outage never makes a supervisor restart a healthy process.

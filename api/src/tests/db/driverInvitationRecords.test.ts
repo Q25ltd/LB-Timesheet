@@ -86,7 +86,7 @@ function stringField(body: unknown, key: string): string {
 async function registeredCompany(email: string, companyName: string): Promise<{ companyId: string; membershipId: string }> {
   const registered = await inject({
     url: "/auth/web/register", web: true,
-    payload: { companyName, timeZone: "Asia/Tokyo", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
+    payload: { companyName, timeZone: "Asia/Tokyo", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
   });
   assert.equal(registered.statusCode, 201, `registration — got ${registered.raw}`);
   const message = outbox.filter(m => m.to === email).at(-1);

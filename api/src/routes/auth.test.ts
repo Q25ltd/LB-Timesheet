@@ -211,7 +211,7 @@ interface AuthReads {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
-  company: { findUnique(): Promise<{ timezone: string; name: string } | null> };
+  company: { findUnique(): Promise<{ timezone: string; name: string; distanceUnit: null; volumeUnit: null } | null>; update(): Promise<never> };
   // Every WRITE rejects: no case in this file may reach persistence, so a
   // call landing here is itself the failure rather than a setup gap.
   // Company registration's (D51). No case here registers a company.
@@ -252,7 +252,7 @@ function reads(session: SessionRow | null, membership: MembershipRow | null, use
       create:    () => Promise.reject(new Error("no case in routes/auth.test.ts may reach shift persistence")),
       findFirst: () => Promise.resolve(null),
     },
-    company: { findUnique: () => Promise.resolve({ timezone: "Europe/London", name: "Test Haulage" }) },
+    company: { findUnique: () => Promise.resolve({ timezone: "Europe/London", name: "Test Haulage", distanceUnit: null, volumeUnit: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
     pendingCompanyRegistration: {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),

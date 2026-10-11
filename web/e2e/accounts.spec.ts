@@ -33,6 +33,8 @@ async function registerThroughThePage(page: Page, email: string, companyName: st
   await page.goto("/register");
   await page.getByLabel("Company name").fill(companyName);
   await page.getByLabel("Time zone").selectOption("Europe/Vilnius");
+  await page.getByLabel("Distance unit").selectOption("kilometre");
+  await page.getByLabel("Fuel unit").selectOption("litre");
   await page.getByLabel("First name").fill("Edith");
   await page.getByLabel("Last name").fill("Owner");
   await page.getByLabel("Email").fill(email);
@@ -110,14 +112,14 @@ test("a company registers, confirms its email, reaches its company, signs out an
   expect(page.url()).toBe(`${WEB}/verify-email`);
   await page.getByRole("link", { name: "Continue", exact: true }).click();
 
-  // The company's Home: its real name, Home current, the four areas — Home
-  // and Drivers links (D63) — and the onboarding with only "Company created"
+  // The company's Home: its real name, Home current, the four areas — Home,
+  // Drivers (D63) and Settings (D66) links — and the onboarding with only "Company created"
   // done and adding drivers the available next step.
   await expectCompanyHome(page, "E2E Vilnius Haulage UAB");
   const nav = page.getByRole("navigation", { name: "Company" });
   await expect(nav.getByRole("listitem")).toHaveCount(4);
   await expect(nav.locator("[data-nav-label]")).toHaveText(["Home", "Drivers", "Timesheets", "Settings"]);
-  await expect(nav.getByRole("link")).toHaveText(["Home", "Drivers"]);
+  await expect(nav.getByRole("link")).toHaveText(["Home", "Drivers", "Settings"]);
   const steps = page.getByRole("region", { name: "Getting started" }).getByRole("listitem");
   await expect(steps).toHaveCount(4);
   await expect(steps.first()).toHaveAttribute("data-state", "done");

@@ -32,6 +32,20 @@ enum SubmitJobStatus {
   failed
 }
 
+/// The distance unit a company's odometer readings are recorded in (D52, D66).
+enum DistanceUnit {
+  kilometre
+  mile
+}
+
+/// The volume unit a company's fuel quantities are recorded in (D52, D66).
+/// Two gallons, because "gallons" is not one unit.
+enum VolumeUnit {
+  litre
+  us_gallon
+  imperial_gallon
+}
+
 /// Authorization role carried by a CompanyMembership. Closed at the database
 /// boundary so middleware never has to interpret an unknown role string.
 enum MembershipRole {
@@ -106,6 +120,13 @@ model Company {
   /// settings capability, and STATUS.md owns what exists. When it lands, a
   /// change is NOT retrospective — shiftDate is already persisted per shift.
   timezone     String    @default("Europe/London")
+
+  /// The units the company's drivers record in (D52, D66): odometer readings
+  /// and fuel quantities are stored WITH the unit they were recorded in, and
+  /// never converted. Null — never defaulted — for a company that has not
+  /// chosen; its administrator is prompted. A new registration must choose.
+  distanceUnit DistanceUnit?
+  volumeUnit   VolumeUnit?
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -214,6 +235,11 @@ model PendingCompanyRegistration {
   /// when the registration is confirmed (a later increment). It belongs to
   /// the company being registered, not to the administrator's account.
   timezone    String
+  /// The units the company chose at registration (D66), copied into the
+  /// Company when the registration is confirmed. Null only for a
+  /// registration made before units existed — never defaulted.
+  distanceUnit DistanceUnit?
+  volumeUnit   VolumeUnit?
   createdAt   DateTime    @default(now())
 
   user User @relation(fields: [userId, accountKind], references: [id, accountKind], onDelete: Cascade)

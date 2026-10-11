@@ -48,7 +48,7 @@ const db = {
     create:    () => Promise.reject(new Error("shift.create is not part of this test")),
     findFirst: () => Promise.resolve(null),
   },
-  company: { findUnique: () => Promise.resolve(null) },
+  company: { findUnique: () => Promise.resolve(null), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
   user: {
     findUnique: () => Promise.resolve(null),
     // Login's credential read. Declared because `AppDatabase` requires it;

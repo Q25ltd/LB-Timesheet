@@ -84,7 +84,8 @@ describe("credentials: where they live and how they travel", () => {
         expect(call.authorization, `${call.path} never needs a bearer token`).toBeNull();
       } else {
         expect(call.credentials, call.path).toBe("omit");
-        expect(call.authorization, call.path).toBe(`Bearer ${IDENTITY}`);
+        // The company's own calls carry its TENANT token, in memory too (Home's units read, D66).
+        expect(call.authorization, call.path).toBe(call.path.startsWith("/company/") ? `Bearer ${TENANT}` : `Bearer ${IDENTITY}`);
       }
     }
   });
@@ -251,6 +252,8 @@ describe("registration and the emailed links", () => {
     // Chosen, as a company does — never left to whatever zone the machine
     // running the test is in (D53).
     fill("Time zone", "Europe/Vilnius");
+    fill("Distance unit", "kilometre");
+    fill("Fuel unit", "litre");
     fill("First name", "Nerijus");
     fill("Last name", "Kuizinas");
     fill("Email", "owner@example.com");

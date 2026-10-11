@@ -21,6 +21,7 @@ import { normaliseEmail } from "../lib/accountEmail.js";
 import { AppError } from "../lib/errors.js";
 import { hashPassword, PasswordPolicy } from "../lib/password.js";
 import { CompanyTimeZoneField } from "../lib/timezone.js";
+import { DistanceUnitField, VolumeUnitField } from "../lib/units.js";
 import {
   hashRefreshToken,
   mintIdentityToken,
@@ -67,10 +68,14 @@ export type RegisterInput = z.infer<typeof RegisterBody>;
  *
  * Company name: CLAUDE.md's 200, trimmed, never blank, NOT unique (D51).
  * Timezone: `CompanyTimeZoneField` — an IANA place, stored exactly as chosen.
+ * Units: both REQUIRED (D66) — a company's drivers record in them, and none
+ * is ever defaulted.
  */
 export const CompanyRegisterBody = z.object({
-  companyName: z.string().trim().min(1).max(200),
-  timeZone:    CompanyTimeZoneField,
+  companyName:  z.string().trim().min(1).max(200),
+  timeZone:     CompanyTimeZoneField,
+  distanceUnit: DistanceUnitField,
+  volumeUnit:   VolumeUnitField,
   firstName:   z.string().trim().min(1).max(200),
   lastName:    z.string().trim().min(1).max(200),
   email:       z.string().trim().min(1).max(320).email(),
@@ -199,6 +204,8 @@ export async function registerCompany(
       passwordHash,
       companyName:      input.companyName,
       timezone:         input.timeZone,
+      distanceUnit:     input.distanceUnit,
+      volumeUnit:       input.volumeUnit,
       sessionExpiresAt,
       refreshTokenHash: hashRefreshToken(refreshToken),
     });

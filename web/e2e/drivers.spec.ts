@@ -29,6 +29,8 @@ async function registeredCompany(page: Page, email: string, companyName: string)
   await page.goto("/register");
   await page.getByLabel("Company name").fill(companyName);
   await page.getByLabel("Time zone").selectOption("Europe/Vilnius");
+  await page.getByLabel("Distance unit").selectOption("kilometre");
+  await page.getByLabel("Fuel unit").selectOption("litre");
   await page.getByLabel("First name").fill("Edith");
   await page.getByLabel("Last name").fill("Owner");
   await page.getByLabel("Email").fill(email);

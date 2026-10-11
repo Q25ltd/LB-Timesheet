@@ -115,7 +115,7 @@ async function driver(email: string, options: { verified?: boolean } = {}): Prom
 
 async function companyInviting(name: string, email: string): Promise<string> {
   const admin = freshEmail();
-  const registered = await json("/auth/web/register", { companyName: `${TAG}-${name}`, timeZone: "Europe/Vilnius", firstName: "Ada", lastName: "Admin", email: admin, password: PASSWORD }, { origin: ORIGIN });
+  const registered = await json("/auth/web/register", { companyName: `${TAG}-${name}`, timeZone: "Europe/Vilnius", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Ada", lastName: "Admin", email: admin, password: PASSWORD }, { origin: ORIGIN });
   assert.equal(registered.status, 201);
   // A live server sends the link after its answer (background work): wait for it.
   let token: string | undefined;

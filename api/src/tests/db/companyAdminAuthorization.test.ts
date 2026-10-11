@@ -112,7 +112,7 @@ function probe(token: string): Promise<Injected> {
 async function registeredCompany(email: string, companyName: string): Promise<{ userId: string; companyId: string; membershipId: string }> {
   const registered = await inject({
     url: "/auth/web/register", web: true,
-    payload: { companyName, timeZone: "Asia/Tokyo", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
+    payload: { companyName, timeZone: "Asia/Tokyo", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
   });
   assert.equal(registered.statusCode, 201, `registration — got ${registered.raw}`);
   const message = outbox.filter(m => m.to === email).at(-1);
@@ -210,7 +210,7 @@ test("CA3. a company account with NO company has no tenant authority to present"
   const email = freshEmail();
   const registered = await inject({
     url: "/auth/web/register", web: true,
-    payload: { companyName: `${TAG}-Pending`, timeZone: "Asia/Tokyo", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
+    payload: { companyName: `${TAG}-Pending`, timeZone: "Asia/Tokyo", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Aiko", lastName: "Sato", email, password: PASSWORD },
   });
   const identityToken = stringField(registered.body, "identityToken");
   const login = await webLogin(email);

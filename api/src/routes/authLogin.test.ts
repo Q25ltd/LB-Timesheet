@@ -117,7 +117,7 @@ interface StubDatabase {
     create(): Promise<never>;
     findFirst(): Promise<null>;
   };
-  company: { findUnique(): Promise<{ timezone: string } | null> };
+  company: { findUnique(): Promise<{ timezone: string; distanceUnit: null; volumeUnit: null } | null>; update(): Promise<never> };
   // Company registration's (D51). No case here registers a company.
   pendingCompanyRegistration: { findUnique(): Promise<null>; create(): Promise<never> };
   emailSuppression: { findMany(): Promise<never[]> };
@@ -158,7 +158,7 @@ function noRows(): StubDatabase {
       create:    write("shift"),
       findFirst: () => Promise.resolve(null),
     },
-    company:      { findUnique: () => Promise.resolve({ timezone: "Europe/London" }) },
+    company:      { findUnique: () => Promise.resolve({ timezone: "Europe/London", distanceUnit: null, volumeUnit: null }), update: (): Promise<never> => Promise.reject(new Error("not used here")) },
     pendingCompanyRegistration: {
       findUnique: () => Promise.resolve(null),
       create:     () => Promise.reject(new Error("pendingCompanyRegistration.create is not part of this test")),

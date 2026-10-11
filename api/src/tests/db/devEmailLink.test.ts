@@ -91,7 +91,7 @@ function stringField(body: unknown, key: string): string {
 async function registerCompany(email: string): Promise<string> {
   const res = await inject({
     url: "/auth/web/register", web: true,
-    payload: { companyName: `${TAG}-co`, timeZone: "Asia/Tokyo", firstName: "Dev", lastName: "Owner", email, password: PASSWORD },
+    payload: { companyName: `${TAG}-co`, timeZone: "Asia/Tokyo", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Dev", lastName: "Owner", email, password: PASSWORD },
   });
   assert.equal(res.statusCode, 201, `registration — got ${res.raw}`);
   return stringField(res.body, "identityToken");

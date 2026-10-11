@@ -11,6 +11,7 @@ import {
   type CompanySelection,
   type SignedIn,
 } from "./responses";
+import type { DistanceUnit, VolumeUnit } from "../units";
 
 /**
  * The browser's authentication state (D45, D46) — held in MEMORY and nowhere
@@ -121,6 +122,8 @@ export interface AuthApi {
 interface CompanyRegistration {
   companyName: string;
   timeZone: string;
+  distanceUnit: DistanceUnit;
+  volumeUnit: VolumeUnit;
   firstName: string;
   lastName: string;
   email: string;

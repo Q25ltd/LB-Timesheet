@@ -17,6 +17,7 @@ export const PATHS = {
   account: "/account",
   company: "/company",
   companyDrivers: "/company/drivers",
+  companySettings: "/company/settings",
 } as const;
 
 /** The homepage sections an in-page link may target, by element id. */

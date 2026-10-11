@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
 import { PATHS } from "../../paths";
 import { Icon } from "../../components/Icon";
 import { usePageTitle } from "../../usePageTitle";
+import { readUnits, unitsMissing } from "./companySettingsApi";
 
 /**
  * HOME — the company workspace's first page (`/company`).
@@ -29,11 +31,42 @@ export function CompanyHome() {
   return (
     <div className="company-home">
       <CompanyIdentity companyName={companyName} />
+      <UnitsPrompt />
       <div className="company-home__body">
         <GettingStarted companyName={companyName} />
         <WorkspaceGuide />
       </div>
     </div>
+  );
+}
+
+/**
+ * A company registered before measurement units existed has none (D66), and
+ * is asked to choose them here. Said only when the server says so: a read that
+ * fails says nothing rather than nagging a company that may have chosen.
+ */
+function UnitsPrompt() {
+  const { withCompany } = useAuth();
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    void readUnits(withCompany).then(result => {
+      if (current && result.kind === "ok") setMissing(unitsMissing(result.value));
+    });
+    return () => { current = false; };
+  }, [withCompany]);
+
+  if (!missing) return null;
+  return (
+    <section className="units-prompt" aria-labelledby="units-prompt-title">
+      <h2 id="units-prompt-title" className="units-prompt__title">Choose your measurement units</h2>
+      <p className="units-prompt__text">
+        Your company has not chosen the units its drivers record odometer readings and fuel in. Until it does, their readings
+        are recorded without a unit.
+      </p>
+      <Link className="button button--primary" to={PATHS.companySettings}>Go to Settings</Link>
+    </section>
   );
 }
 
@@ -127,7 +160,7 @@ const AREAS = [
   { name: "Home", summary: "This page: where your company stands, and what needs attention.", available: true },
   { name: "Drivers", summary: "Add your drivers and see who has joined.", available: true },
   { name: "Timesheets", summary: "The timesheets and vehicle checks your drivers submit to your company.", available: false },
-  { name: "Settings", summary: "Your company's details and configuration.", available: false },
+  { name: "Settings", summary: "Your company's configuration: the units its timesheets are recorded in.", available: true },
 ] as const;
 
 function WorkspaceGuide() {

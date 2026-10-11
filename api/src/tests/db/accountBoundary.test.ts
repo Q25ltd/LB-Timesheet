@@ -114,7 +114,7 @@ async function registerDriver(email: string): Promise<{ userId: string; identity
 }
 
 async function registerCompanyAccount(email: string): Promise<{ userId: string; identityToken: string; cookie: string }> {
-  const res = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "Co", lastName: "Admin", email, password: COMPANY_PASSWORD } });
+  const res = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "Co", lastName: "Admin", email, password: COMPANY_PASSWORD } });
   assert.equal(res.statusCode, 201, `company account registration — got ${res.raw}`);
   return { userId: stringField(field(res.body, "user"), "id"), identityToken: stringField(res.body, "identityToken"), cookie: res.setCookie ?? "" };
 }
@@ -199,7 +199,7 @@ test("AB3. the phone registers DRIVER accounts and the website COMPANY accounts 
   assert.equal(await kindOfUser(driver.userId), "driver");
   assert.equal(await kindOfUser(company.userId), "company");
 
-  const secondCompany = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", firstName: "X", lastName: "Y", email: email.toUpperCase(), password: COMPANY_PASSWORD } });
+  const secondCompany = await inject({ url: "/auth/web/register", web: true, payload: { companyName: "Fixture Freight Ltd", timeZone: "Europe/Vilnius", distanceUnit: "kilometre", volumeUnit: "litre", firstName: "X", lastName: "Y", email: email.toUpperCase(), password: COMPANY_PASSWORD } });
   assert.equal(secondCompany.statusCode, 409, "one company account per email");
 });
 
