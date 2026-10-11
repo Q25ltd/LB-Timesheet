@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-10-11 — D66 stage S3: start receipts and the phone's sync runner
+
+**Built.**
+- The new authority: `authorizeTimesheetSubmission` / `SubmissionContext`
+  (AUTH.md, recorded in S0). A new check-rule pins `SubmissionContext.trust`
+  to its one call site, fixture-tested like the others.
+- `POST /driver/shift-receipts` (active memberships only; server-timed;
+  idempotent; strict; capped). Additive migration.
+- The phone's receipt queue and sync runner, with `expo-network` for
+  reconnect (owner-approved dependency; checked: first-party Expo, MIT, no
+  dependencies, not in the audit — the mobile workspace's existing
+  advisories are in the Expo/Jest dev toolchain and the count did not rise).
+
+**A design choice worth recording.** The runner RECONCILES on every run —
+the open company day always gets its receipt queued — so the queue write at
+Start Shift is not a single point of failure, and starting work never waits
+on storage or the network.
+
+**Test infrastructure.** Each D66 stage was breaking the same ten typed
+fakes in the API's unit tests; D66's delegates now live in one shared
+`unusedD66Delegates` stub (`src/tests/fakeDatabase.ts`) that each fake
+spreads and extends. `expo-network` is mocked once in `jest.setup.js`, with
+a controllable `__emit`.
+
+**Evidence.** 8 DB + 16 phone tests; rule-engine fixtures updated. 14
+mutations: 13 killed, 1 equivalent (role filter vs D51's CHECK).
+
+**Open.** The independent security review AGENT_WORKFLOW §20 asks for, of
+the submission authority, is recommended against S4's committed baseline.
+
+---
+
 ## 2026-10-11 — D66 stage S2: the verified report email address
 
 **Built.** Company admin sets one report address (Settings); it stays
