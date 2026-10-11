@@ -47,6 +47,7 @@ import {
   fetchAccount, logoutSession, refreshSession, switchCompany,
   type AccountMembership, type AccountUser, type AuthenticatedAccount,
 } from "../api/account";
+import type { ApiResult } from "../api/client";
 
 export interface AuthenticatedState {
   user: AccountUser;
@@ -91,12 +92,31 @@ interface AuthValue {
   enableBiometricUnlock: () => Promise<boolean>;
   disableBiometricUnlock: () => Promise<void>;
   chooseCompany: (membershipId: string) => Promise<boolean>;
+  /**
+   * Make an identity-authenticated call. The identity token lives 15 minutes;
+   * when the server answers 401 it is renewed ONCE through `/auth/refresh` —
+   * the stored secret rotated exactly as start-up restore rotates it — and
+   * the call made once more (owner-approved for D63, 2026-10-10). A refused
+   * secret signs the driver out (F-34); any other renewal failure keeps it
+   * and answers `network`. Never renews for any status but 401.
+   */
+  withIdentity: <T>(call: (identityToken: string) => Promise<ApiResult<T>>) => Promise<ApiResult<T>>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 
 /** The server's one answer for a credential it will never accept again. */
 const UNAUTHENTICATED_STATUS = 401;
+
+/** What `withIdentity` answers when there is no identity to use or renew. */
+const NOT_SIGNED_IN: { kind: "api"; status: number; body: { error: string; code: string } } = {
+  kind: "api", status: UNAUTHENTICATED_STATUS, body: { error: "Not authenticated", code: "UNAUTHENTICATED" },
+};
+
+/** What `withIdentity` answers when the identity could not be renewed for a reason other than refusal. */
+const RENEWAL_UNAVAILABLE: { kind: "network"; message: string; detail: null } = {
+  kind: "network", message: "The session could not be renewed", detail: null,
+};
 
 const NO_BIOMETRICS: BiometricCapability = { available: false, label: "biometrics" };
 
@@ -121,6 +141,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * turning a successful restore into a logout.
    */
   const restoring = useRef(false);
+  /**
+   * The identity token as of NOW — read by `withIdentity`, which outlives
+   * renders. Set in the same step as the state (`adoptIdentity`), never by an
+   * effect: a screen mounted by the sign-in itself runs its effects BEFORE
+   * this provider's, and must already find the token.
+   */
+  const identity = useRef<string | null>(null);
+  const adoptIdentity = useCallback((token: string | null) => {
+    identity.current = token;
+    setIdentityToken(token);
+  }, []);
+  /** The one renewal in flight, shared by every call waiting on it. */
+  const renewing = useRef<Promise<string | null> | null>(null);
   const generation = useRef(0);
   const revokers = useRef(new Set<() => void>());
   const transitions = useRef<Promise<unknown>>(Promise.resolve());
@@ -134,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const endAccess = useCallback(() => {
     generation.current += 1;
     for (const revoke of revokers.current) revoke();
-    setIdentityToken(null);
+    adoptIdentity(null);
     setTenantToken(null);
     setAccount(null);
     setBiometricUnlockEnabled(false);
@@ -163,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // recoverable session rather than a lost one.
       await storeRefreshToken(authenticated.refreshToken);
       if (attempt !== generation.current) throw new Error("Sign-in was interrupted by sign-out");
-      setIdentityToken(authenticated.identityToken);
+      adoptIdentity(authenticated.identityToken);
       setTenantToken(authenticated.tenantToken ?? null);
       setAccount({ user: authenticated.user, memberships: authenticated.memberships });
       setRestoreOutcome("none");
@@ -178,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearLocalSession = useCallback(async (outcome: RestoreOutcome) => {
     endAccess();
     await clearRefreshToken();
-    setIdentityToken(null);
+    adoptIdentity(null);
     setTenantToken(null);
     setAccount(null);
     setRestoreOutcome(outcome);
@@ -291,7 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      setIdentityToken(redeemed.value.identityToken);
+      adoptIdentity(redeemed.value.identityToken);
       // Restoration yields ACCOUNT identity only. Company authority is a
       // separate security event and must be re-selected — a tenant token is
       // never restored from storage, because it was never stored.
@@ -311,6 +344,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     transitions.current = result.then(() => undefined, () => undefined);
     return result;
   }, [performRestore]);
+
+  /**
+   * A new identity token from the stored secret — or null. Queued with every
+   * other credential transition, so it never interleaves with a sign-in, a
+   * restore or a sign-out; and a sign-out that happens while it waits wins.
+   */
+  const renewIdentity = useCallback((): Promise<string | null> => {
+    if (renewing.current !== null) return renewing.current;
+    const attempt = generation.current;
+    const run = async (): Promise<string | null> => {
+      if (attempt !== generation.current || cleanupRequired.current || logoutPending()) return null;
+      const stored = await readRefreshToken();
+      if (stored === null || attempt !== generation.current) return null;
+      const redeemed = await refreshSession(stored);
+      if (attempt !== generation.current) return null;
+      if (redeemed.kind === "api" && redeemed.status === UNAUTHENTICATED_STATUS) {
+        // Refused: revoked, expired or reused. It will never work again (F-34).
+        await clearLocalSession("expired");
+        return null;
+      }
+      if (redeemed.kind !== "ok") return null;
+      // Rotated server-side: the stored secret MUST be replaced first.
+      await storeRefreshToken(redeemed.value.refreshToken);
+      if (attempt !== generation.current) { await cleanup(); return null; }
+      adoptIdentity(redeemed.value.identityToken);
+      return redeemed.value.identityToken;
+    };
+    const result = transitions.current.then(run, run).finally(() => { renewing.current = null; });
+    transitions.current = result.then(() => undefined, () => undefined);
+    renewing.current = result;
+    return result;
+  }, [cleanup, clearLocalSession]);
+
+  const withIdentity = useCallback(async <T,>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const token = identity.current;
+    if (token === null) return NOT_SIGNED_IN;
+    const first = await call(token);
+    if (!(first.kind === "api" && first.status === UNAUTHENTICATED_STATUS)) return first;
+    const renewed = await renewIdentity();
+    if (renewed === null) return identity.current === null ? NOT_SIGNED_IN : RENEWAL_UNAVAILABLE;
+    return call(renewed);
+  }, [renewIdentity]);
 
   /** App start: read the device's capability and preference, then restore. */
   useEffect(() => {
@@ -425,11 +500,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       enableBiometricUnlock,
       disableBiometricUnlock,
       chooseCompany,
+      withIdentity,
     }),
     [
       logoutCleanupError, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
       biometricUnlockEnabled, signIn, signOut, unlock, enableBiometricUnlock,
-      disableBiometricUnlock, chooseCompany,
+      disableBiometricUnlock, chooseCompany, withIdentity,
     ],
   );
 
