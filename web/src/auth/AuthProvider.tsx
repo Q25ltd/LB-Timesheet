@@ -99,6 +99,15 @@ export interface AuthApi {
    */
   developmentVerificationLink: () => Promise<string | null>;
   selectCompany(membershipId: string): Promise<Outcome>;
+  /**
+   * Make a call as the COMPANY — with its tenant token, held in memory only.
+   * A tenant token lives 15 minutes; when the server answers 401 the company
+   * is asked for again (switch-company — the server re-checks the
+   * membership, through `withIdentity`) ONCE, and the call made once more.
+   * A refusal of that (the membership is gone or inactive) is returned as
+   * it is; nothing is guessed.
+   */
+  withCompany: <T>(call: (tenantToken: string) => Promise<ApiResult<T>>) => Promise<ApiResult<T>>;
   changePassword(currentPassword: string, newPassword: string): Promise<Outcome>;
   /**
    * Correct the account's OWN address when it cannot receive mail (D56). The
@@ -148,9 +157,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** When the last restore could not reach the API, or null. */
   const unreachableAt = useRef<number | null>(null);
   const refreshing = useRef<Promise<ApiResult<string>> | null>(null);
+  /**
+   * The company as of NOW — read by `withCompany`, which outlives renders.
+   * Set together with the state, never by an effect: a company page mounted
+   * by the very update that selected the company runs its effects first.
+   */
+  const companyRef = useRef<CompanySelection | null>(null);
+  /** The one company re-selection in flight, shared by every call waiting on it. */
+  const reselecting = useRef<Promise<ApiResult<CompanySelection>> | null>(null);
 
   const signOutLocally = useCallback(() => {
     identityToken.current = null;
+    companyRef.current = null;
     setState({ status: "signed-out" });
   }, []);
 
@@ -205,6 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result.kind === "refused" && result.status === 401) return { ok: false, failure: "signed-out" };
       return { ok: false, failure: failureOf(result) };
     }
+    companyRef.current = company;
     setState({ status: "signed-in", account: result.value, company });
     return { ok: true };
   }, [withIdentity]);
@@ -268,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await apiRequest("/auth/web/logout", { cookie: true }, parseNoContent);
     restoring.current = Promise.resolve();
     identityToken.current = null;
+    companyRef.current = null;
     const serverConfirmed = result.kind === "ok";
     setState({ status: "signed-out", ended: serverConfirmed ? "confirmed" : "local-only" });
     return { serverConfirmed };
@@ -295,6 +315,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return loadAccount(result.value);
   }, [loadAccount, withIdentity]);
 
+  const withCompany = useCallback(async <T,>(call: (tenantToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const company = companyRef.current;
+    if (company === null) return { kind: "refused", status: 401, code: "UNAUTHENTICATED" };
+    const first = await call(company.tenantToken);
+    if (first.kind !== "refused" || first.status !== 401) return first;
+
+    const membershipId = company.membership.membershipId;
+    const renewal = reselecting.current ?? withIdentity(token => apiRequest("/auth/switch-company", { token, body: { membershipId } }, parseCompanySelection))
+      .finally(() => { reselecting.current = null; });
+    reselecting.current = renewal;
+    const renewed = await renewal;
+    if (renewed.kind !== "ok") return renewed.kind === "refused" && renewed.status === 401 ? first : renewed;
+    // Still the same company: nothing else about the account changed.
+    if (companyRef.current?.membership.membershipId === membershipId) {
+      companyRef.current = renewed.value;
+      setState(previous => (previous.status === "signed-in" ? { ...previous, company: renewed.value } : previous));
+    }
+    return call(renewed.value.tenantToken);
+  }, [withIdentity]);
+
   const changePassword = useCallback<AuthApi["changePassword"]>(async (currentPassword, newPassword) => {
     const result = await withIdentity(token => apiRequest("/auth/password/change", { token, body: { currentPassword, newPassword } }, parseNoContent));
     return result.kind === "ok" ? { ok: true } : { ok: false, failure: failureOf(result) };
@@ -313,8 +353,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [withIdentity]);
 
   const api = useMemo<AuthApi>(() => ({
-    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword, correctEmail,
-  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, changePassword, correctEmail]);
+    state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, withCompany, changePassword, correctEmail,
+  }), [state, restore, login, logout, reloadAccount, resendVerification, registerCompany, developmentVerificationLink, selectCompany, withCompany, changePassword, correctEmail]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

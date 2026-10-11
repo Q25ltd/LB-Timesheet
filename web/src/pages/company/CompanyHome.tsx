@@ -1,4 +1,6 @@
+import { Link } from "react-router";
 import { useAuth } from "../../auth/AuthProvider";
+import { PATHS } from "../../paths";
 import { Icon } from "../../components/Icon";
 import { usePageTitle } from "../../usePageTitle";
 
@@ -52,7 +54,7 @@ function CompanyIdentity({ companyName }: { companyName: string }) {
   );
 }
 
-type StepState = "done" | "unavailable";
+type StepState = "done" | "available" | "unavailable";
 
 interface Step {
   title: string;
@@ -61,10 +63,10 @@ interface Step {
 }
 
 /**
- * The approved path to a company's first timesheet. Only the first step can
- * be done today; the others are named for what they will be, and say they
- * are not available. How a driver connects is NOT described: it is not
- * designed yet.
+ * The approved path to a company's first timesheet. The first step is done;
+ * adding drivers is available under Drivers (D63, stage 4) — Home asks the
+ * server nothing about drivers, so it cannot say whether that is done, only
+ * where to do it. The steps after it say they are not available yet.
  */
 const STEPS: readonly Step[] = [
   {
@@ -74,13 +76,13 @@ const STEPS: readonly Step[] = [
   },
   {
     title: "Add your first driver",
-    state: "unavailable",
-    detail: () => "Adding drivers to your company is being built. It will happen under Drivers.",
+    state: "available",
+    detail: () => "Under Drivers, add each driver's name and the email address they use in the phone app. Each one gets an invitation.",
   },
   {
     title: "Your driver connects with the phone app",
     state: "unavailable",
-    detail: () => "Drivers fill in their day on the LogisticBay Timesheets phone app. How a driver connects to your company is still being designed.",
+    detail: () => "The driver confirms their email address in the LogisticBay Timesheets phone app and accepts your invitation there. Accepting in the app is still being built.",
   },
   {
     title: "Receive your first timesheet",
@@ -109,9 +111,10 @@ function GettingStarted({ companyName }: { companyName: string }) {
             <div className="step__body">
               <h3 className="step__title">{step.title}</h3>
               <p className="step__status">
-                {step.state === "done" ? "Done" : index === next ? "Next step · Not available yet" : "Not available yet"}
+                {step.state === "done" ? "Done" : step.state === "available" ? "Next step" : index === next ? "Next step · Not available yet" : "Not available yet"}
               </p>
               <p className="step__detail">{step.detail(companyName)}</p>
+              {step.state === "available" ? <Link className="step__link" to={PATHS.companyDrivers}>Go to Drivers</Link> : null}
             </div>
           </li>
         ))}
@@ -122,7 +125,7 @@ function GettingStarted({ companyName }: { companyName: string }) {
 
 const AREAS = [
   { name: "Home", summary: "This page: where your company stands, and what needs attention.", available: true },
-  { name: "Drivers", summary: "The drivers connected to your company.", available: false },
+  { name: "Drivers", summary: "Add your drivers and see who has joined.", available: true },
   { name: "Timesheets", summary: "The timesheets and vehicle checks your drivers submit to your company.", available: false },
   { name: "Settings", summary: "Your company's details and configuration.", available: false },
 ] as const;
@@ -136,7 +139,7 @@ function WorkspaceGuide() {
           <li key={area.name} className="workspace-guide__item" data-available={area.available}>
             <h3 className="workspace-guide__name">{area.name}</h3>
             <p className="workspace-guide__summary">{area.summary}</p>
-            <p className="workspace-guide__state">{area.available ? "You are here" : "Not available yet"}</p>
+            <p className="workspace-guide__state">{area.name === "Home" ? "You are here" : area.available ? "Available" : "Not available yet"}</p>
           </li>
         ))}
       </ul>

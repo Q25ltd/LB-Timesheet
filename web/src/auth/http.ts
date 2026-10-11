@@ -18,7 +18,7 @@ export type ApiResult<T> =
   | { kind: "offline" };
 
 export interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   body?: object;
   token?: string;
   cookie?: boolean;

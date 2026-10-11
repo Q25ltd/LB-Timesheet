@@ -178,14 +178,14 @@ describe("the company application shell", () => {
     expect(current.getAttribute("href")).toBe(PATHS.company);
   });
 
-  test("9a. Drivers, Timesheets and Settings are NOT working controls: no link, no button, said to be not available", async () => {
+  test("9a. Home and Drivers (D63) are the only working areas; Timesheets and Settings are NOT controls — no link, no button, said to be not available", async () => {
     completedCompany();
     renderRoute(PATHS.company);
     await home();
     const nav = companyNav();
-    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home"]);
+    expect(within(nav).getAllByRole("link").map(l => l.textContent)).toEqual(["Home", "Drivers"]);
     expect(within(nav).queryAllByRole("button")).toEqual([]);
-    for (const name of ["Drivers", "Timesheets", "Settings"]) {
+    for (const name of ["Timesheets", "Settings"]) {
       const item = within(nav).getAllByRole("listitem").find(li => li.querySelector("[data-nav-label]")?.textContent === name);
       expect(item?.textContent, name).toMatch(/not available yet/i);
     }
@@ -231,29 +231,34 @@ describe("Home for a new company", () => {
     expect(titles[3]).toMatch(/first timesheet/i);
   });
 
-  test("8. ONLY 'company created' is complete — said in words, not colour alone", async () => {
+  test("8. ONLY 'company created' is complete; adding drivers is the available next step (D63) — said in words, not colour alone", async () => {
     completedCompany();
     renderRoute(PATHS.company);
     await home();
     const states = steps().map(step => step.getAttribute("data-state"));
-    expect(states).toEqual(["done", "unavailable", "unavailable", "unavailable"]);
-    const [first, ...rest] = steps();
-    if (first === undefined) throw new Error("no steps");
+    expect(states).toEqual(["done", "available", "unavailable", "unavailable"]);
+    const [first, second, ...rest] = steps();
+    if (first === undefined || second === undefined) throw new Error("no steps");
     expect(within(first).getByText("Done")).toBeTruthy();
+    expect(within(second).getByText("Next step")).toBeTruthy();
+    expect(within(second).queryByText(/^done$/i), "Home cannot know whether drivers were added, so never says so").toBeNull();
     for (const step of rest) {
       expect(within(step).getByText(/not available yet/i)).toBeTruthy();
       expect(within(step).queryByText(/^done$/i)).toBeNull();
     }
   });
 
-  test("9b. future steps trigger nothing: no link or button in them, and the page asks the API for nothing more", async () => {
+  test("9b. future steps trigger nothing: only the available step links (to Drivers), no button anywhere, and the page asks the API for nothing more", async () => {
     completedCompany();
     renderRoute(PATHS.company);
     await home();
-    for (const step of steps()) {
+    const [, add, ...future] = steps();
+    if (add === undefined) throw new Error("no steps");
+    expect(within(add).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual([PATHS.companyDrivers]);
+    for (const step of [...future, ...steps().slice(0, 1)]) {
       expect(within(step).queryAllByRole("link")).toEqual([]);
-      expect(within(step).queryAllByRole("button")).toEqual([]);
     }
+    for (const step of steps()) expect(within(step).queryAllByRole("button")).toEqual([]);
     await new Promise(resolve => setTimeout(resolve, 30));
     // The account is read, the one company requested, and the account re-read with it — nothing else.
     expect(api.calls.map(c => `${c.method} ${c.path}`)).toEqual(["POST /auth/web/refresh", "GET /auth/me", "POST /auth/switch-company", "GET /auth/me"]);

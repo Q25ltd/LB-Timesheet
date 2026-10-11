@@ -16,6 +16,7 @@ export const PATHS = {
   resetPassword: "/reset-password",
   account: "/account",
   company: "/company",
+  companyDrivers: "/company/drivers",
 } as const;
 
 /** The homepage sections an in-page link may target, by element id. */

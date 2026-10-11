@@ -460,3 +460,199 @@
     padding: var(--space-5) var(--space-4);
   }
 }
+
+/* An available step (D63: adding drivers) is numbered like the steps after it,
+   and carries the one link Home's onboarding offers. */
+.step[data-state="available"] .step__marker::before {
+  content: counter(step);
+}
+
+.step__link {
+  display: inline-block;
+  margin-top: var(--space-2);
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+
+/* ---------- Drivers (D63, stage 4) ---------- */
+
+.drivers {
+  max-width: 1320px;
+  margin-inline: auto;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+  display: grid;
+  gap: var(--space-6);
+}
+
+.drivers__title {
+  margin: 0;
+  color: var(--brand-deep);
+  font-size: clamp(2rem, 1.4rem + 2.2vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.drivers__intro {
+  max-width: 68ch;
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+}
+
+.drivers__add,
+.drivers__list {
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.drivers__form {
+  max-width: 40rem;
+  margin-top: var(--space-4);
+}
+
+.drivers__form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.drivers__notice {
+  margin: var(--space-4) 0 0;
+  color: var(--text-muted);
+}
+
+.drivers__table {
+  width: 100%;
+  margin-top: var(--space-4);
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.drivers__table th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.drivers__table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.drivers__table td:first-child:not([colspan]) {
+  font-weight: 700;
+}
+
+.drivers__status {
+  display: inline-block;
+  padding: 0.125rem var(--space-2);
+  border-radius: 999px;
+  background: var(--neutral-selected);
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.drivers__status[data-status="pending"] { background: var(--amber-soft); color: var(--amber-ink); }
+.drivers__status[data-status="accepted"] { background: var(--success-bg); color: var(--success); }
+.drivers__status[data-status="declined"] { background: var(--danger-bg); color: var(--danger); }
+
+.drivers__status-note {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.drivers__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.drivers__confirm {
+  font-weight: 700;
+}
+
+.drivers__edit {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: end;
+}
+
+.drivers__edit-note,
+.drivers__edit .drivers__actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
+.drivers__edit-who {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-weight: 700;
+}
+
+.drivers__edit-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* A phone: each driver is a card, not a squeezed table row. */
+@media (max-width: 760px) {
+  .drivers__add,
+  .drivers__list {
+    padding: var(--space-4);
+  }
+
+  .drivers__form-row,
+  .drivers__edit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drivers__table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .drivers__table,
+  .drivers__table tbody,
+  .drivers__table tr,
+  .drivers__table td {
+    display: block;
+  }
+
+  .drivers__table tr {
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .drivers__table td {
+    padding: var(--space-1) 0;
+    border: 0;
+  }
+
+  /* No payroll reference: no empty line in the card. */
+  .drivers__table td:empty {
+    display: none;
+  }
+
+  .drivers__actions {
+    justify-content: flex-start;
+    margin-top: var(--space-2);
+  }
+}

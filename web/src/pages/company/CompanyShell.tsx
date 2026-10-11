@@ -12,17 +12,17 @@ import "../../styles/company.css";
 /**
  * The COMPANY WORKSPACE's frame — every company page renders inside it.
  *
- * Four primary areas and no more: Home, Drivers, Timesheets, Settings. Only
- * Home exists. The other three are named, so the workspace's shape is clear,
- * but they are NOT links: an area that does not exist is not offered as a
- * control. When one is built it becomes a `NavLink` here and a child route in
+ * Four primary areas and no more: Home, Drivers, Timesheets, Settings. Home
+ * and Drivers (D63, stage 4) exist. The other two are named, so the
+ * workspace's shape is clear, but they are NOT links: an area that does not
+ * exist is not offered as a control. When one is built it becomes a `NavLink` here and a child route in
  * `routes.tsx` — nothing else in the frame changes.
  *
  * Who gets in is the server's decision. `RequireAccount` is presentation;
  * `RequireCompany` asks the API for the tenant context and shows nothing of a
  * company the API has not confirmed.
  */
-const AREAS_NOT_BUILT = ["Drivers", "Timesheets", "Settings"] as const;
+const AREAS_NOT_BUILT = ["Timesheets", "Settings"] as const;
 
 export function CompanyShell() {
   const auth = useAuth();
@@ -49,6 +49,11 @@ export function CompanyShell() {
                 <li className="workspace-nav__item">
                   <NavLink to={PATHS.company} end className="workspace-nav__link">
                     <span className="workspace-nav__label" data-nav-label>Home</span>
+                  </NavLink>
+                </li>
+                <li className="workspace-nav__item">
+                  <NavLink to={PATHS.companyDrivers} className="workspace-nav__link">
+                    <span className="workspace-nav__label" data-nav-label>Drivers</span>
                   </NavLink>
                 </li>
                 {AREAS_NOT_BUILT.map(area => (
