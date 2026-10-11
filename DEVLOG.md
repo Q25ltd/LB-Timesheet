@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-10-11 — D63 stage 5: invitations in the app; the company at Start Shift — D63 complete
+
+**Built.**
+- **`Invitations`** on Home, below the email card. Each open invitation
+  says:
+  - who invited, and as whom;
+  - until when;
+  - that the company will see the driver's name and email — nothing about
+    other companies or their own records.
+- **Accept** → `POST /driver/invitations/:id/accept`, then `reloadAccount`
+  (new in `AuthContext`), so `account.memberships` — Start Shift's Working
+  for — includes the company at once.
+- **Decline** asks first: "<Company> will see that you declined" (owner
+  decision).
+- **Not now** asks nothing and returns next time.
+- **API client:** `listInvitations` / `acceptInvitation` /
+  `declineInvitation`, shape-checked.
+- **Re-read on confirm:** confirming the email on Home re-reads the
+  invitations (`onConfirmed`, a remount key).
+- **Home's server rule** (D64): the asserted list is now `GET /auth/me` and
+  `GET /driver/invitations`.
+
+**Evidence.**
+- RED: the component did not exist.
+- GREEN: 9 invitation tests, plus a route-level Home test (unconfirmed →
+  confirm → invitations appear).
+- Mutation: 10 mutants, all killed by their intended tests.
+- Gate, exit 0: api 246, mobile 1475 + 7 restart checks, web 160, db 318,
+  backup 12, build, smoke.
+- One earlier full mobile run timed out in three suites untouched by this
+  stage (vehicleCheck, startShiftStep2, companyRedeclaration, 17–33 s at a
+  load average around 10); 106/106 on rerun.
+
+**D63 end to end:**
+1. A company adds a driver on the website (stage 4) through the invitation
+   API (1).
+2. The driver confirms their email in the app (2).
+3. The driver accepts (3, 5), and the company is offered at Start Shift.
+
+None of it has been tried on a physical phone, and the owner has not
+reviewed the screens. Still open: invitation bounce handling, and removing a
+driver from the website.
+
+---
+
 ## 2026-10-11 — D63 stage 4: the website's Drivers page
 
 **Built.**
