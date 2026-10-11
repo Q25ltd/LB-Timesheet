@@ -8,6 +8,7 @@
  *   USES        each use of a finished day opens its own screens, by identity
  *   IN USE      Active Shift corrects the plate or trailer number typed wrong
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
 import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -89,13 +90,13 @@ const DRIVER: AuthenticatedAccount = {
   identityToken: "identity.token.value",
   refreshToken: "refresh-secret-value",
   memberships: [
-    { membershipId: "m1", companyId: "c1", companyName: "Northgate Haulage", role: "driver" },
+    { membershipId: "m1", companyId: "c1", companyName: "Northgate Haulage", role: "driver", distanceUnit: "mile", volumeUnit: "litre" },
     { membershipId: "m2", companyId: "c2", companyName: "Eastway Freight", role: "driver" },
   ],
 };
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 
 type View = Awaited<ReturnType<typeof render>>;
 const text = (view: View, testID: string) => {
@@ -160,6 +161,8 @@ async function busyDay(): Promise<CompletedShift> {
 }
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File) entry.delete();
@@ -407,10 +410,10 @@ test("Fuel is added to a finished day's use from its Fuel screen", async () => {
   const view = await mount(<VehicleFillRoute />, ["fill-save"]);
 
   await press(view, "amount-known");
-  await type(view, "litres", "180");
+  await type(view, "quantity", "180");
   await press(view, "fill-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[1]?.fills).toMatchObject([{ type: "fuel", litres: 180 }]); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[1]?.fills).toMatchObject([{ type: "fuel", quantity: 180, volumeUnit: "litre" }]); });
   expect((await readCompletedShift(SCOPE, done.id))?.previousVehicles[0]?.fills).toEqual([]);
 });
 
@@ -438,7 +441,7 @@ test("Fridge Diesel is added to a finished day's refrigerated trailer use", asyn
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[1]?.reeferDiesel).toMatchObject([{ litres: null }]); });
+  await waitFor(async () => { expect((await readCompletedShift(SCOPE, done.id))?.previousTrailers[1]?.reeferDiesel).toMatchObject([{ quantity: null, volumeUnit: "litre" }]); });
 });
 
 test("a completed Trailer Check on a finished day is CORRECTED by an appended revision", async () => {

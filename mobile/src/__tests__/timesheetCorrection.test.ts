@@ -9,6 +9,7 @@
  *   DELETE    one finished day, by its id, and nothing else
  *   IN USE    the plate or trailer number typed wrong on the open day
  */
+import { quantityOf } from "./fillQuantity";
 import { File } from "expo-file-system";
 import { checklistFor, checklistItems, trailerChecklistFor } from "../shift/checklists";
 import {
@@ -66,8 +67,8 @@ const DRIVER = "user_correct_1";
 const PERSONAL: WorkingContext = { kind: "personal" };
 const NORTHGATE: WorkingContext = { kind: "company", membershipId: "m1", companyId: "c1", companyName: "Northgate Haulage" };
 const EASTWAY: WorkingContext = { kind: "company", membershipId: "m2", companyId: "c2", companyName: "Eastway Freight" };
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 const RF77 = { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated };
 
@@ -335,13 +336,13 @@ test("Fuel and AdBlue are added, edited and removed on ONE use — the same plat
   const done = await busyDay();
   const first = { shiftId: done.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended };
 
-  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 200, note: "" });
-  await recordVehicleFill(SCOPE, { ...first, fillId: "a1", type: FILL_TYPE.adblue, recordedAt: at(7), litres: null, note: "" });
-  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 250, note: "Corrected" });
+  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 200, volumeUnit: "litre", note: "" });
+  await recordVehicleFill(SCOPE, { ...first, fillId: "a1", type: FILL_TYPE.adblue, recordedAt: at(7), quantity: null, volumeUnit: "litre", note: "" });
+  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 250, volumeUnit: "litre", note: "Corrected" });
   await removeVehicleFill(SCOPE, { ...first, fillId: "a1" });
 
   const after = await readCompletedShift(SCOPE, done.id);
-  expect(after?.previousVehicles[0]?.fills).toEqual([{ id: "f1", type: FILL_TYPE.fuel, recordedAt: at(6).toISOString(), litres: 250, note: "Corrected" }]);
+  expect(after?.previousVehicles[0]?.fills).toEqual([{ id: "f1", type: FILL_TYPE.fuel, recordedAt: at(6).toISOString(), quantity: 250, volumeUnit: "litre", note: "Corrected" }]);
   expect(after?.previousVehicles.slice(1)).toEqual(done.previousVehicles.slice(1));
   expect(after?.previousTrailers).toEqual(done.previousTrailers);
   expect(after && effectiveFacts(after)).toEqual(effectiveFacts(done));
@@ -363,8 +364,8 @@ test("a use named as IN USE on a finished day is not found — nothing is writte
   const done = await busyDay();
   const before = bytesOf(done.id);
 
-  expect(await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.inUse, fillId: "x", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 5, note: "" })).toBeNull();
-  expect(await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: "x", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 5, note: "" })).toBeNull();
+  expect(await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.inUse, fillId: "x", type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 5, volumeUnit: "litre", note: "" })).toBeNull();
+  expect(await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: "x", type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 5, volumeUnit: "litre", note: "" })).toBeNull();
 
   expect(bytesOf(done.id)).toBe(before);
 });
@@ -373,15 +374,15 @@ test("Fridge Diesel is added, edited and removed on the REFRIGERATED use; a stan
   const done = await busyDay();
   const fridge = { shiftId: done.id, trailerUseId: trailerUseAt(at(12).toISOString()), usageState: USAGE_STATE.ended };
 
-  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d1", recordedAt: at(12, 30), litres: 30, note: "" });
-  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d2", recordedAt: at(13), litres: null, note: "" });
-  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d1", recordedAt: at(12, 30), litres: 35, note: "" });
+  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d1", recordedAt: at(12, 30), quantity: 30, volumeUnit: "litre", note: "" });
+  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d2", recordedAt: at(13), quantity: null, volumeUnit: "litre", note: "" });
+  await recordReeferDiesel(SCOPE, { ...fridge, fillId: "d1", recordedAt: at(12, 30), quantity: 35, volumeUnit: "litre", note: "" });
   await removeReeferDiesel(SCOPE, { ...fridge, fillId: "d2" });
-  const standard = await recordReeferDiesel(SCOPE, { shiftId: done.id, trailerUseId: trailerUseAt(at(13).toISOString()), usageState: USAGE_STATE.ended, fillId: "no", recordedAt: at(14), litres: 10, note: "" });
+  const standard = await recordReeferDiesel(SCOPE, { shiftId: done.id, trailerUseId: trailerUseAt(at(13).toISOString()), usageState: USAGE_STATE.ended, fillId: "no", recordedAt: at(14), quantity: 10, volumeUnit: "litre", note: "" });
 
   const after = await readCompletedShift(SCOPE, done.id);
   expect(standard).toBeNull();
-  expect(after?.previousTrailers.map(use => use.reeferDiesel.map(fill => [fill.id, fill.litres]))).toEqual([[], [["d1", 35]], []]);
+  expect(after?.previousTrailers.map(use => use.reeferDiesel.map(fill => [fill.id, quantityOf(fill)]))).toEqual([[], [["d1", 35]], []]);
   expect(after?.previousVehicles).toEqual(done.previousVehicles);
 });
 
@@ -438,7 +439,7 @@ test("a use correction that cannot be saved is a SafeSaveFailedError, and the fi
   const done = await busyDay();
   jest.spyOn(File.prototype, "write").mockImplementation(() => { throw new Error("disk full"); });
 
-  await expect(recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 10, note: "" }))
+  await expect(recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 10, volumeUnit: "litre", note: "" }))
     .rejects.toThrow(SafeSaveFailedError);
 
   jest.restoreAllMocks();
@@ -548,7 +549,7 @@ test("the plate of the vehicle IN USE is corrected — normalised, and nothing e
 test("the number of the trailer IN USE is corrected; its type, identity and fridge diesel stay", async () => {
   const shift = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: at(5), vehicle: UNIT });
   await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { ...RF77, trailerNumber: "RF7" }, startedAt: at(6) });
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "d", recordedAt: at(7), litres: 20, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "d", recordedAt: at(7), quantity: 20, volumeUnit: "litre", note: "" });
   const before = (await readOpenShift(SCOPE))?.trailer;
 
   await correctTrailerNumber(SCOPE, { shiftId: shift.id, useId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, value: "rf77" });
@@ -602,7 +603,7 @@ test("a FINISHED day's plate and trailer number are corrected by identity — cl
   const done = await busyDay();
   const items = checklistItems(checklistFor("class1"));
   await completeVehicleCheck(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, checkId: "vc", startedAt: new Date(), answers: answers(items), completedAt: new Date(), completedBy: DRIVER });
-  await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 50, note: "" });
+  await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 50, volumeUnit: "litre", note: "" });
   const before = await readCompletedShift(SCOPE, done.id);
 
   await correctNumberPlate(SCOPE, { shiftId: done.id, useId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, value: "ab12 cdf" });
@@ -718,7 +719,7 @@ test("a use correction on a finished day leaves every stored end as it was — a
   const corrected = await correctDeclared(SCOPE, correction(done, { endedAt: at(16, 30) }));
   if (corrected === null) throw new Error("expected the correction");
 
-  await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 10, note: "" });
+  await recordVehicleFill(SCOPE, { shiftId: done.id, vehicleUseId: vehicleUseAt(at(11).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 10, volumeUnit: "litre", note: "" });
 
   const after = await readCompletedShift(SCOPE, done.id);
   expect(after?.previousVehicles[2]?.endedAt).toBe(at(17).toISOString());

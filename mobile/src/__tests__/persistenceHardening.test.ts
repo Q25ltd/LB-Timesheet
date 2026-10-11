@@ -43,8 +43,8 @@ const SCOPE = scopeFor("user_1");
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const OTHER: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const OTHER: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 
 const live = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
@@ -178,7 +178,7 @@ test("a temporary write that lands INCOMPLETE is never moved into place", async 
 
   await expect(recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
-    fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "",
+    fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 50, volumeUnit: "litre", note: "",
   })).rejects.toThrow(SafeSaveFailedError);
 
   jest.restoreAllMocks();
@@ -235,7 +235,7 @@ test("a next state the READER would refuse is never written — the live day is 
 
   await expect(recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
-    fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "",
+    fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 50, volumeUnit: "litre", note: "",
   })).rejects.toThrow("Refusing to store a day the reader would refuse");
 
   jest.restoreAllMocks();
@@ -274,8 +274,8 @@ test("two queued writes both land, in order, through the safe path", async () =>
   const shift = await dayWith();
 
   await Promise.all([
-    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 50, note: "" }),
-    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(7), litres: null, note: "" }),
+    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 50, volumeUnit: "litre", note: "" }),
+    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(7), quantity: null, volumeUnit: "litre", note: "" }),
   ]);
 
   expect((await readOpenShift(SCOPE))?.vehicle?.fills.map(fill => fill.id)).toEqual(["f1", "f2"]);
@@ -511,7 +511,7 @@ test("a write queued behind a Discard that failed part-way does not resurrect th
   const discard = clearOpenShift(SCOPE);
   const write = recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
-    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 10, note: "",
+    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 10, volumeUnit: "litre", note: "",
   });
 
   await expect(discard).rejects.toBeInstanceOf(DiscardIncompleteError);

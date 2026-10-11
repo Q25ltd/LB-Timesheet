@@ -22,6 +22,7 @@ import {
   type VehicleClass,
   type VehicleDetails,
 } from "../shift/localShift";
+import { distanceShort, type DistanceUnit } from "../shift/units";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 
 /**
@@ -65,11 +66,14 @@ export function vehicleDetailsFrom(
   vehicleClass: VehicleClass | null,
   numberPlate: string,
   mileage: string,
+  /** The unit the reading is recorded in (D66), or `null` when none is set — then none is stored. */
+  odometerUnit: DistanceUnit | null,
 ): VehicleDetails | null {
   const plate = normalisePlate(numberPlate);
-  const miles = parseMileage(mileage);
-  if (vehicleClass === null || plate === "" || miles === null) return null;
-  return { vehicleClass, numberPlate: plate, startMileage: miles };
+  const reading = parseMileage(mileage);
+  if (vehicleClass === null || plate === "" || reading === null) return null;
+  const details = { vehicleClass, numberPlate: plate, startMileage: reading };
+  return odometerUnit === null ? details : { ...details, odometerUnit };
 }
 
 interface VehicleFieldsProps {
@@ -79,11 +83,15 @@ interface VehicleFieldsProps {
   onNumberPlate: (next: string) => void;
   mileage: string;
   onMileage: (next: string) => void;
+  /** The unit the start reading is recorded in (D66) — `null` when none is set. */
+  odometerUnit: DistanceUnit | null;
+  /** Why no unit is set, in the driver's words — or `null`. */
+  unitNote: string | null;
 }
 
 /** Class, number plate and start mileage — the three vehicle questions. */
 export function VehicleFields({
-  vehicleClass, onVehicleClass, numberPlate, onNumberPlate, mileage, onMileage,
+  vehicleClass, onVehicleClass, numberPlate, onNumberPlate, mileage, onMileage, odometerUnit, unitNote,
 }: VehicleFieldsProps) {
   return (
     <>
@@ -121,7 +129,7 @@ export function VehicleFields({
         />
       </FormSection>
 
-      <FormSection label="START MILEAGE">
+      <FormSection label={odometerUnit === null ? "START MILEAGE" : `START MILEAGE (${distanceShort(odometerUnit).toUpperCase()})`}>
         <TextInput
           testID="start-mileage"
           value={mileage}
@@ -132,6 +140,7 @@ export function VehicleFields({
           style={formStyles.input}
           accessibilityLabel="Start mileage"
         />
+        {unitNote === null ? null : <Text style={styles.unitNote} testID="start-mileage-unit-hint">{unitNote}</Text>}
       </FormSection>
     </>
   );
@@ -288,4 +297,8 @@ export const formStyles = StyleSheet.create({
 
   action: { marginTop: spacing.sm },
   blocked: { ...typography.error, marginTop: -spacing.md, marginBottom: spacing.lg, marginHorizontal: spacing.xs },
+});
+
+const styles = StyleSheet.create({
+  unitNote: { ...typography.helper, marginTop: spacing.xs, marginLeft: spacing.xs },
 });

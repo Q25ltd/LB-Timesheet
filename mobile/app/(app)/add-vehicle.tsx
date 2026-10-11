@@ -15,8 +15,9 @@ import { Alert } from "react-native";
 import { Redirect, router } from "expo-router";
 import { AddVehicleScreen } from "../../src/screens/AddVehicleScreen";
 import { Restoring } from "../../src/components/Restoring";
-import { addVehicleToOpenShift, readOpenShift, type VehicleDetails } from "../../src/shift/localShift";
+import { addVehicleToOpenShift, readOpenShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useRecordingUnits } from "../../src/shift/recordingUnits";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
@@ -25,6 +26,9 @@ type Where = "loading" | "no-shift" | "has-vehicle" | "ready";
 export default function AddVehicleRoute() {
   const scope = useAccountScope();
   const [where, setWhere] = useState<Where>("loading");
+  const [workingFor, setWorkingFor] = useState<WorkingContext | null>(null);
+  // The vehicle's readings are recorded in the day's units (D66).
+  const units = useRecordingUnits(workingFor);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +36,10 @@ export default function AddVehicleRoute() {
     void readOpenShift(scope).then(open => {
       if (cancelled) return;
       if (open === null) setWhere("no-shift");
-      else setWhere(open.vehicle === null ? "ready" : "has-vehicle");
+      else {
+        setWorkingFor(open.workingFor);
+        setWhere(open.vehicle === null ? "ready" : "has-vehicle");
+      }
     });
     return () => { cancelled = true; };
   }, [scope]);
@@ -43,7 +50,7 @@ export default function AddVehicleRoute() {
   if (where === "no-shift") return <Redirect href="/today" />;
   if (where === "has-vehicle") return <Redirect href="/active-shift" />;
 
-  return <AddVehicleScreen onBack={() => { router.back(); }} onAdd={vehicle => add(scope, vehicle)} />;
+  return <AddVehicleScreen units={units} onBack={() => { router.back(); }} onAdd={vehicle => add(scope, vehicle)} />;
 }
 
 /**

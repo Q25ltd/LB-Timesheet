@@ -84,8 +84,8 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top: 62, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const OTHER: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const OTHER: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const TR23: TrailerDetails = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.refrigerated };
 const GFD: TrailerDetails = { trailerNumber: "GFD", trailerType: TRAILER_TYPE.refrigerated };
 const DRIVER: AuthenticatedAccount = {
@@ -176,7 +176,7 @@ const VEHICLE: Asset = {
     });
     await recordVehicleFill(SCOPE, {
       shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.inUse, fillId: "fuel-1",
-      type: FILL_TYPE.fuel, recordedAt: at(6), litres: 300, note: "",
+      type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 300, volumeUnit: "litre", note: "",
     });
     await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(first), endMileage: 100_100, next: OTHER, changedAt: at(9) });
     const middle = at(9).toISOString();
@@ -209,7 +209,7 @@ const TRAILER: Asset = {
       shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, checkId: "check-first", startedAt: at(5, 35),
       answers: defaults(trailerChecklistFor(TRAILER_TYPE.refrigerated)), completedAt: at(5, 40), completedBy: CERTIFIER,
     });
-    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, fillId: "diesel-1", recordedAt: at(6), litres: 40, note: "" });
+    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.inUse, fillId: "diesel-1", recordedAt: at(6), quantity: 40, volumeUnit: "litre", note: "" });
     await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(first), next: GFD, changedAt: at(9) });
     const middle = at(9).toISOString();
     await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(middle), next: TR23, changedAt: at(11) });

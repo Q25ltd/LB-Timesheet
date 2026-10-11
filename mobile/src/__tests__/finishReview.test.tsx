@@ -100,8 +100,8 @@ const DRIVER: AuthenticatedAccount = {
 };
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
 const OPENED_AT = at(17, 40);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 
 type View = Awaited<ReturnType<typeof render>>;
@@ -380,7 +380,7 @@ test("leaving the Review to correct anything clears the declaration — even wit
 test.each([
   ["a plate", async (shift: LocalShift) => { await correctNumberPlate(SCOPE, { shiftId: shift.id, useId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, value: "XY34 ZZY" }); }, "review-vehicle-1-title", "XY34 ZZY · Rigid truck"],
   ["a start mileage", async (shift: LocalShift) => { await correctStartMileage(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, startMileage: 220_050 }); }, "review-vehicle-1-mileage", "220,050 → 220,100 · 50 mi"],
-  ["a fill", async (shift: LocalShift) => { await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 80, note: "" }); }, "review-vehicle-0-fuel", "Fuel: 80 L · 1 entry"],
+  ["a fill", async (shift: LocalShift) => { await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(5).toISOString()), usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 80, volumeUnit: "litre", note: "" }); }, "review-vehicle-0-fuel", "Fuel: 80 L · 1 entry"],
   ["the start and who it is for", async (shift: LocalShift) => { await correctOpenShift(SCOPE, { shiftId: shift.id, workingFor: NORTHGATE, startedAt: at(4) }); }, "review-duration", "13 h 40 min"],
   ["a trailer number", async (shift: LocalShift) => { await correctTrailerNumberAt(shift, at(10), "TR24"); }, "review-trailer-0-title", "TR24 · Standard"],
 ])("a correction of %s shows on the Review at once — and the old declaration no longer holds", async (_what, correction, testID, shown) => {

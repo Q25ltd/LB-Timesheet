@@ -80,7 +80,7 @@ const NORTHGATE: WorkingContext = {
 };
 
 const LORRY: LocalVehicle = {
-  vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203,
+  vehicleClass: "class2", numberPlate: "AB24 XYZ", startMileage: 184_203, odometerUnit: "mile",
   useId: "use-lorry", startedAt: new Date(2026, 8, 13, 5, 42).toISOString(),
   checks: [], fills: [],
 };
@@ -273,7 +273,7 @@ test("class, plate and start mileage all come from the shift", async () => {
 test("the plate is shown VERBATIM — never reformatted into a UK shape", async () => {
   // Plates are international. A Lithuanian one must survive intact.
   const view = await show(shiftWith({
-    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, useId: "use-kat", startedAt: LORRY.startedAt, checks: [], fills: [] },
+    vehicle: { vehicleClass: "van", numberPlate: "KAT 123", startMileage: 640, odometerUnit: "mile", useId: "use-kat", startedAt: LORRY.startedAt, checks: [], fills: [] },
   }));
 
   expect(view.getByTestId("vehicle-plate-value").props.children).toBe("KAT 123");
@@ -736,7 +736,7 @@ test("folding is screen state only: it survives a re-render of the same day, and
   expect(isExpanded(view)).toBe(false);
   // Nothing about the card reached the day it renders.
   expect(Object.keys(shift).sort()).toEqual(["createdAt", "id", "ownerUserId", "previousTrailers", "previousVehicles", "startedAt", "status", "trailer", "vehicle", "workingFor"]);
-  expect(Object.keys(LORRY).sort()).toEqual(["checks", "fills", "numberPlate", "startMileage", "startedAt", "useId", "vehicleClass"]);
+  expect(Object.keys(LORRY).sort()).toEqual(["checks", "fills", "numberPlate", "odometerUnit", "startMileage", "startedAt", "useId", "vehicleClass"]);
 });
 
 test("a NEW vehicle use opens its card again, so its checks are the first thing seen", async () => {

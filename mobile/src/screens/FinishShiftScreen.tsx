@@ -36,7 +36,7 @@ import {
   type LocalShift,
   type ShiftFinish,
 } from "../shift/localShift";
-import { classLabel, formatDateTime, formatMileage } from "./format";
+import { classLabel, formatDateTime, formatOdometer } from "./format";
 import { DayStepper, TimeOfDayFields, timeStyles, useTimeOfDay } from "./timeOfDay";
 import { confirmFinishAhead } from "./confirmFinishAhead";
 import { FinalDeclaration } from "./FinalDeclaration";
@@ -149,7 +149,7 @@ export function FinishShiftScreen({
           <View style={styles.vehicle}>
             <Text style={styles.plate} testID="finish-vehicle-plate">{current.numberPlate}</Text>
             <Text style={styles.meta}>
-              {`${classLabel(current.vehicleClass)} · start mileage ${formatMileage(current.startMileage)}`}
+              {`${classLabel(current.vehicleClass)} · start mileage ${formatOdometer(current.startMileage, current.odometerUnit)}`}
             </Text>
           </View>
         </FormSection>
@@ -167,7 +167,7 @@ export function FinishShiftScreen({
         </FormSection>
         {mileageBelowStart ? (
           <Text style={styles.error} testID="final-mileage-error">
-            {`Can't be less than the start mileage, ${formatMileage(current.startMileage)}.`}
+            {`Can't be less than the start mileage, ${formatOdometer(current.startMileage, current.odometerUnit)}.`}
           </Text>
         ) : null}
         <View style={formStyles.action}>

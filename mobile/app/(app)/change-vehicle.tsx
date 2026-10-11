@@ -34,12 +34,15 @@ import {
 } from "../../src/shift/localShift";
 import { usedThisShift } from "../../src/shift/usedVehicles";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useRecordingUnits } from "../../src/shift/recordingUnits";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
 export default function ChangeVehicleRoute() {
   const scope = useAccountScope();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
+  // The next vehicle's readings are recorded in the day's units (D66).
+  const units = useRecordingUnits(shift === "loading" || shift === null ? null : shift.workingFor);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +61,7 @@ export default function ChangeVehicleRoute() {
   const current = shift.vehicle;
   return (
     <ChangeVehicleScreen
+      units={units}
       current={current}
       candidates={usedThisShift(shift)}
       trailerInUse={shift.trailer?.trailerNumber ?? null}

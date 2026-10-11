@@ -37,6 +37,7 @@ import {
 import { FILL_TYPES, fillTypeLabel, fillsOfType, type FillType } from "../../src/shift/vehicleFill";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
 import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
+import { unsetUnitsText, useRecordingUnits } from "../../src/shift/recordingUnits";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
@@ -44,6 +45,8 @@ export default function VehicleFillRoute() {
   const scope = useAccountScope();
   const { type, usage, usageState, timesheet } = useLocalSearchParams<{ type?: string; usage?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
+  // The unit a NEW entry is recorded in: the day's company's, or the driver's own (D66).
+  const units = useRecordingUnits(shift === "loading" || shift === null ? null : shift.workingFor);
 
   // Re-read on every return, so a fill stored here — or a vehicle changed
   // behind this screen — is what the driver sees.
@@ -72,6 +75,8 @@ export default function VehicleFillRoute() {
   const named = { shiftId: shift.id, vehicleUseId: usage, usageState: state };
   return (
     <VehicleFillScreen
+      volumeUnit={units?.volumeUnit ?? null}
+      unitNote={units === null || units.volumeUnit !== null ? null : unsetUnitsText(units.unset)}
       label={fillTypeLabel(fillType)}
       asset="vehicle"
       usage={target}
@@ -113,7 +118,8 @@ async function save(scope: AccountScope, named: NamedUsage, type: FillType, entr
       fillId: entry.fillId ?? newLocalId(),
       type,
       recordedAt: entry.recordedAt,
-      litres: entry.litres,
+      quantity: entry.quantity,
+      volumeUnit: entry.volumeUnit,
       note: entry.note,
     });
     settle(day, show, timesheet);

@@ -35,18 +35,7 @@ import { TRAILER_TYPE, trailerTypeLabel, type EndedTrailer } from "../shift/trai
 import { usageDistance } from "../shift/usedVehicles";
 import { CHECK_RESULT, checkStateOf, effectiveItems, latestCheck, type CheckResult, type VehicleCheck } from "../shift/vehicleCheck";
 import { FILL_TYPE, fillsOfType, type FillRecord } from "../shift/vehicleFill";
-import {
-  calendarDaysBetween,
-  classLabel,
-  finishedCheckLabel,
-  formatClockTime,
-  formatDate,
-  formatDateTime,
-  formatDuration,
-  formatFinish,
-  formatLitres,
-  formatMileage,
-} from "./format";
+import { calendarDaysBetween, classLabel, finishedCheckLabel, formatClockTime, formatDate, formatDateTime, formatDuration, formatFinish, formatFillAmount, formatOdometer, formatDistance } from "./format";
 import { workingForLabel } from "./TimesheetRow";
 import { BackButton, FormSection, formStyles } from "./vehicleForm";
 import { colors, spacing } from "../theme/index";
@@ -298,9 +287,9 @@ function VehicleUse({ use, facts, prefix, last, onOpen, onCheck }: {
       <UseHeader prefix={prefix} title={`${classLabel(use.vehicleClass)} · ${use.numberPlate}`} onOpen={onOpen} />
       <Fact label="Started" value={onTheDay(facts, use.startedAt)} testID={`${prefix}-started`} />
       <Fact label="Ended" value={onTheDay(facts, use.endedAt)} testID={`${prefix}-ended`} />
-      <Fact label="Start mileage" value={formatMileage(use.startMileage)} testID={`${prefix}-start-mileage`} />
-      <Fact label="End mileage" value={formatMileage(use.endMileage)} testID={`${prefix}-end-mileage`} />
-      <Fact label="Travelled" value={formatMileage(usageDistance(use))} testID={`${prefix}-travelled`} />
+      <Fact label="Start mileage" value={formatOdometer(use.startMileage, use.odometerUnit)} testID={`${prefix}-start-mileage`} />
+      <Fact label="End mileage" value={formatOdometer(use.endMileage, use.odometerUnit)} testID={`${prefix}-end-mileage`} />
+      <Fact label="Travelled" value={formatDistance(usageDistance(use), use.odometerUnit)} testID={`${prefix}-travelled`} />
       <Entries title="Fuel" fills={fillsOfType(use.fills, FILL_TYPE.fuel)} facts={facts} prefix={`${prefix}-fuel`} />
       <Entries title="AdBlue / DEF" fills={fillsOfType(use.fills, FILL_TYPE.adblue)} facts={facts} prefix={`${prefix}-adblue`} />
       <Check checks={use.checks} prefix={prefix} />
@@ -336,7 +325,7 @@ function Entries({ title, fills, facts, prefix }: { title: string; fills: readon
       ) : fills.map((fill, index) => (
         <View key={fill.id} testID={`${prefix}-${String(index)}`}>
           <Text style={styles.entry} testID={`${prefix}-${String(index)}-amount`}>
-            {`${onTheDay(facts, fill.recordedAt)} · ${fill.litres === null ? "Amount unknown" : formatLitres(fill.litres)}`}
+            {`${onTheDay(facts, fill.recordedAt)} · ${formatFillAmount(fill)}`}
           </Text>
           {fill.note === null ? null : <Text style={styles.entryNote}>{fill.note}</Text>}
         </View>

@@ -68,7 +68,7 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top: 62, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
 const FRIDGE: TrailerDetails = { trailerNumber: "TR100", trailerType: TRAILER_TYPE.refrigerated };
 const BOX: TrailerDetails = { trailerNumber: "TR200", trailerType: TRAILER_TYPE.standard };
 const DRIVER: AuthenticatedAccount = {
@@ -420,14 +420,14 @@ test("vehicle and trailer checks never touch: completing either leaves the other
 
 test("Fridge Diesel and Trailer Checks are independent: neither creates, requires or changes the other", async () => {
   const { shift, use } = await dayWithTrailer(FRIDGE);
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), litres: 40, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(6), quantity: 40, volumeUnit: "litre", note: "" });
   expect(await trailerChecks()).toEqual([]);
 
   await complete(shift, use, TRAILER_TYPE.refrigerated);
   const checks = JSON.stringify(await trailerChecks());
   expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toHaveLength(1);
 
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), litres: null, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(use), usageState: USAGE_STATE.inUse, fillId: newLocalId(), recordedAt: at(7), quantity: null, volumeUnit: "litre", note: "" });
   expect(JSON.stringify(await trailerChecks())).toBe(checks);
 });
 

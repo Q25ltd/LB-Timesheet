@@ -70,6 +70,7 @@
  * here — and nothing reading it — may treat the classes already used as a
  * constraint on the next one.
  */
+import { isDistanceUnit, type DistanceUnit, type VolumeUnit } from "./units";
 import { Directory, File, Paths } from "expo-file-system";
 import { AccountScope, AccountScopeError, assertLiveScope, accountDirectory } from "./accountScope";
 import { USE_ENDED_BY, asUseEndedBy, type UseEndedBy } from "./useEnd";
@@ -130,8 +131,20 @@ export interface VehicleDetails {
   vehicleClass: VehicleClass;
   /** Trimmed and upper-cased. Never format-validated — plates are international. */
   numberPlate: string;
-  /** Whole miles, zero or more. Never defaulted or invented. */
+  /**
+   * The odometer reading as the dashboard showed it: a whole number, zero or
+   * more, in `odometerUnit`. Never defaulted or invented. (Named before units
+   * existed; it is a reading, not necessarily miles.)
+   */
   startMileage: number;
+  /**
+   * The unit this use's odometer readings are recorded in (D66) — the
+   * company's, or the driver's own for a Personal day — fixed when the use is
+   * created and never changed by a later change of company or setting.
+   * ABSENT means not recorded: every use from before units, and a use made
+   * while no unit was set. Never guessed, never written as a default.
+   */
+  odometerUnit?: DistanceUnit;
 }
 
 export interface LocalVehicle extends VehicleDetails {
@@ -261,7 +274,9 @@ function checkedVehicle(details: VehicleDetails, refusal: string): VehicleDetail
   if (!known || numberPlate === "" || !Number.isSafeInteger(details.startMileage) || details.startMileage < 0) {
     throw new Error(refusal);
   }
-  return { vehicleClass: details.vehicleClass, numberPlate, startMileage: details.startMileage };
+  if (details.odometerUnit !== undefined && !isDistanceUnit(details.odometerUnit)) throw new Error(refusal);
+  const checked = { vehicleClass: details.vehicleClass, numberPlate, startMileage: details.startMileage };
+  return details.odometerUnit === undefined ? checked : { ...checked, odometerUnit: details.odometerUnit };
 }
 
 /** Trimmed and upper-cased — how a plate is stored and shown, wherever it is typed. */
@@ -642,14 +657,18 @@ function asLocalVehicle(value: unknown, shiftStartedAt: string): LocalVehicle | 
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
 
-  const { vehicleClass, numberPlate, startMileage, startedAt } = record;
+  const { vehicleClass, numberPlate, startMileage, startedAt, odometerUnit } = record;
   const known = VEHICLE_CLASSES.some(option => option.id === vehicleClass);
   if (!known || typeof vehicleClass !== "string") return null;
   if (typeof numberPlate !== "string" || numberPlate === "") return null;
-  // Whole miles, as every writer stores them (`checkedVehicle`).
+  // A whole reading, as every writer stores it (`checkedVehicle`).
   if (typeof startMileage !== "number" || !Number.isSafeInteger(startMileage) || startMileage < 0) return null;
+  // Absent: not recorded (D66). Present but not a unit: a broken record.
+  if (odometerUnit !== undefined && !isDistanceUnit(odometerUnit)) return null;
 
-  const vehicle = { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage };
+  const vehicle = odometerUnit === undefined
+    ? { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage }
+    : { vehicleClass: vehicleClass as VehicleClass, numberPlate, startMileage, odometerUnit };
   let usageStartedAt: string;
   if (startedAt === undefined) usageStartedAt = shiftStartedAt;
   else if (typeof startedAt !== "string" || Number.isNaN(Date.parse(startedAt))) return null;
@@ -1188,8 +1207,13 @@ export interface RecordVehicleFillInput {
   type: FillType;
   /** The driver's declared moment — the device clock, or their correction of it. */
   recordedAt: Date;
-  /** Litres, or `null` when the driver does not know. Never 0 for unknown. */
-  litres: number | null;
+  /** The quantity in `volumeUnit`, or `null` when the driver does not know. Never 0 for unknown. */
+  quantity: number | null;
+  /**
+   * The unit the form showed (D66): for a new fill the day's unit, for a
+   * correction the fill's own. `null` only when no unit was set — never guessed.
+   */
+  volumeUnit: VolumeUnit | null;
   /** Optional; empty means none, and is stored as `null`. */
   note: string;
 }
@@ -1218,24 +1242,26 @@ export interface RecordVehicleFillInput {
  * state — writing nothing in every one of those cases.
  *
  * REFUSES — rejects, writing nothing — an unknown type, an invalid moment, an
- * over-long note, and any `litres` that is not a real positive reading. An
- * UNKNOWN quantity is `null`, never 0: zero is a measurement.
+ * over-long note, any `quantity` that is not a real positive reading, and an
+ * unknown unit. An UNKNOWN quantity is `null`, never 0: zero is a measurement.
  */
 export function recordVehicleFill(scope: AccountScope, input: RecordVehicleFillInput): Promise<LocalShift | null> {
   return queued(scope, () => writeFill(scope, input));
 }
 
-async function writeFill(scope: AccountScope, { shiftId, vehicleUseId, usageState, fillId, type, recordedAt, litres, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
+async function writeFill(scope: AccountScope, { shiftId, vehicleUseId, usageState, fillId, type, recordedAt, quantity, volumeUnit, note }: RecordVehicleFillInput): Promise<LocalShift | null> {
   if (fillId === "") throw new Error("Refusing a fill with no id");
   if (!FILL_TYPES.some(entry => entry.id === type)) throw new Error("Refusing a fill of an unknown type");
-  const described = checkedFillNote({ fillId, recordedAt, litres, note });
+  const described = checkedFillNote({ fillId, recordedAt, quantity, volumeUnit, note });
 
   const open = await readDayOfUses(scope, shiftId);
   if (open === null) return null;
   const target = locateUsage(open, vehicleUseId, usageState);
   if (target === null) return null;
 
-  const fill: VehicleFill = { id: fillId, type, recordedAt: recordedAt.toISOString(), litres, note: described };
+  // Written in the current shape — a correction of a fill recorded before
+  // units becomes one, in the unit the form showed for it (litres, D66).
+  const fill: VehicleFill = { id: fillId, type, recordedAt: recordedAt.toISOString(), quantity, volumeUnit, note: described };
   return writeFills(scope, open, target, withFill(target.use.fills, fill));
 }
 
@@ -1661,8 +1687,10 @@ export interface RecordReeferDieselInput {
   /** A second write with the same id corrects that entry. */
   fillId: string;
   recordedAt: Date;
-  /** Litres, or `null` when the driver does not know. Never 0 for unknown. */
-  litres: number | null;
+  /** The quantity in `volumeUnit`, or `null` when the driver does not know. Never 0 for unknown. */
+  quantity: number | null;
+  /** The unit the form showed (D66); `null` only when none was set. */
+  volumeUnit: VolumeUnit | null;
   note: string;
 }
 
@@ -1684,14 +1712,14 @@ export function recordReeferDiesel(scope: AccountScope, input: RecordReeferDiese
   return queued(scope, () => writeReeferDiesel(scope, input));
 }
 
-async function writeReeferDiesel(scope: AccountScope, { shiftId, trailerUseId, usageState, fillId, recordedAt, litres, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
-  const described = checkedFillNote({ fillId, recordedAt, litres, note });
+async function writeReeferDiesel(scope: AccountScope, { shiftId, trailerUseId, usageState, fillId, recordedAt, quantity, volumeUnit, note }: RecordReeferDieselInput): Promise<LocalShift | null> {
+  const described = checkedFillNote({ fillId, recordedAt, quantity, volumeUnit, note });
 
   const open = await readDayOfUses(scope, shiftId);
   const target = reefer(locateTrailer(open, shiftId, trailerUseId, usageState));
   if (open === null || target === null) return null;
 
-  const fill: FillRecord = { id: fillId, recordedAt: recordedAt.toISOString(), litres, note: described };
+  const fill: FillRecord = { id: fillId, recordedAt: recordedAt.toISOString(), quantity, volumeUnit, note: described };
   return writeTrailerUse(scope, open, target, { reeferDiesel: withFill(target.use.reeferDiesel, fill) });
 }
 

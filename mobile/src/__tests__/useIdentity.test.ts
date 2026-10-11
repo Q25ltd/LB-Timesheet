@@ -60,9 +60,9 @@ const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes)
 const iso = (hours: number, minutes = 0) => at(hours, minutes).toISOString();
 const PERSONAL: WorkingContext = { kind: "personal" };
 const NORTHGATE: WorkingContext = { kind: "company", membershipId: "m1", companyId: "c1", companyName: "Northgate Haulage" };
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
-const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 5_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 5_000, odometerUnit: "mile" };
 const TR23 = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 const RF77 = { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated };
 
@@ -147,7 +147,7 @@ describe("a use's identity", () => {
 
     await recordVehicleFill(SCOPE, {
       shiftId: shift.id, vehicleUseId: day.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse,
-      fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(12), litres: 50, note: "",
+      fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 50, volumeUnit: "litre", note: "",
     });
 
     const after = await open();
@@ -163,7 +163,7 @@ describe("a use's identity", () => {
     const day = await open();
     const [first] = day.previousTrailers;
 
-    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: day.trailer?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: "d1", recordedAt: at(11), litres: 40, note: "" });
+    await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: day.trailer?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: "d1", recordedAt: at(11), quantity: 40, volumeUnit: "litre", note: "" });
 
     expect(first?.trailerNumber).toBe(day.trailer?.trailerNumber);
     expect(first?.useId).not.toBe(day.trailer?.useId);
@@ -193,7 +193,7 @@ describe("a use's identity", () => {
     // The id still names it; its old start names nothing.
     await recordVehicleFill(SCOPE, {
       shiftId: day.id, vehicleUseId: current.useId, usageState: USAGE_STATE.inUse,
-      fillId: "f1", type: FILL_TYPE.adblue, recordedAt: at(10), litres: null, note: "",
+      fillId: "f1", type: FILL_TYPE.adblue, recordedAt: at(10), quantity: null, volumeUnit: "litre", note: "",
     });
 
     const after = await open();
@@ -274,7 +274,7 @@ describe("a use stored before ids existed", () => {
     // The start the id was derived from has moved; the id has not — and every other use's id is written out too.
     expect((rawOpen()["previousVehicles"] as unknown[])[0]).toMatchObject({ useId: legacy, startedAt: iso(5, 15) });
     expect(rawOpen()["vehicle"]).toMatchObject({ useId: `legacy-vehicle-${iso(9)}` });
-    await recordVehicleFill(SCOPE, { shiftId: day.id, vehicleUseId: legacy, usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), litres: 5, note: "" });
+    await recordVehicleFill(SCOPE, { shiftId: day.id, vehicleUseId: legacy, usageState: USAGE_STATE.ended, fillId: "f", type: FILL_TYPE.fuel, recordedAt: at(6), quantity: 5, volumeUnit: "litre", note: "" });
 
     expect((await open()).previousVehicles[0]).toMatchObject({ useId: legacy, startedAt: iso(5, 15), fills: [expect.objectContaining({ id: "f" })] });
   });
@@ -562,7 +562,7 @@ describe("a company's declaration", () => {
 
     await recordVehicleFill(SCOPE, {
       shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
-      fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
+      fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 80, volumeUnit: "litre", note: "",
     });
 
     const changed = await readCompletedShift(SCOPE, done.id);
@@ -647,7 +647,7 @@ describe("a company's declaration", () => {
 
     await recordVehicleFill(SCOPE, {
       shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
-      fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
+      fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 80, volumeUnit: "litre", note: "",
     });
 
     const changed = await readCompletedShift(SCOPE, done.id);

@@ -8,6 +8,8 @@
  * completed after the trailer went back is dated when it was actually
  * completed, and that what cannot be edited is not offered.
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
+import { quantityOf } from "./fillQuantity";
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
 import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -75,7 +77,7 @@ const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top:
 // A day in the past, so "now" is unmistakably after any trailer's hours.
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
 const TR23: TrailerDetails = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.refrigerated };
 const BOX: TrailerDetails = { trailerNumber: "GFD", trailerType: TRAILER_TYPE.standard };
 const DRIVER: AuthenticatedAccount = {
@@ -96,6 +98,8 @@ async function type(view: View, testID: string, value: string): Promise<void> {
 }
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   for (const key of ["usage", "trailer", "usageState"] as const) delete params[key];
   for (const fn of Object.values(mockRouter)) fn.mockClear();
@@ -136,7 +140,7 @@ const textInputs = (view: View): string[] =>
 async function dieselOn(shift: LocalShift, trailerStartedAt: string, usageState: UsageState, over: { fillId?: string; litres?: number | null } = {}) {
   return recordReeferDiesel(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(trailerStartedAt), usageState, fillId: over.fillId ?? newLocalId(),
-    recordedAt: at(10, 0), litres: over.litres === undefined ? 50 : over.litres, note: "",
+    recordedAt: at(10, 0), quantity: over.litres === undefined ? 50 : over.litres, volumeUnit: "litre", note: "",
   });
 }
 
@@ -151,7 +155,7 @@ test("historical fridge diesel lands on EXACTLY the ended use named — the othe
   await dieselOn(shift, second, USAGE_STATE.ended, { litres: 300 });
 
   const after = await readOpenShift(SCOPE);
-  expect((await ended(second))?.reeferDiesel.map(fill => fill.litres)).toEqual([300]);
+  expect((await ended(second))?.reeferDiesel.map(fill => quantityOf(fill))).toEqual([300]);
   expect(JSON.stringify(await ended(first))).toBe(JSON.stringify(before?.previousTrailers.find(use => use.startedAt === first)));
   expect(JSON.stringify(after?.trailer)).toBe(JSON.stringify(before?.trailer));
 });
@@ -162,8 +166,8 @@ test("an ended use's diesel can be added, corrected, set UNKNOWN (null, never 0)
 
   await dieselOn(shift, first, USAGE_STATE.ended, { fillId: id, litres: 30 });
   await dieselOn(shift, first, USAGE_STATE.ended, { fillId: id, litres: null });
-  expect((await ended(first))?.reeferDiesel).toMatchObject([{ id, litres: null }]);
-  expect(bytes()).toContain('"litres":null');
+  expect((await ended(first))?.reeferDiesel).toMatchObject([{ id, quantity: null, volumeUnit: "litre" }]);
+  expect(bytes()).toContain('"quantity":null');
 
   await removeReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: id });
   expect((await ended(first))?.reeferDiesel).toEqual([]);
@@ -206,7 +210,7 @@ test("ADVERSARIAL: a day saved with two trailer uses sharing one start is refuse
 
   expect(await readOpenShift(SCOPE)).toBeNull();
   const result = await recordReeferDiesel(SCOPE, {
-    shiftId: "any", trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(), recordedAt: at(10), litres: 5, note: "",
+    shiftId: "any", trailerUseId: trailerUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(), recordedAt: at(10), quantity: 5, volumeUnit: "litre", note: "",
   });
   expect(result).toBeNull();
   expect(bytes()).toBe(before);
@@ -328,7 +332,7 @@ test("the Fridge Diesel form for an ENDED use names it by number AND hours, and 
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  expect((await ended(second))?.reeferDiesel).toMatchObject([{ litres: null }]);
+  expect((await ended(second))?.reeferDiesel).toMatchObject([{ quantity: null, volumeUnit: "litre" }]);
   expect((await ended(first))?.reeferDiesel).toEqual([]);
   expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toEqual([]);
 });
@@ -342,9 +346,9 @@ test("an existing ended entry is corrected and removed on its form, keeping its 
   const view = await mount(<TrailerDieselRoute />);
 
   await press(view, `fill-${id}`);
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
   await press(view, "fill-save");
-  expect((await ended(second))?.reeferDiesel).toMatchObject([{ id, litres: 300 }]);
+  expect((await ended(second))?.reeferDiesel).toMatchObject([{ id, quantity: 300, volumeUnit: "litre" }]);
 
   await press(view, `fill-${id}`);
   await press(view, "fill-remove");

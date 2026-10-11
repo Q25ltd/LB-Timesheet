@@ -86,7 +86,7 @@ import { FILL_TYPES, summariseFills, summariseRecords, type FillSummary, type Fi
 import { TRAILER_TYPE, towsTrailers, trailerTypeLabel, type EndedTrailer, type LocalTrailer } from "../shift/trailer";
 import { usageDistance, usageHistory } from "../shift/usedVehicles";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
-import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatMileage, formatMileageRange } from "./format";
+import { CHECK_STATE_LABEL, classLabel, fillSummaryText, formatClockTime, formatOdometer, formatDistance, formatOdometerRange } from "./format";
 
 /**
  * A Class 1 is a tractor UNIT pulling a separate trailer, and that is what
@@ -483,7 +483,7 @@ function CurrentVehicle({ vehicle, expanded, onToggle, changeLabel, onVehicleChe
       <View style={styles.facts}>
         <FactRow label="Start mileage">
           <Text style={styles.factValue} testID="vehicle-mileage-value">
-            {formatMileage(vehicle.startMileage)}
+            {formatOdometer(vehicle.startMileage, vehicle.odometerUnit)}
           </Text>
         </FactRow>
         <FactRow label="Vehicle checks">
@@ -809,7 +809,7 @@ function UsedTrailerRow({ use, last, onPress }: { use: EndedTrailer; last: boole
 }
 
 function UsedRow({ use, last, onPress }: { use: EndedVehicle; last: boolean; onPress: () => void }) {
-  const mileage = `${formatMileageRange(use.startMileage, use.endMileage)} mi · ${formatMileage(usageDistance(use))}`;
+  const mileage = `${formatOdometerRange(use.startMileage, use.endMileage, use.odometerUnit)} · ${formatDistance(usageDistance(use), use.odometerUnit)}`;
   return (
     <Pressable
       testID={`usage-${use.startedAt}`}

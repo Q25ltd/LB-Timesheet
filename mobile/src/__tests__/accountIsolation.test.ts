@@ -111,7 +111,7 @@ test("RED-2. B cannot modify, correct, finish or discard A's unfinished day, by 
   expect(await addVehicleToOpenShift(b, { vehicle: LORRY, startedAt: at(7) })).toBeNull();
   expect(await recordVehicleFill(b, {
     shiftId: aDay.id, vehicleUseId: aDay.vehicle!.useId, usageState: "in-use", fillId: "fill-1", type: "fuel",
-    recordedAt: at(8), litres: 50, note: "",
+    recordedAt: at(8), quantity: 50, volumeUnit: "litre", note: "",
   })).toBeNull();
   expect(await correctOpenShift(b, { shiftId: aDay.id, workingFor: { kind: "personal" }, startedAt: at(4) })).toBeNull();
   expect(await finishOpenShift(b, {

@@ -13,6 +13,7 @@
  * It does NOT check the vehicle. Vehicle checks are still not completed the
  * moment a vehicle arrives, and nothing here pretends otherwise.
  */
+import { unsetUnitsText, type RecordingUnits } from "../shift/recordingUnits";
 import { useRef, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -34,9 +35,13 @@ interface AddVehicleScreenProps {
    * be, in which case the form stays open and can be submitted again.
    */
   onAdd: (vehicle: VehicleDetails) => Promise<void>;
+  /** The units the vehicle's readings are recorded in (D66); `null` while they are read. */
+  units: RecordingUnits | null;
 }
 
-export function AddVehicleScreen({ onBack, onAdd }: AddVehicleScreenProps) {
+export function AddVehicleScreen({ onBack, onAdd, units }: AddVehicleScreenProps) {
+  const odometerUnit = units?.distanceUnit ?? null;
+  const unitNote = units === null || odometerUnit !== null ? null : unsetUnitsText(units.unset);
   const insets = useSafeAreaInsets();
   const [vehicleClass, setVehicleClass] = useState<VehicleClass | null>(null);
   const [numberPlate, setNumberPlate] = useState("");
@@ -51,7 +56,7 @@ export function AddVehicleScreen({ onBack, onAdd }: AddVehicleScreenProps) {
    */
   const inFlight = useRef(false);
 
-  const vehicle = vehicleDetailsFrom(vehicleClass, numberPlate, mileage);
+  const vehicle = vehicleDetailsFrom(vehicleClass, numberPlate, mileage, odometerUnit);
 
   function add() {
     if (vehicle === null || inFlight.current) return;
@@ -89,6 +94,8 @@ export function AddVehicleScreen({ onBack, onAdd }: AddVehicleScreenProps) {
           onNumberPlate={setNumberPlate}
           mileage={mileage}
           onMileage={setMileage}
+          odometerUnit={odometerUnit}
+          unitNote={unitNote}
         />
 
         <View style={formStyles.action}>

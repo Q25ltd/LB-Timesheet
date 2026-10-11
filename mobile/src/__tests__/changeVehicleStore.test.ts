@@ -7,6 +7,7 @@
  * with its own start mileage and no checks; and nothing about an earlier use
  * — its start, its checks, its certificate — is touched by what comes after.
  */
+import { quantityOf } from "./fillQuantity";
 import { File } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
@@ -36,8 +37,10 @@ import { accountDirectoryOf, scopeFor } from "./testScope";
 const SCOPE = scopeFor("user_1");
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
-const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+/** AB12 as a day stored BEFORE units holds it: its readings have no recorded unit (D66). */
+const AB12_NO_UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
+const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
 
 const storedFile = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
@@ -399,7 +402,7 @@ test("a day saved BEFORE vehicles could be changed still loads, with no earlier 
 
   expect(day?.previousVehicles).toEqual([]);
   // No stored identity: the legacy one, derived from its start — the same on every read (D42).
-  expect(day?.vehicle).toEqual({ ...AB12, useId: `legacy-vehicle-${STARTED_AT.toISOString()}`, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
+  expect(day?.vehicle).toEqual({ ...AB12_NO_UNIT, useId: `legacy-vehicle-${STARTED_AT.toISOString()}`, startedAt: STARTED_AT.toISOString(), checks: [], fills: [] });
   // Reading is not writing.
   expect(storedFile().textSync()).toBe(bytes);
 });
@@ -416,7 +419,8 @@ test("an old day can be changed like any other — its vehicle becomes the first
 
   const day = await changeFrom(shift, { endMileage: 100_120, next: XY34 });
 
-  expect(day?.previousVehicles[0]).toMatchObject({ ...AB12, startedAt: STARTED_AT.toISOString(), endMileage: 100_120 });
+  expect(day?.previousVehicles[0]).toEqual(expect.objectContaining({ ...AB12_NO_UNIT, startedAt: STARTED_AT.toISOString(), endMileage: 100_120 }));
+  expect(day?.previousVehicles[0]).not.toHaveProperty("odometerUnit");
 });
 
 const ended = (over: Record<string, unknown> = {}) => ({
@@ -470,8 +474,8 @@ test("changing vehicle makes NO request", async () => {
 // Giving a vehicle up with NOTHING to follow (D32)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "RG11 AAA", startMileage: 40_000 };
-const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 BBB", startMileage: 500 };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "RG11 AAA", startMileage: 40_000, odometerUnit: "mile" };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 BBB", startMileage: 500, odometerUnit: "mile" };
 
 /** End the vehicle in use and carry on without one, as the screen asks for it. */
 async function endFrom(shift: LocalShift, over: Partial<EndVehicleUseInput> = {}): Promise<LocalShift | null> {
@@ -490,7 +494,7 @@ async function fill(shift: LocalShift, litres: number | null, type: "fuel" | "ad
   const open = await readOpenShift(SCOPE);
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type, recordedAt, litres, note: "",
+    type, recordedAt, quantity: litres, volumeUnit: "litre", note: "",
   });
 }
 
@@ -596,7 +600,7 @@ test("checks, fuel and AdBlue stay on the use that had them", async () => {
   expect(closed?.checks).toEqual(held?.checks);
   expect(checkStateOf(closed?.checks ?? [])).toBe("completed");
   expect(closed?.fills).toEqual(held?.fills);
-  expect(closed?.fills.map(entry => [entry.type, entry.litres])).toEqual([["fuel", 300], ["adblue", null]]);
+  expect(closed?.fills.map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 300], ["adblue", null]]);
 });
 
 test("a RESTART during the gap restores an OPEN day with no vehicle and its history intact", async () => {
@@ -613,7 +617,7 @@ test("a RESTART during the gap restores an OPEN day with no vehicle and its hist
   expect(day?.previousVehicles[0]).toMatchObject({
     numberPlate: "AB12 CDE", startMileage: 100_000, endMileage: 100_250, endedAt: at(13).toISOString(),
   });
-  expect(day?.previousVehicles[0]?.fills).toMatchObject([{ type: "fuel", litres: 300 }]);
+  expect(day?.previousVehicles[0]?.fills).toMatchObject([{ type: "fuel", quantity: 300, volumeUnit: "litre" }]);
 });
 
 test("a later vehicle begins a NEW use at ITS OWN time, and the real gap survives", async () => {

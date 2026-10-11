@@ -28,6 +28,7 @@ import {
 import { TRAILER_TYPE } from "../../src/shift/trailer";
 import { formatClockTime, saveFailureMessage } from "../../src/screens/format";
 import { leaveStale, missingHref, readScreenDay } from "../../src/navigation/useScreenDay";
+import { unsetUnitsText, useRecordingUnits } from "../../src/shift/recordingUnits";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
 
@@ -35,6 +36,8 @@ export default function TrailerDieselRoute() {
   const scope = useAccountScope();
   const { trailer, usageState, timesheet } = useLocalSearchParams<{ trailer?: string; usageState?: string; timesheet?: string }>();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
+  // The unit a NEW entry is recorded in: the day's company's, or the driver's own (D66).
+  const units = useRecordingUnits(shift === "loading" || shift === null ? null : shift.workingFor);
 
   useFocusEffect(
     useCallback(() => {
@@ -59,6 +62,8 @@ export default function TrailerDieselRoute() {
   const named: NamedTrailer = { shiftId: shift.id, trailerUseId: trailer, usageState: state };
   return (
     <VehicleFillScreen
+      volumeUnit={units?.volumeUnit ?? null}
+      unitNote={units === null || units.volumeUnit !== null ? null : unsetUnitsText(units.unset)}
       label="Fridge Diesel"
       asset="trailer"
       usage={{
@@ -83,7 +88,8 @@ async function save(scope: AccountScope, named: NamedTrailer, entry: FillEntry, 
       ...named,
       fillId: entry.fillId ?? newLocalId(),
       recordedAt: entry.recordedAt,
-      litres: entry.litres,
+      quantity: entry.quantity,
+      volumeUnit: entry.volumeUnit,
       note: entry.note,
     }), show, timesheet);
   } catch (error: unknown) {

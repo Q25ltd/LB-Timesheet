@@ -188,8 +188,8 @@ test("no current trailer: the day's trailers are exactly the ones already ended"
 test("a refrigerated trailer keeps its Fridge Diesel exactly", async () => {
   const shift = await dayWith();
   await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: FRIDGE, startedAt: at(6) });
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd1", recordedAt: at(7), litres: 40, note: "" });
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd2", recordedAt: at(11), litres: null, note: "Gauge broken" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd1", recordedAt: at(7), quantity: 40, volumeUnit: "litre", note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(6).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd2", recordedAt: at(11), quantity: null, volumeUnit: "litre", note: "Gauge broken" });
   const diesel = (await readOpenShift(SCOPE))?.trailer?.reeferDiesel;
 
   const done = await finishDeclared(SCOPE, await finishOf());
@@ -314,8 +314,8 @@ test("completed checks, their defects and their corrections are carried byte-for
   const tyre = items.find(entry => entry.key.includes("tyre"))?.key ?? items[0]?.key;
   await completeVehicleCheck(SCOPE, { ...use, checkId: "morning", startedAt: at(5, 5), answers: answersFor(items, tyre), completedAt: at(5, 20), completedBy: DRIVER });
   await reviseVehicleCheck(SCOPE, { shiftId: shift.id, useId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, checkId: "morning", revisionId: "r1", answers: answersFor(items), revisedAt: at(6), revisedBy: DRIVER });
-  await recordVehicleFill(SCOPE, { ...use, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 300, note: "" });
-  await recordVehicleFill(SCOPE, { ...use, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(8), litres: null, note: "" });
+  await recordVehicleFill(SCOPE, { ...use, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 300, volumeUnit: "litre", note: "" });
+  await recordVehicleFill(SCOPE, { ...use, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(8), quantity: null, volumeUnit: "litre", note: "" });
   const current = (await readOpenShift(SCOPE))?.vehicle;
 
   const done = await finishDeclared(SCOPE, await finishOf());
@@ -457,7 +457,7 @@ test("a write queued behind the finish cannot touch the finished day", async () 
   const [done, late] = await Promise.all([
     finishOpenShift(SCOPE, finish),
     addVehicleToOpenShift(SCOPE, { vehicle: OTHER, startedAt: at(18) }),
-    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(16), litres: 5, note: "" }),
+    recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(16), quantity: 5, volumeUnit: "litre", note: "" }),
   ]);
 
   expect(done).not.toBeNull();

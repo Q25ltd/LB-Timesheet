@@ -69,8 +69,8 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top: 62, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const XY34: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const XY34: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 
 type View = Awaited<ReturnType<typeof render>>;
 
@@ -121,7 +121,7 @@ async function fillNow(litres: number | null, over: { type?: "fuel" | "adblue"; 
   await recordVehicleFill(SCOPE, {
     shiftId: open?.id ?? "", vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse,
     fillId: newLocalId(), type: over.type ?? FILL_TYPE.fuel, recordedAt: over.recordedAt ?? at(8),
-    litres, note: over.note ?? "",
+    quantity: litres, volumeUnit: "litre", note: over.note ?? "",
   });
 }
 

@@ -51,7 +51,7 @@ describe("the registration example", () => {
   test("is the neutral instruction 'Registration number', not a UK-looking plate", async () => {
     const noop = (): void => undefined;
     const view = await render(
-      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} />,
+      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} odometerUnit={null} unitNote={null} />,
     );
     expect(view.queryByPlaceholderText("AB24 XYZ")).toBeNull();
     expect(view.getByPlaceholderText("Registration number")).toBeTruthy();

@@ -9,6 +9,7 @@
  * `registration.ts` owns the register call and uses these types; it does not
  * define its own copies.
  */
+import { isDistanceUnit, isVolumeUnit, type DistanceUnit, type VolumeUnit } from "../shift/units";
 import { getJson, postEmpty, postJson, type ApiResult } from "./client";
 
 export interface AccountUser {
@@ -28,6 +29,13 @@ export interface AccountMembership {
   companyId: string;
   companyName: string;
   role: "driver" | "admin";
+  /**
+   * The company's units (D66) — what its drivers record in. `null` where the
+   * company has chosen none; absent only from a server before units existed,
+   * which means the same.
+   */
+  distanceUnit?: DistanceUnit | null;
+  volumeUnit?: VolumeUnit | null;
 }
 
 /**
@@ -86,7 +94,11 @@ function isAccountUser(value: unknown): value is AccountUser {
 function isAccountMembership(value: unknown): value is AccountMembership {
   const r = record(value);
   return r !== null && text(r["membershipId"]) && text(r["companyId"]) && typeof r["companyName"] === "string"
-    && (r["role"] === "driver" || r["role"] === "admin");
+    && (r["role"] === "driver" || r["role"] === "admin")
+    // A unit, when the server names one, must be one this app knows — never a
+    // value it would have to guess the meaning of.
+    && (r["distanceUnit"] === undefined || r["distanceUnit"] === null || isDistanceUnit(r["distanceUnit"]))
+    && (r["volumeUnit"] === undefined || r["volumeUnit"] === null || isVolumeUnit(r["volumeUnit"]));
 }
 
 function isMemberships(value: unknown): value is AccountMembership[] {

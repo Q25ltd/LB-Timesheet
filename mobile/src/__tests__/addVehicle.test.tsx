@@ -17,6 +17,7 @@
  *
  * It asks no server anything. The day is local (D28), and so is its vehicle.
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AddVehicleScreen } from "../screens/AddVehicleScreen";
@@ -33,7 +34,10 @@ const SCOPE = scopeFor("user_1");
 // behaviour is proven in accountSwitchRoute.test.tsx.
 jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
 // No company is withdrawn in these screens' days (D65: membershipWithdrawal.test.tsx).
-jest.mock("../auth/useActiveMemberships", () => ({ useActiveMemberships: () => null }));
+// The company these days are for, with its units (D66).
+jest.mock("../auth/useActiveMemberships", () => ({
+  useActiveMemberships: () => [{ membershipId: "mem_1", companyId: "co_1", companyName: "Northgate Logistics", role: "driver", distanceUnit: "mile", volumeUnit: "litre" }],
+}));
 const mockScope = SCOPE;
 
 const mockRouter = {
@@ -110,6 +114,8 @@ function allText(view: View): string {
 }
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   for (const fn of Object.values(mockRouter)) fn.mockClear();
   mockFocusEffects.length = 0;
@@ -121,7 +127,7 @@ afterEach(() => { jest.restoreAllMocks(); });
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function openForm(onAdd: (v: VehicleDetails) => Promise<void> = () => Promise.resolve()) {
-  return wrap(<AddVehicleScreen onBack={() => undefined} onAdd={onAdd} />);
+  return wrap(<AddVehicleScreen units={null} onBack={() => undefined} onAdd={onAdd} />);
 }
 
 test("the form asks exactly the three vehicle questions, and starts unavailable", async () => {
@@ -239,7 +245,7 @@ test("the keyboard cannot sit on Number plate or Start mileage", async () => {
 test("Back leaves without adding anything", async () => {
   const onBack = jest.fn();
   const onAdd = jest.fn(() => Promise.resolve());
-  const view = await wrap(<AddVehicleScreen onBack={onBack} onAdd={onAdd} />);
+  const view = await wrap(<AddVehicleScreen units={null} onBack={onBack} onAdd={onAdd} />);
 
   await press(view, "add-vehicle-back");
 

@@ -67,7 +67,7 @@ jest.mock("expo-router", () => {
 
 const METRICS = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 13, 5, 42);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 124_560 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 124_560, odometerUnit: "mile" };
 
 /** The signed-in driver a completed check is attributed to. */
 const DRIVER: AuthenticatedAccount = {

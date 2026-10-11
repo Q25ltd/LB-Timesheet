@@ -73,7 +73,8 @@ import {
   parseMileage,
   vehicleDetailsFrom,
 } from "./vehicleForm";
-import { formatClockTime, formatMileage } from "./format";
+import { unsetUnitsText, type RecordingUnits } from "../shift/recordingUnits";
+import { formatClockTime, formatOdometer } from "./format";
 import { colors, spacing, typography } from "../theme/index";
 
 /** What the driver confirms: how the vehicle in use ends, and what comes next. */
@@ -103,6 +104,8 @@ interface ChangeVehicleScreenProps {
   onLeave: () => void;
   /** Store the change. Rejects if it could not be stored; the form stays open. */
   onConfirm: (change: VehicleChange) => Promise<void>;
+  /** The units the NEXT use is recorded in (D66); `null` while they are read. The ending use keeps its own. */
+  units: RecordingUnits | null;
 }
 
 type Step =
@@ -116,7 +119,9 @@ function classLabel(id: VehicleClass): string {
   return VEHICLE_CLASSES.find(option => option.id === id)?.label ?? id;
 }
 
-export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave, onConfirm }: ChangeVehicleScreenProps) {
+export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave, onConfirm, units }: ChangeVehicleScreenProps) {
+  const nextUnit = units?.distanceUnit ?? null;
+  const unitNote = units === null || nextUnit !== null ? null : unsetUnitsText(units.unset);
   const insets = useSafeAreaInsets();
   const isUnit = current.vehicleClass === "class1";
   const noun = isUnit ? "unit" : "vehicle";
@@ -165,7 +170,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
           <View style={styles.vehicle}>
             <Text style={styles.plate} testID="ending-plate">{current.numberPlate}</Text>
             <Text style={styles.meta} testID="ending-start-mileage">
-              {`${classLabel(current.vehicleClass)} · start mileage ${formatMileage(current.startMileage)}`}
+              {`${classLabel(current.vehicleClass)} · start mileage ${formatOdometer(current.startMileage, current.odometerUnit)}`}
             </Text>
           </View>
         </FormSection>
@@ -183,7 +188,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
         </FormSection>
         {endBelowStart ? (
           <Text style={styles.error} testID="end-mileage-error">
-            {`Can't be less than the start mileage, ${formatMileage(current.startMileage)}.`}
+            {`Can't be less than the start mileage, ${formatOdometer(current.startMileage, current.odometerUnit)}.`}
           </Text>
         ) : null}
         <View style={formStyles.action}>
@@ -200,7 +205,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
     body = (
       <>
         <Text style={styles.summary} testID="ending-summary">
-          {`Ending ${current.numberPlate} at ${formatMileage(endMileage ?? current.startMileage)}`}
+          {`Ending ${current.numberPlate} at ${formatOdometer(endMileage ?? current.startMileage, current.odometerUnit)}`}
         </Text>
         {candidates.length > 0 ? (
           <FormSection label="USED THIS SHIFT">
@@ -261,7 +266,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
     body = (
       <>
         <Text style={styles.summary} testID="ending-summary">
-          {`Ending ${current.numberPlate} at ${formatMileage(endMileage ?? current.startMileage)}`}
+          {`Ending ${current.numberPlate} at ${formatOdometer(endMileage ?? current.startMileage, current.odometerUnit)}`}
         </Text>
         <FormSection label="NO VEHICLE">
           <View style={styles.vehicle}>
@@ -299,7 +304,9 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
     const change = !vanBlocked && endMileage !== null && startMileage !== null && performChecks !== null
       ? {
           endMileage,
-          next: { vehicleClass: vehicle.vehicleClass, numberPlate: vehicle.numberPlate, startMileage },
+          next: nextUnit === null
+            ? { vehicleClass: vehicle.vehicleClass, numberPlate: vehicle.numberPlate, startMileage }
+            : { vehicleClass: vehicle.vehicleClass, numberPlate: vehicle.numberPlate, startMileage, odometerUnit: nextUnit },
           performChecks,
         }
       : null;
@@ -358,7 +365,7 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
     );
   } else {
     const vanBlocked = trailerInUse !== null && newClass !== null && !towsTrailers(newClass);
-    const next = vanBlocked ? null : vehicleDetailsFrom(newClass, newPlate, newMileage);
+    const next = vanBlocked ? null : vehicleDetailsFrom(newClass, newPlate, newMileage, nextUnit);
     const change = endMileage !== null && next !== null ? { endMileage, next, performChecks: false } : null;
     body = (
       <>
@@ -369,6 +376,8 @@ export function ChangeVehicleScreen({ current, candidates, trailerInUse, onLeave
           onNumberPlate={setNewPlate}
           mileage={newMileage}
           onMileage={setNewMileage}
+          odometerUnit={nextUnit}
+          unitNote={unitNote}
         />
         {vanBlocked && trailerInUse !== null ? <HandBackTrailerFirst trailerNumber={trailerInUse} because="van" /> : null}
         <View style={formStyles.action}>

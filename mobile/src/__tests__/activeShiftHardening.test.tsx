@@ -13,6 +13,7 @@
  *              was saved — it never reports success for a write that did not
  *              happen, and never goes on to act on the asset that replaced it
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
 import { Directory, File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -54,6 +55,8 @@ const SCOPE = scopeFor("user_harden_1");
 // Screens act for this test's driver. The real hook's sign-in / sign-out
 // behaviour is proven in accountSwitchRoute.test.tsx.
 jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+// No company is withdrawn in these screens' days (D65: membershipWithdrawal.test.tsx).
+jest.mock("../auth/useActiveMemberships", () => ({ useActiveMemberships: () => null }));
 const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
@@ -80,8 +83,8 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top: 62, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const OTHER: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const OTHER: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const TR23: TrailerDetails = { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard };
 const DRIVER: AuthenticatedAccount = {
   user: { id: "user_harden_1", firstName: "Nerijus", lastName: "Kuizinas", email: "driver@example.com" },
@@ -109,6 +112,8 @@ const dayWith = (vehicle: VehicleDetails | null = UNIT) =>
   startLocalShift(SCOPE, { workingFor: { kind: "personal" }, startedAt: STARTED_AT, vehicle });
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   delete params.usage;
   delete params.usageState;

@@ -25,10 +25,13 @@
  * genuinely knows fuel went in and genuinely does not know how much, and that
  * is a complete record of what happened — not a half-filled form.
  *
- * `litres` is therefore `number | null`:
+ * `quantity` is therefore `number | null`, in the unit recorded with it (D66):
  *
- *   litres: 320      the driver read 320 litres off the pump
- *   litres: null     fuel went in; the quantity is not known
+ *   quantity: 320    the driver read 320 off the pump, in `volumeUnit`
+ *   quantity: null   fuel went in; the quantity is not known
+ *
+ * A fill recorded before units holds `litres` instead — the form said LITRES
+ * — and is read as litres, never rewritten (`fillAmount`).
  *
  * **NULL IS NEVER 0, AND 0 IS NEVER STORED FOR UNKNOWN.** Zero would be a
  * measurement — "nothing went in" — and would silently join every total it
@@ -40,6 +43,8 @@
  * Nothing about price, cost, supplier, station, payment, tank level or economy
  * is recorded. This is what went in, and when.
  */
+
+import { UNIT_SOURCE, isVolumeUnit, type UnitSource, type VolumeUnit } from "./units";
 
 /** The two things a driver puts in. One registry, no magic strings. */
 export const FILL_TYPE = {
@@ -72,7 +77,8 @@ export const FILL_NOTE_MAX_LENGTH = 500;
  * keep a slipped keypress out of a payroll record, and is deliberately far
  * above any real tank.
  */
-const MAX_LITRES = 9999.99;
+/** A refusal bound, not a product rule: no single fill is ten thousand of any unit. */
+const MAX_QUANTITY = 9999.99;
 
 /**
  * One thing put into one asset use: diesel or AdBlue into a vehicle, or diesel
@@ -81,7 +87,28 @@ const MAX_LITRES = 9999.99;
  * `null`, never 0 — but never the same LIST: a vehicle's fuel and a trailer's
  * fridge diesel are held on their own uses and never added together.
  */
-export interface FillRecord {
+/**
+ * A quantity as it is recorded now (D66): the number the driver read, WITH the
+ * unit the form showed. `quantity` is `null` when the driver does not know it
+ * — never 0. `volumeUnit` is `null` only when no unit was set when it was
+ * recorded (a company that had not chosen its units; a Personal day with no
+ * preference) — never guessed afterwards.
+ */
+interface UnitQuantity {
+  quantity: number | null;
+  volumeUnit: VolumeUnit | null;
+}
+
+/**
+ * A quantity recorded BEFORE units existed: the form labelled the field
+ * LITRES, so it is litres (D66). Read exactly as stored — never rewritten —
+ * so a timesheet declared before units keeps the version it was declared at.
+ */
+interface LegacyLitres {
+  litres: number | null;
+}
+
+export type FillRecord = {
   /** Stable local id — `newLocalId()`, as a day and a check use. */
   id: string;
   /**
@@ -89,42 +116,53 @@ export interface FillRecord {
    * or the time they corrected it to. Never a server time (D28).
    */
   recordedAt: string;
-  /** Litres added, or `null` when the quantity is not known. NEVER 0 for unknown. */
-  litres: number | null;
   /** Optional, and never required to explain an unknown quantity. */
   note: string | null;
+} & (UnitQuantity | LegacyLitres);
+
+/** What a fill says it holds: its quantity, the unit, and where that unit came from. */
+export interface FillAmount {
+  quantity: number | null;
+  unit: VolumeUnit | null;
+  source: UnitSource;
+}
+
+export function fillAmount(fill: FillRecord): FillAmount {
+  if ("litres" in fill) return { quantity: fill.litres, unit: "litre", source: UNIT_SOURCE.legacyLitresLabel };
+  return { quantity: fill.quantity, unit: fill.volumeUnit, source: UNIT_SOURCE.recorded };
 }
 
 /** Diesel or AdBlue put into a vehicle use. */
-export interface VehicleFill extends FillRecord {
+export type VehicleFill = FillRecord & {
   type: FillType;
-}
+};
 
 /**
  * A quantity this app is willing to store: a real, positive reading, to the
  * two decimal places a pump displays. Zero and negatives are not quantities,
  * and `null` — not this function — is how "unknown" is said.
  */
-function isStorableLitres(value: number): boolean {
-  if (!Number.isFinite(value) || value <= 0 || value > MAX_LITRES) return false;
+function isStorableQuantity(value: number): boolean {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_QUANTITY) return false;
   const hundredths = value * 100;
   return Math.abs(hundredths - Math.round(hundredths)) < 1e-9;
 }
 
 /**
- * What the driver typed, as litres — or `null` while it is not a quantity.
+ * What the driver typed, as a quantity in the unit the form shows — or `null`
+ * while it is not one.
  *
  * Digits, optionally to two decimal places, because that is what a pump
  * shows. A comma is read as a decimal point: a European keypad offers one,
- * and "12,5" plainly means twelve and a half litres. `0` is not a quantity —
- * a fill of nothing did not happen — and neither is a minus sign or an
- * exponent. Unknown is a separate answer, never an empty field.
+ * and "12,5" plainly means twelve and a half. `0` is not a quantity — a fill
+ * of nothing did not happen — and neither is a minus sign or an exponent.
+ * Unknown is a separate answer, never an empty field.
  */
-export function parseLitres(raw: string): number | null {
+export function parseQuantity(raw: string): number | null {
   const typed = raw.trim().replace(",", ".");
   if (!/^\d{1,4}(\.\d{1,2})?$/.test(typed)) return null;
   const value = Number(typed);
-  return isStorableLitres(value) ? value : null;
+  return isStorableQuantity(value) ? value : null;
 }
 
 /**
@@ -148,16 +186,30 @@ export function asFillRecord(value: unknown): FillRecord | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
 
-  const { id, recordedAt, litres, note } = record;
+  const { id, recordedAt, note } = record;
   if (typeof id !== "string" || id === "") return null;
   if (typeof recordedAt !== "string" || Number.isNaN(Date.parse(recordedAt))) return null;
-
-  // Absent is not unknown: a fill has always been written with the field, so
-  // a missing one is a broken record rather than an older, valid shape.
-  if (litres !== null && (typeof litres !== "number" || !isStorableLitres(litres))) return null;
   if (note !== null && (typeof note !== "string" || note.length > FILL_NOTE_MAX_LENGTH)) return null;
 
-  return { id, recordedAt, litres, note };
+  // Exactly one shape. Absent is not unknown: a fill has always been written
+  // with its quantity field, so a missing one — or both shapes at once — is a
+  // broken record rather than an older, valid one.
+  const legacy = "litres" in record;
+  const current = "quantity" in record || "volumeUnit" in record;
+  if (legacy === current) return null;
+  if (legacy) {
+    const { litres } = record;
+    if (!isQuantity(litres)) return null;
+    return { id, recordedAt, litres, note };
+  }
+  const { quantity, volumeUnit } = record;
+  if (!("quantity" in record) || !("volumeUnit" in record) || !isQuantity(quantity)) return null;
+  if (volumeUnit !== null && !isVolumeUnit(volumeUnit)) return null;
+  return { id, recordedAt, quantity, volumeUnit, note };
+}
+
+function isQuantity(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && isStorableQuantity(value));
 }
 
 /**
@@ -173,13 +225,15 @@ export function withFill<T extends FillRecord>(fills: readonly T[], fill: T): T[
 /**
  * A fill as the driver entered it, checked before anything is written — the
  * rules every fill shares. Returns the note as stored (`null` when empty).
- * REFUSES — throws — an invalid moment, an over-long note, and any `litres`
- * that is not a real positive reading. Unknown is `null`, never 0.
+ * REFUSES — throws — an invalid moment, an over-long note, any `quantity`
+ * that is not a real positive reading, and a unit that is not one. Unknown is
+ * `null`, never 0.
  */
-export function checkedFillNote(input: { fillId: string; recordedAt: Date; litres: number | null; note: string }): string | null {
+export function checkedFillNote(input: { fillId: string; recordedAt: Date; quantity: number | null; volumeUnit: VolumeUnit | null; note: string }): string | null {
   if (input.fillId === "") throw new Error("Refusing a fill with no id");
   if (Number.isNaN(input.recordedAt.getTime())) throw new Error("Refusing a fill with an invalid time");
-  if (input.litres !== null && !isStorableLitres(input.litres)) throw new Error("Refusing a fill quantity that is not a positive reading");
+  if (input.quantity !== null && !isStorableQuantity(input.quantity)) throw new Error("Refusing a fill quantity that is not a positive reading");
+  if (input.volumeUnit !== null && !isVolumeUnit(input.volumeUnit)) throw new Error("Refusing a fill in an unknown unit");
   const described = input.note.trim();
   if (described.length > FILL_NOTE_MAX_LENGTH) throw new Error("Refusing an over-long fill note");
   return described === "" ? null : described;
@@ -193,8 +247,13 @@ export function fillsOfType(fills: readonly VehicleFill[], type: FillType): Vehi
 export interface FillSummary {
   /** How many fills of this type the use holds. */
   count: number;
-  /** Litres across the fills whose quantity IS known — never padded with a guess. */
-  knownLitres: number;
+  /**
+   * The total of the fills whose quantity IS known, PER UNIT, in the order
+   * each unit first appears — never converted, never padded with a guess. One
+   * entry in the ordinary case; a day whose units changed holds more. `unit`
+   * is null for quantities recorded with no unit set.
+   */
+  known: { unit: VolumeUnit | null; total: number }[];
   /** How many of them have no quantity at all. */
   unknownCount: number;
 }
@@ -211,13 +270,19 @@ export function summariseFills(fills: readonly VehicleFill[], type: FillType): F
 
 /** The same arithmetic over a list that is already one kind — a trailer's fridge diesel. */
 export function summariseRecords(mine: readonly FillRecord[]): FillSummary {
-  let knownLitres = 0;
+  const known: { unit: VolumeUnit | null; total: number }[] = [];
   let unknownCount = 0;
   for (const fill of mine) {
-    if (fill.litres === null) unknownCount += 1;
-    else knownLitres += fill.litres;
+    const { quantity, unit } = fillAmount(fill);
+    if (quantity === null) {
+      unknownCount += 1;
+      continue;
+    }
+    const entry = known.find(sum => sum.unit === unit);
+    if (entry === undefined) known.push({ unit, total: quantity });
+    else entry.total += quantity;
   }
   // Two decimal places in, two decimal places out: adding 0.1 and 0.2 in
-  // binary floating point must not surface as 0.30000000000000004 litres.
-  return { count: mine.length, knownLitres: Math.round(knownLitres * 100) / 100, unknownCount };
+  // binary floating point must not surface as 0.30000000000000004.
+  return { count: mine.length, known: known.map(sum => ({ unit: sum.unit, total: Math.round(sum.total * 100) / 100 })), unknownCount };
 }

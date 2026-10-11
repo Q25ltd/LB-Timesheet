@@ -8,6 +8,7 @@
  * vehicle card folding when — and only when — a trailer has just been taken
  * (D33), and every write naming the exact use it was begun for.
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
 import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -43,6 +44,8 @@ const SCOPE = scopeFor("user_1");
 // Screens act for this test's driver. The real hook's sign-in / sign-out
 // behaviour is proven in accountSwitchRoute.test.tsx.
 jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+// No company is withdrawn in these screens' days (D65: membershipWithdrawal.test.tsx).
+jest.mock("../auth/useActiveMemberships", () => ({ useActiveMemberships: () => null }));
 const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };
@@ -69,8 +72,8 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 402, height: 874 }, insets: { top: 62, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN12 ABC", startMileage: 9_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN12 ABC", startMileage: 9_000, odometerUnit: "mile" };
 const FRIDGE: TrailerDetails = { trailerNumber: "TR1234", trailerType: TRAILER_TYPE.refrigerated };
 const BOX: TrailerDetails = { trailerNumber: "TR5678", trailerType: TRAILER_TYPE.standard };
 
@@ -97,6 +100,8 @@ function isExpanded(view: View, testID: string): boolean {
 }
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   delete params.trailer;
   delete params.usageState;
@@ -496,7 +501,7 @@ test("Change Trailer offers ONLY a different trailer or No trailer — no traile
 test("typing a trailer used EARLIER is a NEW use — new start, no fridge diesel, no Trailer Check inherited", async () => {
   const shift = await withTrailer(FRIDGE);
   const morning = at(5, 35).toISOString();
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), litres: 50, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, fillId: "morning-fill", recordedAt: at(6), quantity: 50, volumeUnit: "litre", note: "" });
   await completeTrailerCheck(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(morning), usageState: USAGE_STATE.inUse, checkId: "morning-check", startedAt: at(5, 40),
     answers: checklistItems(trailerChecklistFor(TRAILER_TYPE.refrigerated)).map(entry => ({ key: entry.key, result: entry.defaultResult, note: "" })),
@@ -576,12 +581,12 @@ test("a KNOWN amount with a time and a note lands on the trailer use — and now
   await type(view, "fill-time-hours", "07");
   await type(view, "fill-time-minutes", "20");
   await press(view, "amount-known");
-  await type(view, "litres", "62,5");
+  await type(view, "quantity", "62,5");
   await type(view, "fill-note", "Depot tank");
   await press(view, "fill-save");
 
   const stored = await readOpenShift(SCOPE);
-  expect(stored?.trailer?.reeferDiesel).toMatchObject([{ litres: 62.5, note: "Depot tank" }]);
+  expect(stored?.trailer?.reeferDiesel).toMatchObject([{ quantity: 62.5, volumeUnit: "litre", note: "Depot tank" }]);
   const when = new Date(stored?.trailer?.reeferDiesel[0]?.recordedAt ?? "");
   expect([when.getHours(), when.getMinutes()]).toEqual([7, 20]);
   expect(stored?.vehicle?.fills).toEqual([]);
@@ -597,7 +602,7 @@ test("an UNKNOWN amount is stored with no litres, and a double tap stores one", 
     await Promise.all([fireEvent.press(save), fireEvent.press(save), fireEvent.press(save)]);
   });
 
-  expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toMatchObject([{ litres: null }]);
+  expect((await readOpenShift(SCOPE))?.trailer?.reeferDiesel).toMatchObject([{ quantity: null, volumeUnit: "litre" }]);
 });
 
 test("STALE: the trailer was changed while the form was open — nothing is saved anywhere, and the driver is told", async () => {
@@ -605,7 +610,7 @@ test("STALE: the trailer was changed while the form was open — nothing is save
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await openDiesel();
   await press(view, "amount-known");
-  await type(view, "litres", "70");
+  await type(view, "quantity", "70");
 
   // Behind the form, TR1234 is swapped for ANOTHER refrigerated TR1234 use.
   await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(at(5, 35).toISOString()), next: FRIDGE, changedAt: at(9) });

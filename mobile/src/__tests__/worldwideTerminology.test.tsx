@@ -54,7 +54,7 @@ describe("vehicle types", () => {
 
   test("the vehicle form offers the new names and no UK licence category", async () => {
     const view = await render(
-      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} />,
+      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} odometerUnit={null} unitNote={null} />,
     );
     for (const label of ["Articulated truck", "Rigid truck", "Van"]) expect(view.getByText(label)).toBeTruthy();
     expect(allText(view)).not.toMatch(/Class [12]/);
@@ -64,7 +64,7 @@ describe("vehicle types", () => {
 describe("vehicle registration", () => {
   test("the vehicle form asks for the VEHICLE REGISTRATION, not a number plate", async () => {
     const view = await render(
-      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} />,
+      <VehicleFields vehicleClass={null} onVehicleClass={noop} numberPlate="" onNumberPlate={noop} mileage="" onMileage={noop} odometerUnit={null} unitNote={null} />,
     );
     expect(view.getByText("VEHICLE REGISTRATION")).toBeTruthy();
     expect(view.getByLabelText("Vehicle registration")).toBeTruthy();

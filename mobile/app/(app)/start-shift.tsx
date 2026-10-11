@@ -18,12 +18,15 @@ import { Restoring } from "../../src/components/Restoring";
 import { useAuth } from "../../src/auth/AuthContext";
 import { readOpenShift, startLocalShift, type VehicleDetails, type WorkingContext } from "../../src/shift/localShift";
 import { saveFailureMessage } from "../../src/screens/format";
+import { useUnitResolver } from "../../src/shift/recordingUnits";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 
 export default function StartShiftRoute() {
   const scope = useAccountScope();
   const { account } = useAuth();
   const [checkedForOpenShift, setChecked] = useState(false);
+  // The start reading is recorded in the units of whoever the day is for (D66).
+  const unitsFor = useUnitResolver();
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +52,7 @@ export default function StartShiftRoute() {
     <StartShiftScreen
       // ACTIVE memberships, as the authenticated account reports them.
       memberships={account.memberships}
+      unitsFor={unitsFor}
       onBack={() => { router.back(); }}
       onStart={(input: { workingFor: WorkingContext; startedAt: Date; vehicle: VehicleDetails | null }) => {
         // Local only: this cannot fail for want of a network, and it cannot

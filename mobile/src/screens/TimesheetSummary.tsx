@@ -17,17 +17,7 @@ import { usesWithoutCompletedCheck } from "../shift/checkCompletion";
 import { usageDistance } from "../shift/usedVehicles";
 import { CHECK_RESULT, checkStateOf, effectiveItems, latestCheck, type VehicleCheck } from "../shift/vehicleCheck";
 import { FILL_TYPE, summariseFills, summariseRecords, type FillSummary } from "../shift/vehicleFill";
-import {
-  checkDetailLabel,
-  classLabel,
-  fillSummaryText,
-  formatClockTime,
-  formatDateTime,
-  formatDuration,
-  formatFinish,
-  formatMileage,
-  formatMileageRange,
-} from "./format";
+import { checkDetailLabel, classLabel, fillSummaryText, formatClockTime, formatDateTime, formatDuration, formatFinish, formatDistance, formatMileageRange } from "./format";
 import { workingForLabel } from "./TimesheetRow";
 import { FormSection, formStyles } from "./vehicleForm";
 import { colors, radius, spacing, typography } from "../theme/index";
@@ -84,7 +74,7 @@ export function TimesheetSummary({ day, inUse, corrections = {} }: {
               title={`${use.numberPlate} · ${classLabel(use.vehicleClass)}`}
               times={`${formatClockTime(use.startedAt)} – ${formatClockTime(use.endedAt)}`}
               lines={[
-                { key: "mileage", text: `${formatMileageRange(use.startMileage, use.endMileage)} · ${formatMileage(usageDistance(use))}` },
+                { key: "mileage", text: `${formatMileageRange(use.startMileage, use.endMileage)} · ${formatDistance(usageDistance(use), use.odometerUnit)}` },
                 ...fillLine("fuel", "Fuel", summariseFills(use.fills, FILL_TYPE.fuel)),
                 ...fillLine("adblue", "AdBlue / DEF", summariseFills(use.fills, FILL_TYPE.adblue)),
               ]}

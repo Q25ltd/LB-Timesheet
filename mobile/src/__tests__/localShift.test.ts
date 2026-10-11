@@ -40,7 +40,7 @@ const NORTHGATE: WorkingContext = {
 };
 
 /** What the driver ENTERS. Stored, it also carries when its use began. */
-const LORRY: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184_203 };
+const LORRY: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB24 XYZ", startMileage: 184_203, odometerUnit: "mile" };
 
 const STARTED_AT = new Date(2026, 8, 13, 5, 45);
 

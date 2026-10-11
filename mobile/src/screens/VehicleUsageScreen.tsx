@@ -43,7 +43,7 @@ import { checkStateOf } from "../shift/vehicleCheck";
 import { FILL_TYPES, fillsOfType, summariseFills, type FillType } from "../shift/vehicleFill";
 import { usageDistance } from "../shift/usedVehicles";
 import { BackButton, FormSection, formStyles, keyboardSafeScrollProps, parseMileage } from "./vehicleForm";
-import { checkDetailLabel, classLabel, fillSummaryText, formatClockTime, formatLitres, formatMileage } from "./format";
+import { checkDetailLabel, classLabel, fillSummaryText, formatClockTime, formatFillAmount, formatOdometer, formatDistance } from "./format";
 import { colors, radius, sizing, spacing, typography } from "../theme/index";
 
 /** A use still in progress has no end yet; one that has ended has both. */
@@ -121,14 +121,14 @@ function UsageDetail({ use, onVehicleChecks, onEdit }: { use: LocalVehicle | End
   return (
     <>
       <View style={[formStyles.card, styles.facts]}>
-        <Row label="Start mileage" value={formatMileage(use.startMileage)} testID="usage-start-mileage" />
+        <Row label="Start mileage" value={formatOdometer(use.startMileage, use.odometerUnit)} testID="usage-start-mileage" />
         {ended === null ? (
           // Still in use: its end mileage is the final mileage given at the finish.
           <Row label="End mileage" value="At the finish" testID="usage-end-mileage" />
         ) : (
           <>
-            <Row label="End mileage" value={formatMileage(ended.endMileage)} testID="usage-end-mileage" />
-            <Row label="Travelled" value={formatMileage(usageDistance(ended))} testID="usage-travelled" />
+            <Row label="End mileage" value={formatOdometer(ended.endMileage, ended.odometerUnit)} testID="usage-end-mileage" />
+            <Row label="Travelled" value={formatDistance(usageDistance(ended), ended.odometerUnit)} testID="usage-travelled" />
           </>
         )}
         <Row label="Vehicle checks" value={checkDetailLabel(use.checks)} testID="usage-checks" last />
@@ -175,7 +175,7 @@ function FillList({ use, type }: { use: LocalVehicle | EndedVehicle; type: FillT
           style={[styles.fill, index === fills.length - 1 ? null : formStyles.optionDivided]}
         >
           <View style={styles.fillHead}>
-            <Text style={styles.fillAmount}>{fill.litres === null ? "Amount unknown" : formatLitres(fill.litres)}</Text>
+            <Text style={styles.fillAmount}>{formatFillAmount(fill)}</Text>
             <Text style={styles.meta}>{formatClockTime(fill.recordedAt)}</Text>
           </View>
           {fill.note === null ? null : <Text style={styles.fillNote}>{fill.note}</Text>}
@@ -274,7 +274,7 @@ function StartMileageField({ use, onSave }: { use: LocalVehicle | EndedVehicle; 
       </FormSection>
       {aboveEnd ? (
         <Text style={styles.error} testID="usage-start-mileage-hint">
-          {`Start mileage cannot be above the end mileage (${formatMileage(ended.endMileage)}).`}
+          {`Start mileage cannot be above the end mileage (${formatOdometer(ended.endMileage, ended.odometerUnit)}).`}
         </Text>
       ) : null}
       <PrimaryButton label="Save Start Mileage" onPress={save} disabled={!changed} submitting={submitting} testID="usage-start-mileage-save" />
@@ -323,8 +323,8 @@ function EndMileageField({ use, onSave }: { use: EndedVehicle; onSave: (endMilea
           distance follows what is typed, never what is stored. */}
       <Text style={belowStart ? styles.error : styles.hint} testID="usage-end-mileage-hint">
         {belowStart
-          ? `End mileage cannot be below the start mileage (${formatMileage(use.startMileage)}).`
-          : `Start mileage ${formatMileage(use.startMileage)}${valid ? ` · Travelled ${formatMileage(endMileage - use.startMileage)}` : ""}`}
+          ? `End mileage cannot be below the start mileage (${formatOdometer(use.startMileage, use.odometerUnit)}).`
+          : `Start mileage ${formatOdometer(use.startMileage, use.odometerUnit)}${valid ? ` · Travelled ${formatDistance(endMileage - use.startMileage, use.odometerUnit)}` : ""}`}
       </Text>
       <PrimaryButton
         label="Save End Mileage"

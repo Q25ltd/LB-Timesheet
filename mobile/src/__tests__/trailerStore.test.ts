@@ -8,6 +8,7 @@
  * trailer use it was begun for or nowhere, and that all of it survives a
  * restart and loads alongside days saved before trailers existed.
  */
+import { quantityOf } from "./fillQuantity";
 import { File } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
@@ -37,9 +38,9 @@ const SCOPE = scopeFor("user_1");
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 0);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "RG12 IDD", startMileage: 50_000 };
-const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN12 ABC", startMileage: 9_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "RG12 IDD", startMileage: 50_000, odometerUnit: "mile" };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN12 ABC", startMileage: 9_000, odometerUnit: "mile" };
 const FRIDGE: TrailerDetails = { trailerNumber: "TR1234", trailerType: TRAILER_TYPE.refrigerated };
 const BOX: TrailerDetails = { trailerNumber: "TR5678", trailerType: TRAILER_TYPE.standard };
 
@@ -65,7 +66,7 @@ async function trailerTo(shift: LocalShift, next: TrailerDetails | null, hour: n
 async function diesel(shift: LocalShift, trailerStartedAt: string, over: { litres?: number | null; note?: string; fillId?: string; recordedAt?: Date } = {}) {
   return recordReeferDiesel(SCOPE, {
     shiftId: shift.id, trailerUseId: trailerUseAt(trailerStartedAt), usageState: USAGE_STATE.inUse, fillId: over.fillId ?? newLocalId(),
-    recordedAt: over.recordedAt ?? at(8), litres: over.litres === undefined ? 120 : over.litres, note: over.note ?? "",
+    recordedAt: over.recordedAt ?? at(8), quantity: over.litres === undefined ? 120 : over.litres, volumeUnit: "litre", note: over.note ?? "",
   });
 }
 
@@ -156,7 +157,7 @@ test("a day with a trailer, its diesel and its history survives a COLD START fro
   const day = await readOpenShift(SCOPE);
 
   expect(day).toEqual(onDisk);
-  expect(day?.trailer).toMatchObject({ trailerNumber: "TR1234", trailerType: "refrigerated", reeferDiesel: [{ litres: null, note: "Yard tank" }] });
+  expect(day?.trailer).toMatchObject({ trailerNumber: "TR1234", trailerType: "refrigerated", reeferDiesel: [{ quantity: null, volumeUnit: "litre", note: "Yard tank" }] });
   expect(day?.previousTrailers).toMatchObject([{ trailerNumber: "TR5678", trailerType: "standard", endedAt: at(9).toISOString() }]);
 });
 
@@ -290,7 +291,7 @@ test("the SAME trailer taken again is a NEW use, and inherits none of the earlie
   const day = await readOpenShift(SCOPE);
   expect(day?.trailer).toEqual({ ...FRIDGE, useId: ANY_USE_ID, startedAt: at(13).toISOString(), reeferDiesel: [], checks: [] });
   // The morning's use keeps its own 80 L.
-  expect(day?.previousTrailers.map(use => [use.trailerNumber, use.reeferDiesel.map(fill => fill.litres)]))
+  expect(day?.previousTrailers.map(use => [use.trailerNumber, use.reeferDiesel.map(fill => quantityOf(fill))]))
     .toEqual([["TR1234", [80]], ["TR5678", []]]);
 });
 
@@ -469,7 +470,7 @@ test("a REFRIGERATED trailer takes a KNOWN amount, with its time and note", asyn
 
   await diesel(shift, (await current())?.startedAt ?? "", { litres: 85.5, note: "Depot pump 2", recordedAt: at(7, 45) });
 
-  expect((await current())?.reeferDiesel).toMatchObject([{ litres: 85.5, note: "Depot pump 2", recordedAt: at(7, 45).toISOString() }]);
+  expect((await current())?.reeferDiesel).toMatchObject([{ quantity: 85.5, volumeUnit: "litre", note: "Depot pump 2", recordedAt: at(7, 45).toISOString() }]);
 });
 
 test("an UNKNOWN amount is stored as null — never 0 — and needs no note", async () => {
@@ -479,9 +480,9 @@ test("an UNKNOWN amount is stored as null — never 0 — and needs no note", as
   await diesel(shift, (await current())?.startedAt ?? "", { litres: null });
 
   const [stored] = (await current())?.reeferDiesel ?? [];
-  expect(stored?.litres).toBeNull();
+  expect(quantityOf(stored)).toBeNull();
   expect(stored?.note).toBeNull();
-  expect(bytes()).toContain('"litres":null');
+  expect(bytes()).toContain('"quantity":null');
 });
 
 test.each([["zero", 0], ["a negative amount", -5], ["three decimal places", 12.345]])("%s is refused as a known amount", async (_why, litres) => {
@@ -503,7 +504,7 @@ test("several diesel entries stay separate, in the order recorded", async () => 
   await diesel(shift, trailer, { litres: null, recordedAt: at(10) });
   await diesel(shift, trailer, { litres: 30, recordedAt: at(12) });
 
-  expect((await current())?.reeferDiesel.map(fill => fill.litres)).toEqual([50, null, 30]);
+  expect((await current())?.reeferDiesel.map(fill => quantityOf(fill))).toEqual([50, null, 30]);
 });
 
 test("fridge diesel NEVER touches the vehicle's Fuel — and vehicle Fuel never touches the trailer", async () => {
@@ -512,12 +513,12 @@ test("fridge diesel NEVER touches the vehicle's Fuel — and vehicle Fuel never 
   await diesel(shift, (await current())?.startedAt ?? "", { litres: 90 });
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse,
-    fillId: newLocalId(), type: FILL_TYPE.fuel, recordedAt: at(9), litres: 300, note: "",
+    fillId: newLocalId(), type: FILL_TYPE.fuel, recordedAt: at(9), quantity: 300, volumeUnit: "litre", note: "",
   });
 
   const day = await readOpenShift(SCOPE);
-  expect(day?.vehicle?.fills.map(fill => fill.litres)).toEqual([300]);
-  expect(day?.trailer?.reeferDiesel.map(fill => fill.litres)).toEqual([90]);
+  expect(day?.vehicle?.fills.map(fill => quantityOf(fill))).toEqual([300]);
+  expect(day?.trailer?.reeferDiesel.map(fill => quantityOf(fill))).toEqual([90]);
 });
 
 test("STALE: the trailer changed while the form was open — nothing is written, not even to its replacement", async () => {
@@ -570,7 +571,7 @@ test("re-recording the same id CORRECTS that entry; a rapid double save leaves o
   await Promise.all([diesel(shift, trailer, { fillId: id, litres: 40 }), diesel(shift, trailer, { fillId: id, litres: 40 })]);
   await diesel(shift, trailer, { fillId: id, litres: null });
 
-  expect((await current())?.reeferDiesel).toMatchObject([{ id, litres: null }]);
+  expect((await current())?.reeferDiesel).toMatchObject([{ id, quantity: null, volumeUnit: "litre" }]);
 });
 
 test("removing an entry takes only that one", async () => {

@@ -84,8 +84,8 @@ const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes)
 const OPENED_AT = at(17, 40);
 /** The device's clock as the screen reads it — changeable mid-test. */
 let clockNow = OPENED_AT;
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const OTHER: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const OTHER: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 
 type View = Awaited<ReturnType<typeof render>>;
 const live = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
@@ -290,12 +290,12 @@ async function busyDay(): Promise<LocalShift> {
       ? { key: entry.key, result: CHECK_RESULT.defect, note: "Cut in the sidewall" }
       : { key: entry.key, result: entry.defaultResult, note: "" })),
   });
-  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 300, note: "" });
+  await recordVehicleFill(SCOPE, { ...first, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 300, volumeUnit: "litre", note: "" });
   await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(STARTED_AT.toISOString()), endMileage: 100_120, next: OTHER, changedAt: at(9) });
-  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(10), litres: null, note: "" });
+  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: at(10), quantity: null, volumeUnit: "litre", note: "" });
   await saveVehicleCheckDraft(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(at(9).toISOString()), usageState: USAGE_STATE.inUse, checkId: "c2", startedAt: at(9, 5), answers: [{ key: "horn", result: CHECK_RESULT.notApplicable, note: "" }] });
   await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, startedAt: at(9, 30) });
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(9, 30).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: at(11), litres: 40, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(at(9, 30).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: at(11), quantity: 40, volumeUnit: "litre", note: "" });
   return open();
 }
 

@@ -8,6 +8,8 @@
  * in use holds — and that a fill always lands on the ONE use the screen was
  * opened for, with no chooser, failing closed if that use has moved on (D31).
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
+import { quantityOf } from "./fillQuantity";
 import { render, fireEvent, act, waitFor } from "@testing-library/react-native";
 import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -68,8 +70,8 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 
 const DRIVER: AuthenticatedAccount = {
   user: { id: "user_1", firstName: "Nerijus", lastName: "Kuizinas", email: "driver@example.com" },
@@ -106,7 +108,7 @@ async function recorded(litres: number | null, over: { type?: "fuel" | "adblue";
   const fillId = newLocalId();
   await recordVehicleFill(SCOPE, {
     shiftId: open?.id ?? "", vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId,
-    type: over.type ?? FILL_TYPE.fuel, recordedAt: over.recordedAt ?? at(9), litres, note: over.note ?? "",
+    type: over.type ?? FILL_TYPE.fuel, recordedAt: over.recordedAt ?? at(9), quantity: litres, volumeUnit: "litre", note: over.note ?? "",
   });
   return fillId;
 }
@@ -124,6 +126,8 @@ async function openFill(which: "fuel" | "adblue" = "fuel"): Promise<View> {
 const fillsNow = async () => (await readOpenShift(SCOPE))?.vehicle?.fills ?? [];
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   params.type = "fuel";
   delete params.usage;
@@ -197,10 +201,10 @@ test("Amount unknown then Add is the WHOLE flow — no litres, no keyboard, no r
 
   await press(view, "amount-unknown");
   // Nothing asks for a quantity, and nothing asks why it is unknown.
-  expect(view.queryByTestId("litres")).toBeNull();
+  expect(view.queryByTestId("quantity")).toBeNull();
   await press(view, "fill-save");
 
-  expect(await fillsNow()).toMatchObject([{ type: "adblue", litres: null, note: null }]);
+  expect(await fillsNow()).toMatchObject([{ type: "adblue", quantity: null, volumeUnit: "litre", note: null }]);
 });
 
 test("nothing can be stored until the driver says which amount it is", async () => {
@@ -220,11 +224,11 @@ test("a KNOWN amount stores the litres typed, to the litre or half of one", asyn
   const view = await openFill();
 
   await press(view, "amount-known");
-  await type(view, "litres", "312.5");
+  await type(view, "quantity", "312.5");
   await type(view, "fill-note", "Truckstop, pump 4");
   await press(view, "fill-save");
 
-  expect(await fillsNow()).toMatchObject([{ type: "fuel", litres: 312.5, note: "Truckstop, pump 4" }]);
+  expect(await fillsNow()).toMatchObject([{ type: "fuel", quantity: 312.5, volumeUnit: "litre", note: "Truckstop, pump 4" }]);
 });
 
 test.each([["0"], ["-5"], ["abc"], ["12.345"], ["1e3"]])("%s is not a quantity: it is refused and nothing is stored", async typed => {
@@ -232,10 +236,10 @@ test.each([["0"], ["-5"], ["abc"], ["12.345"], ["1e3"]])("%s is not a quantity: 
   const view = await openFill();
   await press(view, "amount-known");
 
-  await type(view, "litres", typed);
+  await type(view, "quantity", typed);
 
   expect(isDisabled(view, "fill-save")).toBe(true);
-  expect(view.queryByTestId("litres-error")).not.toBeNull();
+  expect(view.queryByTestId("quantity-error")).not.toBeNull();
   await press(view, "fill-save");
   expect(await fillsNow()).toEqual([]);
 });
@@ -244,12 +248,12 @@ test("choosing Amount unknown after typing litres stores NO quantity", async () 
   await dayWith();
   const view = await openFill();
   await press(view, "amount-known");
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
 
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  expect((await fillsNow())[0]?.litres).toBeNull();
+  expect(quantityOf((await fillsNow())[0])).toBeNull();
 });
 
 test("the time is already set to now, and the driver may correct it", async () => {
@@ -283,7 +287,7 @@ test("opening the screen and backing out writes NOTHING", async () => {
   const view = await openFill();
 
   await press(view, "amount-known");
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
   await type(view, "fill-note", "second thoughts");
   await press(view, "fill-back");
 
@@ -336,12 +340,12 @@ test("pressing an entry loads it back, and saving corrects ONLY that one", async
 
   await press(view, `fill-${wrong}`);
   expect(text(view, "screen-title")).toBe("Edit Fuel");
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
   await press(view, "fill-save");
 
   expect(await fillsNow()).toMatchObject([
-    { id: first, litres: 300, note: null },
-    { id: wrong, litres: 300, note: "typo" },
+    { id: first, quantity: 300, volumeUnit: "litre", note: null },
+    { id: wrong, quantity: 300, volumeUnit: "litre", note: "typo" },
   ]);
 });
 
@@ -354,7 +358,7 @@ test("a correction can change a known amount to UNKNOWN", async () => {
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  expect(await fillsNow()).toMatchObject([{ id, litres: null }]);
+  expect(await fillsNow()).toMatchObject([{ id, quantity: null, volumeUnit: "litre" }]);
 });
 
 test("Remove takes only the entry being edited", async () => {
@@ -375,10 +379,10 @@ test("Cancel leaves the entry exactly as it was", async () => {
   const view = await openFill();
 
   await press(view, `fill-${id}`);
-  await type(view, "litres", "12");
+  await type(view, "quantity", "12");
   await press(view, "fill-cancel-edit");
 
-  expect(await fillsNow()).toMatchObject([{ id, litres: 300 }]);
+  expect(await fillsNow()).toMatchObject([{ id, quantity: 300, volumeUnit: "litre" }]);
   expect(text(view, "screen-title")).toBe("Add Fuel");
 });
 
@@ -609,10 +613,10 @@ test("current Fuel lands on the vehicle in use, and on no earlier use", async ()
   const view = await openFill();
 
   await press(view, "amount-known");
-  await type(view, "litres", "90");
+  await type(view, "quantity", "90");
   await press(view, "fill-save");
 
-  expect(await fillsNow()).toMatchObject([{ type: "fuel", litres: 90 }]);
+  expect(await fillsNow()).toMatchObject([{ type: "fuel", quantity: 90, volumeUnit: "litre" }]);
   expect(await Promise.all([fillsOfUsage(first), fillsOfUsage(middle), fillsOfUsage(second)])).toEqual(before);
 });
 
@@ -624,7 +628,7 @@ test("current AdBlue with an UNKNOWN amount lands on the vehicle in use with no 
   await press(view, "amount-unknown");
   await press(view, "fill-save");
 
-  expect(await fillsNow()).toMatchObject([{ type: "adblue", litres: null }]);
+  expect(await fillsNow()).toMatchObject([{ type: "adblue", quantity: null, volumeUnit: "litre" }]);
   expect(await Promise.all([fillsOfUsage(first), fillsOfUsage(middle), fillsOfUsage(second)])).toEqual(before);
 });
 
@@ -633,7 +637,7 @@ test("the current tile totals the CURRENT use only — never the day", async () 
   // 300 L already sits on the first use; put 90 L on the current one.
   const view = await openFill();
   await press(view, "amount-known");
-  await type(view, "litres", "90");
+  await type(view, "quantity", "90");
   await press(view, "fill-save");
   await view.unmount();
 
@@ -652,7 +656,7 @@ test("the vehicle was CHANGED while the screen was open: Add writes nothing, any
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   const view = await openFill();
   await press(view, "amount-known");
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
 
   // Behind the screen, AB12 CDE is handed back and XY34 ZZZ taken.
   await changeTo(XY34, 11);
@@ -728,12 +732,12 @@ test("a forgotten 300 L added to an ENDED use lands there alone — not the vehi
   const view = await openEndedFills(middle);
 
   await press(view, "amount-known");
-  await type(view, "litres", "300");
+  await type(view, "quantity", "300");
   await press(view, "fill-save");
 
-  expect((await fillsOfUsage(middle)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", null], ["fuel", 300]]);
-  expect((await fillsOfUsage(first)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", 300], ["adblue", 20]]);
-  expect((await fillsOfUsage(second)).map(entry => entry.litres)).toEqual([60]);
+  expect((await fillsOfUsage(middle)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", null], ["fuel", 300]]);
+  expect((await fillsOfUsage(first)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 300], ["adblue", 20]]);
+  expect((await fillsOfUsage(second)).map(entry => quantityOf(entry))).toEqual([60]);
   expect(await fillsNow()).toEqual([]);
 });
 
@@ -746,7 +750,7 @@ test("an UNKNOWN AdBlue added to an ENDED use is stored with no litres — never
 
   const stored = (await fillsOfUsage(second)).filter(entry => entry.type === "adblue");
   expect(stored).toHaveLength(1);
-  expect(stored[0]?.litres).toBeNull();
+  expect(quantityOf(stored[0])).toBeNull();
 });
 
 test("an ENDED use's entry is corrected in place, keeping its own day, and the other AB12 is untouched", async () => {
@@ -756,11 +760,11 @@ test("an ENDED use's entry is corrected in place, keeping its own day, and the o
 
   await press(view, `fill-${historical?.id ?? ""}`);
   expect(text(view, "screen-title")).toBe("Edit Fuel");
-  await type(view, "litres", "30");
+  await type(view, "quantity", "30");
   await press(view, "fill-save");
 
-  expect((await fillsOfUsage(first)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", 30], ["adblue", 20]]);
-  expect(await fillsOfUsage(second)).toMatchObject([{ litres: 60 }]);
+  expect((await fillsOfUsage(first)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 30], ["adblue", 20]]);
+  expect(await fillsOfUsage(second)).toMatchObject([{ quantity: 60, volumeUnit: "litre" }]);
   expect((await fillsOfUsage(first))[0]?.recordedAt.slice(0, 10)).toBe(at(8).toISOString().slice(0, 10));
 });
 
@@ -788,7 +792,7 @@ test("correcting an ENDED use's fuel leaves its plate, class, times, mileages an
 
   const after = (await readOpenShift(SCOPE))?.previousVehicles.find(use => use.startedAt === first);
   expect({ ...after, fills: [] }).toEqual({ ...before, fills: [] });
-  expect(after?.fills?.[0]).toMatchObject({ type: "fuel", litres: null });
+  expect(after?.fills?.[0]).toMatchObject({ type: "fuel", quantity: null, volumeUnit: "litre" });
 });
 
 test("with NO vehicle in use, an ENDED use's fuel can still be added and corrected", async () => {
@@ -797,11 +801,11 @@ test("with NO vehicle in use, an ENDED use's fuel can still be added and correct
   const view = await openEndedFills(first);
 
   await press(view, "amount-known");
-  await type(view, "litres", "45");
+  await type(view, "quantity", "45");
   await press(view, "fill-save");
 
   expect((await readOpenShift(SCOPE))?.vehicle).toBeNull();
-  expect((await fillsOfUsage(first)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", 300], ["adblue", 20], ["fuel", 45]]);
+  expect((await fillsOfUsage(first)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 300], ["adblue", 20], ["fuel", 45]]);
 });
 
 test.each([

@@ -95,9 +95,9 @@ const DRIVER: AuthenticatedAccount = {
 };
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
 const iso = (hours: number, minutes = 0) => at(hours, minutes).toISOString();
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
-const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 5_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
+const VAN: VehicleDetails = { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 5_000, odometerUnit: "mile" };
 
 type View = Awaited<ReturnType<typeof render>>;
 const text = (view: View, testID: string) => {
@@ -339,7 +339,7 @@ test("a use changed on a company's timesheet: its page says so, and the Review d
   const done = await finishedDay(NORTHGATE);
   await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
-    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
+    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 80, volumeUnit: "litre", note: "",
   });
 
   const page = await detail(done.id);
@@ -406,7 +406,7 @@ test("Back from a Review opened to declare again leaves the timesheet — nothin
   const done = await finishedDay(NORTHGATE);
   await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
-    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
+    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 80, volumeUnit: "litre", note: "",
   });
   const before = recordFile(done.id).textSync();
   const review = await edit(done.id, REVIEW_TO_DECLARE);
@@ -452,7 +452,7 @@ test("a use changed on a Personal timesheet asks for nothing", async () => {
   const done = await finishedDay(PERSONAL);
   await recordVehicleFill(SCOPE, {
     shiftId: done.id, vehicleUseId: done.previousVehicles[0]?.useId ?? "", usageState: USAGE_STATE.ended,
-    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), litres: 80, note: "",
+    fillId: "late", type: FILL_TYPE.fuel, recordedAt: at(7), quantity: 80, volumeUnit: "litre", note: "",
   });
 
   const page = await detail(done.id);

@@ -74,7 +74,7 @@ import {
   type VehicleCheck,
 } from "../shift/vehicleCheck";
 import { keyboardSafeScrollProps } from "./vehicleForm";
-import { formatClockTime, formatMileage } from "./format";
+import { formatClockTime, formatOdometer } from "./format";
 import { colors, radius, sizing, spacing } from "../theme/index";
 
 /** A plain footer action: filled for the one that commits, outlined otherwise. */
@@ -166,7 +166,7 @@ export function vehicleCheckSubject(vehicle: LocalVehicle): CheckSubject {
   return {
     title: vehicle.vehicleClass === "class1" ? "Unit Check" : "Vehicle Check",
     name: vehicle.numberPlate,
-    detail: `Start mileage: ${formatMileage(vehicle.startMileage)}`,
+    detail: `Start mileage: ${formatOdometer(vehicle.startMileage, vehicle.odometerUnit)}`,
     noun: "vehicle",
   };
 }

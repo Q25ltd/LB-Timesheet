@@ -37,7 +37,7 @@ import { UseTimesEditor, type UseTimes } from "./UseTimesEditor";
 import { CHECK_RESULT, checkStateOf, effectiveItems, latestCheck } from "../shift/vehicleCheck";
 import { summariseRecords } from "../shift/vehicleFill";
 import { BackButton, FormSection, formStyles } from "./vehicleForm";
-import { checkDetailLabel, fillSummaryText, formatClockTime, formatDuration, formatLitres } from "./format";
+import { checkDetailLabel, fillSummaryText, formatClockTime, formatDuration, formatFillAmount } from "./format";
 import { colors, radius, sizing, spacing } from "../theme/index";
 
 interface TrailerUsageScreenProps {
@@ -163,7 +163,7 @@ function TrailerUseDetail({ use, onTrailerChecks }: { use: LocalTrailer | EndedT
                 {use.reeferDiesel.map((fill, index) => (
                   <View key={fill.id} testID={`trailer-usage-fill-${fill.id}`} style={[styles.entry, index === use.reeferDiesel.length - 1 ? null : formStyles.optionDivided]}>
                     <View style={styles.entryHead}>
-                      <Text style={styles.entryTitle}>{fill.litres === null ? "Amount unknown" : formatLitres(fill.litres)}</Text>
+                      <Text style={styles.entryTitle}>{formatFillAmount(fill)}</Text>
                       <Text style={styles.meta}>{formatClockTime(fill.recordedAt)}</Text>
                     </View>
                     {fill.note === null ? null : <Text style={styles.entryNote}>{fill.note}</Text>}

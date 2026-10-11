@@ -5,7 +5,8 @@
  */
 import { SafeSaveFailedError, VEHICLE_CLASSES, type VehicleClass } from "../shift/localShift";
 import { checkStateOf, isCorrected, latestCheck, type VehicleCheck, type VehicleCheckState } from "../shift/vehicleCheck";
-import type { FillSummary } from "../shift/vehicleFill";
+import { fillAmount, type FillRecord, type FillSummary } from "../shift/vehicleFill";
+import { distanceShort, volumeShort, type DistanceUnit, type VolumeUnit } from "../shift/units";
 
 /** "class1" → "Articulated truck". */
 export function classLabel(id: VehicleClass): string {
@@ -24,19 +25,31 @@ export const CHECK_STATE_LABEL: Record<VehicleCheckState, string> = {
 };
 
 /**
- * 184203 → "184,203 mi".
+ * An odometer reading in the unit it was RECORDED in (D66): 184203, km →
+ * "184,203 km". A reading recorded before units existed has none, and is
+ * shown as the bare number — never labelled after the fact.
  *
  * Grouped by hand rather than through `toLocaleString`, which would render
- * differently depending on the device's locale — a mileage the driver typed
+ * differently depending on the device's locale — a reading the driver typed
  * should read back the same on every phone.
  */
-export function formatMileage(miles: number): string {
-  return `${grouped(miles)} mi`;
+export function formatOdometer(value: number, unit: DistanceUnit | undefined): string {
+  return unit === undefined ? grouped(value) : `${grouped(value)} ${distanceShort(unit)}`;
+}
+
+/** A distance travelled, in the unit its readings were recorded in — or none (D66). */
+export function formatDistance(value: number, unit: DistanceUnit | undefined): string {
+  return formatOdometer(value, unit);
 }
 
 /** 100000, 100120 → "100,000 → 100,120". The unit belongs to the line below it. */
 export function formatMileageRange(from: number, to: number): string {
   return `${grouped(from)} → ${grouped(to)}`;
+}
+
+/** 100000, 100120, km → "100,000 → 100,120 km" — or the bare readings when no unit was recorded. */
+export function formatOdometerRange(from: number, to: number, unit: DistanceUnit | undefined): string {
+  return unit === undefined ? formatMileageRange(from, to) : `${formatMileageRange(from, to)} ${distanceShort(unit)}`;
 }
 
 function grouped(value: number): string {
@@ -127,15 +140,24 @@ export function formatClockTime(iso: string): string {
 }
 
 /**
- * 350 → "350 L", 12.5 → "12.5 L", 1200.05 → "1,200.05 L".
+ * A quantity in the unit it was recorded in: 350, litre → "350 L"; 12.5,
+ * us_gallon → "12.5 US gal"; 1200.05 → "1,200.05 …". A quantity recorded with
+ * no unit set says so rather than borrowing one (D66).
  *
  * Trailing zeros are dropped: a driver who typed 12.50 read "twelve and a
  * half" off the pump, and 12.5 is how they would write it down.
  */
-export function formatLitres(litres: number): string {
-  const [whole = "0", decimals] = litres.toFixed(2).split(".");
+export function formatQuantity(quantity: number, unit: VolumeUnit | null): string {
+  const [whole = "0", decimals] = quantity.toFixed(2).split(".");
   const trimmed = (decimals ?? "").replace(/0+$/, "");
-  return `${grouped(Number(whole))}${trimmed === "" ? "" : `.${trimmed}`} L`;
+  const number = `${grouped(Number(whole))}${trimmed === "" ? "" : `.${trimmed}`}`;
+  return unit === null ? `${number} (no unit set)` : `${number} ${volumeShort(unit)}`;
+}
+
+/** One fill's amount as recorded: "350 L", "12.5 US gal" — or "Amount unknown". */
+export function formatFillAmount(fill: FillRecord): string {
+  const { quantity, unit } = fillAmount(fill);
+  return quantity === null ? "Amount unknown" : formatQuantity(quantity, unit);
 }
 
 /** "1 entry" / "4 entries", and the same for fills and unknown amounts. */
@@ -148,9 +170,10 @@ function plural(count: number, one: string, many: string): string {
  * nothing to describe.
  *
  * THE UNKNOWN ONES ARE NEVER VALUED. A quantity nobody knows is reported as
- * missing, beside the litres that ARE known — never folded into the total as
- * a zero, and never estimated. Four shapes, and each says exactly what the
- * day holds:
+ * missing, beside the quantities that ARE known — never folded into the total
+ * as a zero, and never estimated. Known quantities are totalled PER UNIT and
+ * never converted: "350 L + 20 US gal" when a day's units changed. Four
+ * shapes, and each says exactly what the day holds:
  *
  *   all known    "350 L"         "2 entries"
  *   mixed        "350 L known"   "1 amount unknown"
@@ -159,14 +182,15 @@ function plural(count: number, one: string, many: string): string {
  */
 export function fillSummaryText(summary: FillSummary): { amount: string; detail: string } | null {
   if (summary.count === 0) return null;
+  const known = summary.known.map(sum => formatQuantity(sum.total, sum.unit)).join(" + ");
   if (summary.unknownCount === 0) {
-    return { amount: formatLitres(summary.knownLitres), detail: plural(summary.count, "entry", "entries") };
+    return { amount: known, detail: plural(summary.count, "entry", "entries") };
   }
   if (summary.unknownCount === summary.count) {
     return { amount: plural(summary.count, "fill", "fills"), detail: "Amount unknown" };
   }
   return {
-    amount: `${formatLitres(summary.knownLitres)} known`,
+    amount: `${known} known`,
     detail: plural(summary.unknownCount, "amount unknown", "amounts unknown"),
   };
 }

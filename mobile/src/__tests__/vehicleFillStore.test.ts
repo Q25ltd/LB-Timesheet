@@ -6,6 +6,7 @@
  * estimated. These prove both, and that nothing else in the day moves when one
  * is recorded, corrected or removed.
  */
+import { quantityOf } from "./fillQuantity";
 import { File } from "expo-file-system";
 import {
   OPEN_SHIFT_FILE,
@@ -34,11 +35,11 @@ import { accountDirectoryOf, scopeFor } from "./testScope";
 const SCOPE = scopeFor("user_1");
 
 /** Exactly these fields, and no others — the id is checked separately. */
-const FILL_FIELDS = ["id", "litres", "note", "recordedAt", "type"];
+const FILL_FIELDS = ["id", "note", "quantity", "recordedAt", "type", "volumeUnit"];
 
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
-const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
 
 const storedFile = () => new File(accountDirectoryOf(SCOPE), OPEN_SHIFT_FILE);
@@ -57,7 +58,7 @@ async function fill(shift: LocalShift, over: Partial<RecordVehicleFillInput> = {
     fillId: newLocalId(),
     type: FILL_TYPE.fuel,
     recordedAt: at(9),
-    litres: 300,
+    quantity: 300, volumeUnit: "litre",
     note: "",
     ...over,
   });
@@ -84,40 +85,40 @@ afterEach(() => { jest.restoreAllMocks(); });
 test("a KNOWN fuel quantity is stored on the vehicle in use", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { litres: 300, recordedAt: at(9, 15), note: "Truckstop" });
+  await fill(shift, { quantity: 300, volumeUnit: "litre", recordedAt: at(9, 15), note: "Truckstop" });
 
   const [stored] = await fillsOn();
   expect(Object.keys(stored ?? {}).sort()).toEqual(FILL_FIELDS);
-  expect(stored).toMatchObject({ type: "fuel", recordedAt: at(9, 15).toISOString(), litres: 300, note: "Truckstop" });
+  expect(stored).toMatchObject({ type: "fuel", recordedAt: at(9, 15).toISOString(), quantity: 300, volumeUnit: "litre", note: "Truckstop" });
   expect(stored?.id).not.toBe("");
 });
 
 test("an UNKNOWN fuel quantity is stored with NO litres — never 0", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { litres: null, note: "Yard pump — meter broken" });
+  await fill(shift, { quantity: null, volumeUnit: "litre", note: "Yard pump — meter broken" });
 
   const [stored] = await fillsOn();
-  expect(stored?.litres).toBeNull();
+  expect(quantityOf(stored)).toBeNull();
   // The distinction the whole feature rests on: absent is not zero.
-  expect(stored?.litres).not.toBe(0);
-  expect(JSON.parse(storedFile().textSync()) as unknown).toMatchObject({ vehicle: { fills: [{ litres: null }] } });
+  expect(quantityOf(stored)).not.toBe(0);
+  expect(JSON.parse(storedFile().textSync()) as unknown).toMatchObject({ vehicle: { fills: [{ quantity: null, volumeUnit: "litre" }] } });
 });
 
 test("a KNOWN AdBlue quantity is stored, with its own type", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { type: FILL_TYPE.adblue, litres: 12.5 });
+  await fill(shift, { type: FILL_TYPE.adblue, quantity: 12.5 , volumeUnit: "litre"});
 
-  expect(await fillsOn()).toMatchObject([{ type: "adblue", litres: 12.5 }]);
+  expect(await fillsOn()).toMatchObject([{ type: "adblue", quantity: 12.5, volumeUnit: "litre" }]);
 });
 
 test("an UNKNOWN AdBlue quantity is stored without litres", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { type: FILL_TYPE.adblue, litres: null });
+  await fill(shift, { type: FILL_TYPE.adblue, quantity: null , volumeUnit: "litre"});
 
-  expect(await fillsOn()).toMatchObject([{ type: "adblue", litres: null }]);
+  expect(await fillsOn()).toMatchObject([{ type: "adblue", quantity: null, volumeUnit: "litre" }]);
 });
 
 test("an empty note is stored as NONE, not as an empty string", async () => {
@@ -143,7 +144,7 @@ test.each([
   const shift = await dayWith();
   const before = storedFile().textSync();
 
-  await expect(fill(shift, { litres })).rejects.toThrow("positive reading");
+  await expect(fill(shift, { quantity: litres, volumeUnit: "litre" })).rejects.toThrow("positive reading");
 
   expect(storedFile().textSync()).toBe(before);
   expect(await fillsOn()).toEqual([]);
@@ -175,23 +176,23 @@ test("an over-long note is refused rather than truncated", async () => {
 test("several fuel fills all survive on one use, in the order they were recorded", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { litres: 300, recordedAt: at(9) });
-  await fill(shift, { litres: null, recordedAt: at(12) });
-  await fill(shift, { litres: 60.5, recordedAt: at(16) });
+  await fill(shift, { quantity: 300, volumeUnit: "litre", recordedAt: at(9) });
+  await fill(shift, { quantity: null, volumeUnit: "litre", recordedAt: at(12) });
+  await fill(shift, { quantity: 60.5, volumeUnit: "litre", recordedAt: at(16) });
 
-  expect((await fillsOn()).map(entry => entry.litres)).toEqual([300, null, 60.5]);
+  expect((await fillsOn()).map(entry => quantityOf(entry))).toEqual([300, null, 60.5]);
 });
 
 test("fuel and AdBlue live side by side on one use, each summarised on its own", async () => {
   const shift = await dayWith();
 
-  await fill(shift, { type: FILL_TYPE.fuel, litres: 300 });
-  await fill(shift, { type: FILL_TYPE.adblue, litres: 20 });
-  await fill(shift, { type: FILL_TYPE.fuel, litres: 50 });
+  await fill(shift, { type: FILL_TYPE.fuel, quantity: 300 , volumeUnit: "litre"});
+  await fill(shift, { type: FILL_TYPE.adblue, quantity: 20 , volumeUnit: "litre"});
+  await fill(shift, { type: FILL_TYPE.fuel, quantity: 50 , volumeUnit: "litre"});
 
   const fills = await fillsOn();
-  expect(summariseFills(fills, FILL_TYPE.fuel)).toEqual({ count: 2, knownLitres: 350, unknownCount: 0 });
-  expect(summariseFills(fills, FILL_TYPE.adblue)).toEqual({ count: 1, knownLitres: 20, unknownCount: 0 });
+  expect(summariseFills(fills, FILL_TYPE.fuel)).toEqual({ count: 2, known: [{ unit: "litre", total: 350 }], unknownCount: 0 });
+  expect(summariseFills(fills, FILL_TYPE.adblue)).toEqual({ count: 1, known: [{ unit: "litre", total: 20 }], unknownCount: 0 });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -200,35 +201,35 @@ test("fuel and AdBlue live side by side on one use, each summarised on its own",
 
 test("a MIXED use reports the litres it knows and COUNTS the ones it does not", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
-  await fill(shift, { litres: 50 });
-  await fill(shift, { litres: null });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
+  await fill(shift, { quantity: 50 , volumeUnit: "litre"});
+  await fill(shift, { quantity: null , volumeUnit: "litre"});
 
   const summary = summariseFills(await fillsOn(), FILL_TYPE.fuel);
 
-  expect(summary).toEqual({ count: 3, knownLitres: 350, unknownCount: 1 });
+  expect(summary).toEqual({ count: 3, known: [{ unit: "litre", total: 350 }], unknownCount: 1 });
   expect(fillSummaryText(summary)).toEqual({ amount: "350 L known", detail: "1 amount unknown" });
 });
 
 test("an ALL-UNKNOWN use never reports a quantity — not even zero", async () => {
   const shift = await dayWith();
-  await fill(shift, { type: FILL_TYPE.adblue, litres: null });
+  await fill(shift, { type: FILL_TYPE.adblue, quantity: null , volumeUnit: "litre"});
 
   const summary = summariseFills(await fillsOn(), FILL_TYPE.adblue);
 
-  expect(summary).toEqual({ count: 1, knownLitres: 0, unknownCount: 1 });
+  expect(summary).toEqual({ count: 1, known: [], unknownCount: 1 });
   expect(fillSummaryText(summary)).toEqual({ amount: "1 fill", detail: "Amount unknown" });
 });
 
 test("an ALL-KNOWN use reports the total and how many entries made it", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 0.1 });
-  await fill(shift, { litres: 0.2 });
+  await fill(shift, { quantity: 0.1 , volumeUnit: "litre"});
+  await fill(shift, { quantity: 0.2 , volumeUnit: "litre"});
 
   const summary = summariseFills(await fillsOn(), FILL_TYPE.fuel);
 
   // Two decimal places in, two decimal places out — not 0.30000000000000004.
-  expect(summary.knownLitres).toBe(0.3);
+  expect(summary.known).toEqual([{ unit: "litre", total: 0.3 }]);
   expect(fillSummaryText(summary)).toEqual({ amount: "0.3 L", detail: "2 entries" });
 });
 
@@ -242,45 +243,45 @@ test("a use with nothing recorded says nothing at all", () => {
 
 test("changing vehicle KEEPS the fills on the use that had them", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
-  await fill(shift, { litres: null });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
+  await fill(shift, { quantity: null , volumeUnit: "litre"});
 
   await changeTo(shift, XY34, 11);
 
   const day = await readOpenShift(SCOPE);
-  expect(day?.previousVehicles[0]?.fills.map(entry => entry.litres)).toEqual([300, null]);
+  expect(day?.previousVehicles[0]?.fills.map(entry => quantityOf(entry))).toEqual([300, null]);
   expect(day?.vehicle?.fills).toEqual([]);
 });
 
 test("a RETURNED-TO plate starts empty — an earlier use's fuel is never inherited", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
   await changeTo(shift, XY34, 11);
   await changeTo(shift, { ...AB12, startMileage: 100_500 }, 13);
 
   expect(await fillsOn()).toEqual([]);
 
   // And filling the new use does not touch the morning's record.
-  await fill(shift, { litres: 60 });
+  await fill(shift, { quantity: 60 , volumeUnit: "litre"});
   const day = await readOpenShift(SCOPE);
-  expect(day?.vehicle?.fills.map(entry => entry.litres)).toEqual([60]);
-  expect(day?.previousVehicles[0]?.fills.map(entry => entry.litres)).toEqual([300]);
+  expect(day?.vehicle?.fills.map(entry => quantityOf(entry))).toEqual([60]);
+  expect(day?.previousVehicles[0]?.fills.map(entry => quantityOf(entry))).toEqual([300]);
 });
 
 test("ONE plate used three times keeps three separate fuel histories", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
   await changeTo(shift, XY34, 10);
-  await fill(shift, { litres: null });
+  await fill(shift, { quantity: null , volumeUnit: "litre"});
   await changeTo(shift, { ...AB12, startMileage: 100_400 }, 12);
-  await fill(shift, { litres: 60 });
+  await fill(shift, { quantity: 60 , volumeUnit: "litre"});
 
   const day = await readOpenShift(SCOPE);
-  expect(day?.previousVehicles.map(use => [use.numberPlate, use.fills.map(entry => entry.litres)])).toEqual([
+  expect(day?.previousVehicles.map(use => [use.numberPlate, use.fills.map(entry => quantityOf(entry))])).toEqual([
     ["AB12 CDE", [300]],
     ["XY34 ZZZ", [null]],
   ]);
-  expect([day?.vehicle?.numberPlate, day?.vehicle?.fills.map(entry => entry.litres)]).toEqual(["AB12 CDE", [60]]);
+  expect([day?.vehicle?.numberPlate, day?.vehicle?.fills.map(entry => quantityOf(entry))]).toEqual(["AB12 CDE", [60]]);
 });
 
 test("a NEW fill may be recorded against a use that has ENDED, and lands only there", async () => {
@@ -293,11 +294,11 @@ test("a NEW fill may be recorded against a use that has ENDED, and lands only th
 
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(endedAt), usageState: USAGE_STATE.ended, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(10, 45), litres: 300, note: "Before I handed it back",
+    type: FILL_TYPE.fuel, recordedAt: at(10, 45), quantity: 300, volumeUnit: "litre", note: "Before I handed it back",
   });
 
   const day = await readOpenShift(SCOPE);
-  expect(day?.previousVehicles[0]?.fills).toMatchObject([{ litres: 300, note: "Before I handed it back" }]);
+  expect(day?.previousVehicles[0]?.fills).toMatchObject([{ quantity: 300, volumeUnit: "litre", note: "Before I handed it back" }]);
   // The vehicle in use gains nothing.
   expect(day?.vehicle?.fills).toEqual([]);
   // And the ended use is otherwise byte-for-byte what it was.
@@ -313,12 +314,12 @@ test("a retrospective fill is refused when the use does not exist — no fallbac
 
   const missing = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt("2026-09-19T04:00:00.000Z"), usageState: USAGE_STATE.ended, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(12), litres: 100, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 100, volumeUnit: "litre", note: "",
   });
   // A plate is not a use identity, and must not be read as one.
   const byPlate = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(12), litres: 100, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(12), quantity: 100, volumeUnit: "litre", note: "",
   });
 
   expect([missing, byPlate]).toEqual([null, null]);
@@ -330,12 +331,12 @@ test("the OLDEST use of a repeated plate can be targeted — the newest one is n
 
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: newLocalId(),
-    type: FILL_TYPE.adblue, recordedAt: at(8, 30), litres: null, note: "",
+    type: FILL_TYPE.adblue, recordedAt: at(8, 30), quantity: null, volumeUnit: "litre", note: "",
   });
 
-  expect((await usageFills(first)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", 300], ["adblue", null]]);
+  expect((await usageFills(first)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 300], ["adblue", null]]);
   // The later use of the SAME registration is untouched.
-  expect((await usageFills(second)).map(entry => [entry.type, entry.litres])).toEqual([["fuel", 60]]);
+  expect((await usageFills(second)).map(entry => [entry.type, quantityOf(entry)])).toEqual([["fuel", 60]]);
 });
 
 test("a day with NO vehicle cannot hold a fill", async () => {
@@ -344,7 +345,7 @@ test("a day with NO vehicle cannot hold a fill", async () => {
 
   const result = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(""), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(9), litres: 100, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(9), quantity: 100, volumeUnit: "litre", note: "",
   });
 
   expect(result).toBeNull();
@@ -373,7 +374,7 @@ test("the vehicle in use CHANGED before the save: nothing is written — not to 
 
   const result = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(10, 50), litres: 300, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(10, 50), quantity: 300, volumeUnit: "litre", note: "",
   });
 
   expect(result).toBeNull();
@@ -391,7 +392,7 @@ test("the vehicle in use was handed back with NO vehicle to follow: the save is 
 
   const result = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.adblue, recordedAt: at(12), litres: null, note: "",
+    type: FILL_TYPE.adblue, recordedAt: at(12), quantity: null, volumeUnit: "litre", note: "",
   });
   const removed = await removeVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: "any" });
 
@@ -403,11 +404,11 @@ test("a correction begun under the vehicle in use cannot rewrite its entry once 
   const shift = await dayWith();
   const opened = (await readOpenShift(SCOPE))?.vehicle?.startedAt ?? "";
   const id = newLocalId();
-  await fill(shift, { fillId: id, litres: 300 });
+  await fill(shift, { fillId: id, quantity: 300 , volumeUnit: "litre"});
   await changeTo(shift, XY34, 11);
   const before = storedFile().textSync();
 
-  const edited = await fill(shift, { vehicleUseId: vehicleUseAt(opened), fillId: id, litres: 30 });
+  const edited = await fill(shift, { vehicleUseId: vehicleUseAt(opened), fillId: id, quantity: 30 , volumeUnit: "litre"});
   const removed = await removeVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: id });
 
   expect([edited, removed]).toEqual([null, null]);
@@ -421,7 +422,7 @@ test("the vehicle in use is not history: an ENDED-use write naming it is refused
 
   const result = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(current), usageState: USAGE_STATE.ended, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(9), litres: 100, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(9), quantity: 100, volumeUnit: "litre", note: "",
   });
 
   expect(result).toBeNull();
@@ -434,10 +435,10 @@ test("CONTROL: the same use, while still in use, takes the fill", async () => {
 
   const result = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(opened), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(10, 50), litres: 300, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(10, 50), quantity: 300, volumeUnit: "litre", note: "",
   });
 
-  expect(result?.vehicle?.fills).toMatchObject([{ litres: 300 }]);
+  expect(result?.vehicle?.fills).toMatchObject([{ quantity: 300, volumeUnit: "litre" }]);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -448,27 +449,27 @@ test("re-recording the SAME id corrects that entry and leaves the others alone",
   const shift = await dayWith();
   const keep = newLocalId();
   const wrong = newLocalId();
-  await fill(shift, { fillId: keep, litres: 300, recordedAt: at(9) });
-  await fill(shift, { fillId: wrong, litres: 30, recordedAt: at(12), note: "typo" });
+  await fill(shift, { fillId: keep, quantity: 300, volumeUnit: "litre", recordedAt: at(9) });
+  await fill(shift, { fillId: wrong, quantity: 30, volumeUnit: "litre", recordedAt: at(12), note: "typo" });
 
-  await fill(shift, { fillId: wrong, litres: 300, recordedAt: at(12, 30), note: "" });
+  await fill(shift, { fillId: wrong, quantity: 300, volumeUnit: "litre", recordedAt: at(12, 30), note: "" });
 
   expect(await fillsOn()).toEqual([
-    { id: keep, type: "fuel", recordedAt: at(9).toISOString(), litres: 300, note: null },
-    { id: wrong, type: "fuel", recordedAt: at(12, 30).toISOString(), litres: 300, note: null },
+    { id: keep, type: "fuel", recordedAt: at(9).toISOString(), quantity: 300, volumeUnit: "litre", note: null },
+    { id: wrong, type: "fuel", recordedAt: at(12, 30).toISOString(), quantity: 300, volumeUnit: "litre", note: null },
   ]);
 });
 
 test("a correction can turn a known amount into an UNKNOWN one, and back", async () => {
   const shift = await dayWith();
   const id = newLocalId();
-  await fill(shift, { fillId: id, litres: 300 });
+  await fill(shift, { fillId: id, quantity: 300 , volumeUnit: "litre"});
 
-  await fill(shift, { fillId: id, litres: null });
-  expect((await fillsOn())[0]?.litres).toBeNull();
+  await fill(shift, { fillId: id, quantity: null , volumeUnit: "litre"});
+  expect(quantityOf((await fillsOn())[0])).toBeNull();
 
-  await fill(shift, { fillId: id, litres: 275.25 });
-  expect((await fillsOn())[0]?.litres).toBe(275.25);
+  await fill(shift, { fillId: id, quantity: 275.25 , volumeUnit: "litre"});
+  expect(quantityOf((await fillsOn())[0])).toBe(275.25);
 });
 
 test("removing an entry takes ONLY that one", async () => {
@@ -476,9 +477,9 @@ test("removing an entry takes ONLY that one", async () => {
   const first = newLocalId();
   const second = newLocalId();
   const third = newLocalId();
-  await fill(shift, { fillId: first, litres: 300 });
-  await fill(shift, { fillId: second, litres: null });
-  await fill(shift, { fillId: third, litres: 60 });
+  await fill(shift, { fillId: first, quantity: 300 , volumeUnit: "litre"});
+  await fill(shift, { fillId: second, quantity: null , volumeUnit: "litre"});
+  await fill(shift, { fillId: third, quantity: 60 , volumeUnit: "litre"});
   const open = await readOpenShift(SCOPE);
 
   await removeVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: second });
@@ -488,7 +489,7 @@ test("removing an entry takes ONLY that one", async () => {
 
 test("removing one that is not there changes nothing — a second press cannot take another", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
   const open = await readOpenShift(SCOPE);
   const before = storedFile().textSync();
 
@@ -503,7 +504,7 @@ test("rapid repeated recording of ONE entry leaves one entry", async () => {
   const open = await readOpenShift(SCOPE);
   const once = {
     shiftId: shift.id, vehicleUseId: open?.vehicle?.useId ?? "", usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.fuel, recordedAt: at(9), litres: 300, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(9), quantity: 300, volumeUnit: "litre" as const, note: "",
   };
 
   await Promise.all([recordVehicleFill(SCOPE, once), recordVehicleFill(SCOPE, once), recordVehicleFill(SCOPE, once)]);
@@ -521,7 +522,7 @@ test("recording a fill leaves the checks, the mileages and the day's history unt
   await changeTo(shift, XY34, 10);
   const before = await readOpenShift(SCOPE);
 
-  await fill(shift, { litres: 300 });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
   const after = await readOpenShift(SCOPE);
 
   expect(after?.previousVehicles).toEqual(before?.previousVehicles);
@@ -539,15 +540,15 @@ test("recording a fill leaves the checks, the mileages and the day's history unt
 
 test("fills survive a COLD START — they are in the file, not in memory", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300, recordedAt: at(9) });
-  await fill(shift, { litres: null, recordedAt: at(14), note: "No meter" });
+  await fill(shift, { quantity: 300, volumeUnit: "litre", recordedAt: at(9) });
+  await fill(shift, { quantity: null, volumeUnit: "litre", recordedAt: at(14), note: "No meter" });
 
   // Nothing in memory: the next read is the file's own answer.
   const recovered = await readOpenShift(SCOPE);
 
   expect(recovered?.vehicle?.fills).toMatchObject([
-    { type: "fuel", recordedAt: at(9).toISOString(), litres: 300, note: null },
-    { type: "fuel", recordedAt: at(14).toISOString(), litres: null, note: "No meter" },
+    { type: "fuel", recordedAt: at(9).toISOString(), quantity: 300, volumeUnit: "litre", note: null },
+    { type: "fuel", recordedAt: at(14).toISOString(), quantity: null, volumeUnit: "litre", note: "No meter" },
   ]);
   expect(recovered?.vehicle?.fills.map(entry => Object.keys(entry).sort())).toEqual([FILL_FIELDS, FILL_FIELDS]);
 });
@@ -586,10 +587,10 @@ test("an old day can be filled, and only then gains the field", async () => {
 
   await recordVehicleFill(SCOPE, {
     shiftId: "shift_legacy", vehicleUseId: vehicleUseAt(STARTED_AT.toISOString()), usageState: USAGE_STATE.inUse, fillId: newLocalId(),
-    type: FILL_TYPE.adblue, recordedAt: at(9), litres: null, note: "",
+    type: FILL_TYPE.adblue, recordedAt: at(9), quantity: null, volumeUnit: "litre", note: "",
   });
 
-  expect((await readOpenShift(SCOPE))?.vehicle?.fills).toMatchObject([{ type: "adblue", litres: null }]);
+  expect((await readOpenShift(SCOPE))?.vehicle?.fills).toMatchObject([{ type: "adblue", quantity: null, volumeUnit: "litre" }]);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -637,7 +638,7 @@ test.each([
 
 test("a fill records nothing about price, station or payment", async () => {
   const shift = await dayWith();
-  await fill(shift, { litres: 300 });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
 
   const stored = JSON.stringify((await fillsOn())[0]).toLowerCase();
 
@@ -650,8 +651,8 @@ test("recording a fill never reaches the network", async () => {
   const shift = await dayWith();
   const fetched = jest.spyOn(globalThis, "fetch");
 
-  await fill(shift, { litres: 300 });
-  await fill(shift, { litres: null });
+  await fill(shift, { quantity: 300 , volumeUnit: "litre"});
+  await fill(shift, { quantity: null , volumeUnit: "litre"});
 
   expect(fetched).not.toHaveBeenCalled();
 });
@@ -665,17 +666,17 @@ async function dayOfThreeUses(): Promise<{ shift: LocalShift; first: string; mid
   const shift = await dayWith();
   const first = (await readOpenShift(SCOPE))?.vehicle?.startedAt ?? "";
   const firstFill = newLocalId();
-  await fill(shift, { fillId: firstFill, litres: 300, recordedAt: at(8) });
+  await fill(shift, { fillId: firstFill, quantity: 300, volumeUnit: "litre", recordedAt: at(8) });
 
   await changeTo(shift, XY34, 10);
   const middle = (await readOpenShift(SCOPE))?.vehicle?.startedAt ?? "";
   const middleFill = newLocalId();
-  await fill(shift, { fillId: middleFill, litres: null, recordedAt: at(11) });
+  await fill(shift, { fillId: middleFill, quantity: null, volumeUnit: "litre", recordedAt: at(11) });
 
   await changeTo(shift, { ...AB12, startMileage: 100_500 }, 12);
   const second = (await readOpenShift(SCOPE))?.vehicle?.startedAt ?? "";
   const secondFill = newLocalId();
-  await fill(shift, { fillId: secondFill, litres: 60, recordedAt: at(13) });
+  await fill(shift, { fillId: secondFill, quantity: 60, volumeUnit: "litre", recordedAt: at(13) });
 
   await changeTo(shift, { ...XY34, startMileage: 220_400 }, 14);
   return { shift, first, middle, second, fills: { first: firstFill, middle: middleFill, second: secondFill } };
@@ -692,13 +693,13 @@ test("an ENDED use's fill can be corrected, and only that use changes", async ()
 
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
-    type: FILL_TYPE.fuel, recordedAt: at(8), litres: 30, note: "Was 300, actually 30",
+    type: FILL_TYPE.fuel, recordedAt: at(8), quantity: 30, volumeUnit: "litre", note: "Was 300, actually 30",
   });
 
-  expect(await usageFills(first)).toMatchObject([{ litres: 30, note: "Was 300, actually 30" }]);
+  expect(await usageFills(first)).toMatchObject([{ quantity: 30, volumeUnit: "litre", note: "Was 300, actually 30" }]);
   // The OTHER use of the same registration is untouched, and so is the third.
-  expect(await usageFills(second)).toMatchObject([{ litres: 60 }]);
-  expect(await usageFills(middle)).toMatchObject([{ litres: null }]);
+  expect(await usageFills(second)).toMatchObject([{ quantity: 60, volumeUnit: "litre" }]);
+  expect(await usageFills(middle)).toMatchObject([{ quantity: null, volumeUnit: "litre" }]);
   // And nothing but the fills moved.
   const after = await readOpenShift(SCOPE);
   expect(after?.previousVehicles.map(use => [use.numberPlate, use.startedAt, use.endedAt, use.startMileage, use.endMileage, use.vehicleClass]))
@@ -710,12 +711,12 @@ test("correcting the FIRST use of a plate never touches the second — targeting
 
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(second), usageState: USAGE_STATE.ended, fillId: fills.second ?? "",
-    type: FILL_TYPE.adblue, recordedAt: at(13), litres: 20, note: "",
+    type: FILL_TYPE.adblue, recordedAt: at(13), quantity: 20, volumeUnit: "litre", note: "",
   });
 
   // The second use's entry became AdBlue; the first use's fuel is as it was.
-  expect(await usageFills(second)).toMatchObject([{ type: "adblue", litres: 20 }]);
-  expect(await usageFills(first)).toMatchObject([{ type: "fuel", litres: 300 }]);
+  expect(await usageFills(second)).toMatchObject([{ type: "adblue", quantity: 20, volumeUnit: "litre" }]);
+  expect(await usageFills(first)).toMatchObject([{ type: "fuel", quantity: 300, volumeUnit: "litre" }]);
 });
 
 test("an ENDED use's fill can be removed, and only that one goes", async () => {
@@ -736,17 +737,17 @@ test("a completed CHECK on an ended use survives a fill correction", async () =>
     completedAt: at(5, 50), completedBy: "user_1",
   });
   const fillId = newLocalId();
-  await fill(shift, { fillId, litres: 300 });
+  await fill(shift, { fillId, quantity: 300 , volumeUnit: "litre"});
   await changeTo(shift, XY34, 10);
   const certificate = (await readOpenShift(SCOPE))?.previousVehicles[0]?.checks;
 
   await recordVehicleFill(SCOPE, {
-    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId, type: FILL_TYPE.fuel, recordedAt: at(8), litres: 310, note: "",
+    shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId, type: FILL_TYPE.fuel, recordedAt: at(8), quantity: 310, volumeUnit: "litre", note: "",
   });
 
   const after = (await readOpenShift(SCOPE))?.previousVehicles[0];
   expect(after?.checks).toEqual(certificate);
-  expect(after?.fills).toMatchObject([{ litres: 310 }]);
+  expect(after?.fills).toMatchObject([{ quantity: 310, volumeUnit: "litre" }]);
 });
 
 test("a use that answers to no name is not corrected — nothing anywhere changes", async () => {
@@ -755,11 +756,11 @@ test("a use that answers to no name is not corrected — nothing anywhere change
 
   const missing = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt("2026-09-19T23:59:00.000Z"), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
-    type: FILL_TYPE.fuel, recordedAt: at(8), litres: 1, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(8), quantity: 1, volumeUnit: "litre", note: "",
   });
   const empty = await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(""), usageState: USAGE_STATE.inUse, fillId: fills.first ?? "",
-    type: FILL_TYPE.fuel, recordedAt: at(8), litres: 1, note: "",
+    type: FILL_TYPE.fuel, recordedAt: at(8), quantity: 1, volumeUnit: "litre", note: "",
   });
   const removed = await removeVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt("AB12 CDE"), usageState: USAGE_STATE.ended, fillId: fills.first ?? "" });
 
@@ -771,11 +772,11 @@ test("a corrected historical fill survives a COLD START", async () => {
   const { shift, first, fills } = await dayOfThreeUses();
   await recordVehicleFill(SCOPE, {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(first), usageState: USAGE_STATE.ended, fillId: fills.first ?? "",
-    type: FILL_TYPE.fuel, recordedAt: at(8), litres: 275.5, note: "Corrected",
+    type: FILL_TYPE.fuel, recordedAt: at(8), quantity: 275.5, volumeUnit: "litre", note: "Corrected",
   });
 
   // Read again from the file alone.
-  expect(await usageFills(first)).toMatchObject([{ litres: 275.5, note: "Corrected" }]);
+  expect(await usageFills(first)).toMatchObject([{ quantity: 275.5, volumeUnit: "litre", note: "Corrected" }]);
 });
 
 test("each use keeps its OWN mileage, distance and fills — nothing is summed across uses", async () => {
@@ -787,9 +788,9 @@ test("each use keeps its OWN mileage, distance and fills — nothing is summed a
   expect([use(second)?.startMileage, use(second)?.endMileage]).toEqual([100_500, 100_620]);
   expect(usageDistance(use(first)!)).toBe(120);
   expect(usageDistance(use(second)!)).toBe(120);
-  expect(summariseFills(use(first)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, knownLitres: 300, unknownCount: 0 });
-  expect(summariseFills(use(second)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, knownLitres: 60, unknownCount: 0 });
-  expect(summariseFills(use(middle)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, knownLitres: 0, unknownCount: 1 });
+  expect(summariseFills(use(first)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, known: [{ unit: "litre", total: 300 }], unknownCount: 0 });
+  expect(summariseFills(use(second)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, known: [{ unit: "litre", total: 60 }], unknownCount: 0 });
+  expect(summariseFills(use(middle)?.fills ?? [], FILL_TYPE.fuel)).toEqual({ count: 1, known: [], unknownCount: 1 });
 });
 
 test("an equal start and end is a real use — it travelled 0 mi", async () => {

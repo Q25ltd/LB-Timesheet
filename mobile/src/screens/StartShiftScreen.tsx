@@ -26,6 +26,7 @@
  * nothing into the shift: the driver cannot see those fields any more, so they
  * cannot be agreeing to them.
  */
+import { unsetUnitsText, type RecordingUnits } from "../shift/recordingUnits";
 import { useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -55,15 +56,24 @@ interface StartShiftScreenProps {
   onBack: () => void;
   /** Create the day. Local only — it cannot fail for want of a network. */
   onStart: (input: { workingFor: WorkingContext; startedAt: Date; vehicle: VehicleDetails | null }) => void;
+  /**
+   * The units a reading is recorded in for a Working For (D66) — `null` while
+   * they are read, and then no unit is recorded.
+   */
+  unitsFor?: ((workingFor: WorkingContext) => RecordingUnits) | null;
 }
 
-export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScreenProps) {
+export function StartShiftScreen({ memberships, onBack, onStart, unitsFor = null }: StartShiftScreenProps) {
   const insets = useSafeAreaInsets();
   const [chosen, setWorking] = useState<WorkingContext>(PERSONAL);
   // A company chosen here and then withdrawn while the screen is open — the
   // account was read again (D65) — is no longer a choice: back to Personal,
   // never a day started for a company that has just withdrawn the driver.
   const working: WorkingContext = chosen.kind === "company" && !memberships.some(m => m.membershipId === chosen.membershipId) ? PERSONAL : chosen;
+  // The units the start reading is recorded in follow who the day is for (D66).
+  const units = unitsFor === null ? null : unitsFor(working);
+  const odometerUnit = units?.distanceUnit ?? null;
+  const unitNote = units === null || odometerUnit !== null ? null : unsetUnitsText(units.unset);
 
   /**
    * The clock is read ONCE, when the screen opens (`useTimeOfDay`).
@@ -81,7 +91,7 @@ export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScr
   // Read only on the "Yes" branch, so fields filled in and then hidden by
   // answering "Not yet" cannot travel with the shift.
   const vehicle: VehicleDetails | null =
-    vehicleAnswer === "yes" ? vehicleDetailsFrom(vehicleClass, numberPlate, mileage) : null;
+    vehicleAnswer === "yes" ? vehicleDetailsFrom(vehicleClass, numberPlate, mileage, odometerUnit) : null;
 
   const canStart = time.valid
     && (vehicleAnswer === "not-yet" || (vehicleAnswer === "yes" && vehicle !== null));
@@ -175,6 +185,8 @@ export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScr
             onNumberPlate={setNumberPlate}
             mileage={mileage}
             onMileage={setMileage}
+            odometerUnit={odometerUnit}
+            unitNote={unitNote}
           />
         ) : null}
 

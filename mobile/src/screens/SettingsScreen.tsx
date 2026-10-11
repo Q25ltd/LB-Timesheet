@@ -44,11 +44,13 @@ interface SettingsScreenProps {
   onSignOut: () => void;
   /** Where the account's email address stands (D63) — shown in Account, under the address. */
   emailStatus?: React.ReactNode;
+  /** The driver's own units for Personal days (D66). */
+  personalUnits?: React.ReactNode;
 }
 
 export function SettingsScreen({
   user, biometrics, biometricUnlockEnabled,
-  onEnableBiometrics, onDisableBiometrics, onSignOut, emailStatus,
+  onEnableBiometrics, onDisableBiometrics, onSignOut, emailStatus, personalUnits,
 }: SettingsScreenProps) {
   const [busy, setBusy] = useState(false);
 
@@ -69,6 +71,8 @@ export function SettingsScreen({
         <Row label="Email" value={user.email} valueTestID="account-email" last={emailStatus === undefined} />
         {emailStatus}
       </Section>
+
+      {personalUnits === undefined ? null : <Section label="Units for Personal days">{personalUnits}</Section>}
 
       <Section label="Security">
         {biometrics.available ? (

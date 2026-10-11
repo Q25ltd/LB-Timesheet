@@ -5,6 +5,7 @@
  * Every capability it passes down already existed — this route is where they
  * became reachable, not where they were built.
  */
+import { PersonalUnits } from "../../../src/components/PersonalUnits";
 import { router } from "expo-router";
 import { SettingsScreen } from "../../../src/screens/SettingsScreen";
 import { EmailConfirmation } from "../../../src/components/EmailConfirmation";
@@ -34,6 +35,7 @@ export default function SettingsRoute() {
       onEnableBiometrics={enableBiometricUnlock}
       onDisableBiometrics={disableBiometricUnlock}
       emailStatus={<EmailConfirmation variant="settings" />}
+      personalUnits={<PersonalUnits />}
       // The auth gate redirects immediately. Cleanup errors remain visible
       // on Sign-in, where they can be retried without restoring the account.
       onSignOut={() => { void signOut().finally(() => { router.replace("/sign-in"); }).catch(cleanupShownOnSignIn); }}

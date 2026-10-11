@@ -8,6 +8,7 @@
  *   DETAIL      opened by the day's id, and a faithful rendering of it
  *   FINISH      a finished day is on Home as the driver lands there
  */
+import { saveUnitPreferences } from "../shift/unitPreferences";
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react-native";
 import { File } from "expo-file-system";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -93,8 +94,8 @@ const DRIVER: AuthenticatedAccount = {
 const day = (date: number, hours: number, minutes = 0) => new Date(2026, 8, date, hours, minutes);
 const PERSONAL: WorkingContext = { kind: "personal" };
 const NORTHGATE: WorkingContext = { kind: "company", membershipId: "m1", companyId: "c1", companyName: "Northgate Haulage & Distribution Services (Midlands) Ltd" };
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const RIGID: VehicleDetails = { vehicleClass: "class2", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
 
 type View = Awaited<ReturnType<typeof render>>;
 const text = (view: View, testID: string) => {
@@ -161,6 +162,8 @@ async function detail(id: string): Promise<View> {
 }
 
 beforeEach(async () => {
+  // A driver who has chosen units for Personal days (D66): what the UI records here carries them.
+  saveUnitPreferences(SCOPE, { distanceUnit: "mile", volumeUnit: "litre" });
   await clearOpenShift(SCOPE);
   for (const entry of accountDirectoryOf(SCOPE).list()) {
     if (entry instanceof File && entry.uri.includes(COMPLETED_SHIFT_FILE_PREFIX)) entry.delete();
@@ -351,8 +354,8 @@ async function busyDay(): Promise<CompletedShift> {
     shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, checkId: "vc",
     startedAt: day(18, 22, 5), answers: answers(unitItems, tyre), completedAt: day(18, 22, 20), completedBy: DRIVER.user.id,
   });
-  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: day(18, 23), litres: 312.5, note: "Tilbury" });
-  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: day(19, 1), litres: null, note: "" });
+  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f1", type: FILL_TYPE.fuel, recordedAt: day(18, 23), quantity: 312.5, volumeUnit: "litre", note: "Tilbury" });
+  await recordVehicleFill(SCOPE, { shiftId: shift.id, vehicleUseId: vehicleUseAt(day(18, 22).toISOString()), usageState: USAGE_STATE.inUse, fillId: "f2", type: FILL_TYPE.adblue, recordedAt: day(19, 1), quantity: null, volumeUnit: "litre", note: "" });
   await addTrailerToOpenShift(SCOPE, { shiftId: shift.id, trailer: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, startedAt: day(18, 22, 30) });
   const trailerItems = checklistItems(trailerChecklistFor(TRAILER_TYPE.standard));
   await completeTrailerCheck(SCOPE, {
@@ -360,7 +363,7 @@ async function busyDay(): Promise<CompletedShift> {
     startedAt: day(18, 22, 35), answers: answers(trailerItems, trailerItems[0]?.key), completedAt: day(18, 22, 45), completedBy: DRIVER.user.id,
   });
   await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(day(18, 22, 30).toISOString()), next: { trailerNumber: "RF77", trailerType: TRAILER_TYPE.refrigerated }, changedAt: day(19, 2) });
-  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(day(19, 2).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: day(19, 3), litres: 40, note: "" });
+  await recordReeferDiesel(SCOPE, { shiftId: shift.id, trailerUseId: trailerUseAt(day(19, 2).toISOString()), usageState: USAGE_STATE.inUse, fillId: "rd", recordedAt: day(19, 3), quantity: 40, volumeUnit: "litre", note: "" });
   await changeTrailer(SCOPE, { shiftId: shift.id, endingUseId: trailerUseAt(day(19, 2).toISOString()), next: { trailerNumber: "TR23", trailerType: TRAILER_TYPE.standard }, changedAt: day(19, 4) });
   await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(day(18, 22).toISOString()), endMileage: 100_180, next: { ...UNIT, vehicleClass: "class1", numberPlate: "CD56 EFG", startMileage: 5_000 }, changedAt: day(19, 4, 30) });
   await changeVehicle(SCOPE, { shiftId: shift.id, endingUseId: vehicleUseAt(day(19, 4, 30).toISOString()), endMileage: 5_040, next: { ...UNIT, startMileage: 100_180 }, changedAt: day(19, 5) });
@@ -463,7 +466,7 @@ test("a day with NO vehicle says so; Night Out No; no notes line", async () => {
 });
 
 test("a VAN day and a MULTI-DAY day read correctly", async () => {
-  const van = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(16, 6), vehicle: { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 40_000 } });
+  const van = await startLocalShift(SCOPE, { workingFor: PERSONAL, startedAt: day(16, 6), vehicle: { vehicleClass: "van", numberPlate: "VN11 AAA", startMileage: 40_000, odometerUnit: "mile" } });
   const done = await finishDeclared(SCOPE, { shiftId: van.id, vehicleUseId: vehicleUseAt(day(16, 6).toISOString()), trailerUseId: null, finalMileage: 40_900, endedAt: day(18, 18), nightOut: true, notes: "" });
 
   const view = await detail(done?.id ?? "");

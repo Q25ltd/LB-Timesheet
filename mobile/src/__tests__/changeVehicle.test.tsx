@@ -66,9 +66,9 @@ jest.mock("expo-router", () => {
 const METRICS = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const STARTED_AT = new Date(2026, 8, 19, 5, 30);
 const at = (hours: number, minutes = 0) => new Date(2026, 8, 19, hours, minutes);
-const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
-const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000 };
-const CD56: VehicleDetails = { vehicleClass: "class1", numberPlate: "CD56 EFG", startMileage: 300_000 };
+const AB12: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
+const XY34: VehicleDetails = { vehicleClass: "class1", numberPlate: "XY34 ZZZ", startMileage: 220_000, odometerUnit: "mile" };
+const CD56: VehicleDetails = { vehicleClass: "class1", numberPlate: "CD56 EFG", startMileage: 300_000, odometerUnit: "mile" };
 
 const DRIVER: AuthenticatedAccount = {
   user: { id: "user_1", firstName: "Nerijus", lastName: "Kuizinas", email: "driver@example.com" },
@@ -524,7 +524,7 @@ test("the screen itself asks ONCE — three taps while the write is still runnin
   // of it, proven where the store cannot mask it: a write that never settles.
   const onConfirm = jest.fn(() => new Promise<void>(() => { /* never settles */ }));
   const view = await wrap(
-    <ChangeVehicleScreen trailerInUse={null}
+    <ChangeVehicleScreen trailerInUse={null} units={null}
       current={{ ...AB12, useId: "use-ab12", startedAt: STARTED_AT.toISOString(), checks: [], fills: [] }}
       candidates={[]}
       onLeave={() => { /* not used here */ }}

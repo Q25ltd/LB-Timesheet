@@ -27,7 +27,7 @@ import { accountDirectoryOf, scopeFor } from "./testScope";
 /** The signed-in driver's records — F-31: every store call names its account. */
 const SCOPE = scopeFor("user_1");
 
-const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000 };
+const UNIT: VehicleDetails = { vehicleClass: "class1", numberPlate: "AB12 CDE", startMileage: 100_000, odometerUnit: "mile" };
 const day = (date: number, hours: number, minutes = 0) => new Date(2026, 8, date, hours, minutes);
 const recordFile = (id: string) => new File(accountDirectoryOf(SCOPE), `${COMPLETED_SHIFT_FILE_PREFIX}${id}.json`);
 

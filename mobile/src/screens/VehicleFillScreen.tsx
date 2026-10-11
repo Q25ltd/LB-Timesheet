@@ -49,9 +49,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
   FILL_NOTE_MAX_LENGTH,
-  parseLitres,
+  fillAmount,
+  parseQuantity,
   type FillRecord,
 } from "../shift/vehicleFill";
+import { volumeLabel, type VolumeUnit } from "../shift/units";
 import {
   BackButton,
   Choice,
@@ -60,7 +62,7 @@ import {
   keyboardSafeScrollProps,
 } from "./vehicleForm";
 import { TimeOfDayFields, timeStyles, useTimeOfDay } from "./timeOfDay";
-import { formatClockTime, formatLitres } from "./format";
+import { formatClockTime, formatFillAmount } from "./format";
 import { colors, spacing, typography } from "../theme/index";
 
 /** What the driver confirms: one fill, as entered, on the use this screen is for. */
@@ -68,8 +70,10 @@ export interface FillEntry {
   /** The fill being corrected, or `null` for a new one. */
   fillId: string | null;
   recordedAt: Date;
-  /** Litres, or `null` when the driver says the amount is unknown. */
-  litres: number | null;
+  /** The quantity in `volumeUnit`, or `null` when the driver says the amount is unknown. */
+  quantity: number | null;
+  /** The unit the form showed for it: the day's for a new fill, the fill's own for a correction (D66). */
+  volumeUnit: VolumeUnit | null;
   note: string;
 }
 
@@ -93,6 +97,10 @@ interface VehicleFillScreenProps {
   /** What it went into, for the list heading: "vehicle" or "trailer". */
   asset: string;
   usage: FillUsage;
+  /** The unit a NEW fill is recorded in (D66) — `null` when none is set. */
+  volumeUnit: VolumeUnit | null;
+  /** Why no unit is set, in the driver's words — or `null`. */
+  unitNote: string | null;
   onLeave: () => void;
   /** Store the fill on this screen's use. Rejects if it could not be stored. */
   onSave: (entry: FillEntry) => Promise<void>;
@@ -102,31 +110,36 @@ interface VehicleFillScreenProps {
 
 type Amount = "known" | "unknown" | null;
 
-export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemove }: VehicleFillScreenProps) {
+export function VehicleFillScreen({ label, asset, usage, volumeUnit, unitNote, onLeave, onSave, onRemove }: VehicleFillScreenProps) {
   const insets = useSafeAreaInsets();
   const recorded = usage.fills;
 
   const time = useTimeOfDay(() => new Date());
   const [amount, setAmount] = useState<Amount>(null);
-  const [litresText, setLitresText] = useState("");
+  const [quantityText, setQuantityText] = useState("");
   const [note, setNote] = useState("");
   /** The fill being corrected. `null` while adding a new one. */
   const [editing, setEditing] = useState<string | null>(null);
   /** The instant that fill already carries — corrections keep its DAY. */
   const [editingAt, setEditingAt] = useState<Date | null>(null);
+  /** The unit of the fill being corrected — a correction never changes a fill's unit. */
+  const [editingUnit, setEditingUnit] = useState<VolumeUnit | null>(null);
   const [submitting, setSubmitting] = useState(false);
   /** ONE write, however many taps — set synchronously, before any re-render. */
   const inFlight = useRef(false);
 
-  const litres = parseLitres(litresText);
-  const litresInvalid = amount === "known" && litresText.trim() !== "" && litres === null;
-  const complete = time.valid && (amount === "unknown" || (amount === "known" && litres !== null));
+  const unit = editing === null ? volumeUnit : editingUnit;
+  const quantity = parseQuantity(quantityText);
+  const quantityInvalid = amount === "known" && quantityText.trim() !== "" && quantity === null;
+  const complete = time.valid && (amount === "unknown" || (amount === "known" && quantity !== null));
 
   function edit(fill: FillRecord) {
+    const stored = fillAmount(fill);
     setEditing(fill.id);
     setEditingAt(new Date(fill.recordedAt));
-    setAmount(fill.litres === null ? "unknown" : "known");
-    setLitresText(fill.litres === null ? "" : String(fill.litres));
+    setEditingUnit(stored.unit);
+    setAmount(stored.quantity === null ? "unknown" : "known");
+    setQuantityText(stored.quantity === null ? "" : String(stored.quantity));
     setNote(fill.note ?? "");
     const at = new Date(fill.recordedAt);
     time.setHours(String(at.getHours()).padStart(2, "0"));
@@ -136,8 +149,9 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
   function clear() {
     setEditing(null);
     setEditingAt(null);
+    setEditingUnit(null);
     setAmount(null);
-    setLitresText("");
+    setQuantityText("");
     setNote("");
   }
 
@@ -158,7 +172,8 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
     run(() => onSave({
       fillId: editing,
       recordedAt,
-      litres: amount === "known" ? litres : null,
+      quantity: amount === "known" ? quantity : null,
+      volumeUnit: unit,
       note,
     }));
   }
@@ -172,7 +187,7 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
           formStyles.content,
           { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xxl },
         ]}
-        // The litres field sits low on a phone; the keyboard must not cover it.
+        // The quantity field sits low on a phone; the keyboard must not cover it.
         {...keyboardSafeScrollProps}
       >
         <BackButton testID="fill-back" onPress={onLeave} />
@@ -203,28 +218,29 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
               testID="amount-unknown"
               label="Amount unknown"
               selected={amount === "unknown"}
-              onSelect={() => { setAmount("unknown"); setLitresText(""); }}
+              onSelect={() => { setAmount("unknown"); setQuantityText(""); }}
               last
             />
           </View>
         </FormSection>
 
         {amount === "known" ? (
-          <FormSection label="LITRES">
+          <FormSection label={unit === null ? "QUANTITY" : volumeLabel(unit).toUpperCase()}>
             <TextInput
-              testID="litres"
-              value={litresText}
-              onChangeText={setLitresText}
+              testID="quantity"
+              value={quantityText}
+              onChangeText={setQuantityText}
               placeholder="0"
               placeholderTextColor={colors.placeholder}
               keyboardType="decimal-pad"
               style={formStyles.input}
-              accessibilityLabel="Litres"
+              accessibilityLabel={unit === null ? "Quantity" : volumeLabel(unit)}
             />
+            {editing === null && unitNote !== null ? <Text style={timeStyles.hint} testID="quantity-unit-hint">{unitNote}</Text> : null}
           </FormSection>
         ) : null}
-        {litresInvalid ? (
-          <Text style={styles.error} testID="litres-error">Enter the litres the pump showed.</Text>
+        {quantityInvalid ? (
+          <Text style={styles.error} testID="quantity-error">Enter the amount the pump showed.</Text>
         ) : null}
 
         <FormSection label="NOTE (OPTIONAL)">
@@ -268,7 +284,7 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
                   testID={`fill-${fill.id}`}
                   onPress={() => { edit(fill); }}
                   accessibilityRole="button"
-                  accessibilityLabel={`${formatClockTime(fill.recordedAt)}, ${fill.litres === null ? "amount unknown" : formatLitres(fill.litres)}. Edit`}
+                  accessibilityLabel={`${formatClockTime(fill.recordedAt)}, ${formatFillAmount(fill).replace("Amount unknown", "amount unknown")}. Edit`}
                   accessibilityState={{ selected: fill.id === editing }}
                   style={({ pressed }) => [
                     styles.row,
@@ -278,7 +294,7 @@ export function VehicleFillScreen({ label, asset, usage, onLeave, onSave, onRemo
                 >
                   <View style={styles.rowText}>
                     <Text style={styles.rowAmount}>
-                      {fill.litres === null ? "Amount unknown" : formatLitres(fill.litres)}
+                      {formatFillAmount(fill)}
                     </Text>
                     <Text style={styles.rowMeta}>{formatClockTime(fill.recordedAt)}</Text>
                     {fill.note === null ? null : <Text style={styles.rowNote}>{fill.note}</Text>}
