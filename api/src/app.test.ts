@@ -120,6 +120,34 @@ test("a foreign preflight is not granted", async () => {
   await app.close();
 });
 
+test("an allowed origin's preflight for PATCH is granted — the company website corrects an invitation with it (D63)", async () => {
+  const app = await buildApp(db);
+  const res = await app.inject({
+    method: "OPTIONS",
+    url: "/company/driver-invitations/inv-1",
+    headers: {
+      origin: ALLOWED,
+      "access-control-request-method": "PATCH",
+      "access-control-request-headers": "authorization,content-type",
+    },
+  });
+  assert.equal(res.headers["access-control-allow-origin"], ALLOWED);
+  const methods = String(res.headers["access-control-allow-methods"] ?? "").split(",").map(m => m.trim());
+  assert.ok(methods.includes("PATCH"), `PATCH must be an allowed method — got "${methods.join(",")}"`);
+  await app.close();
+});
+
+test("a FOREIGN origin's PATCH preflight is still not granted", async () => {
+  const app = await buildApp(db);
+  const res = await app.inject({
+    method: "OPTIONS",
+    url: "/company/driver-invitations/inv-1",
+    headers: { origin: FOREIGN, "access-control-request-method": "PATCH", "access-control-request-headers": "authorization" },
+  });
+  assert.equal(res.headers["access-control-allow-origin"], undefined);
+  await app.close();
+});
+
 test("credentials are never allowed — authority travels in a header, not a cookie", async () => {
   const app = await buildApp(db);
   const res = await app.inject({ method: "GET", url: "/health", headers: { origin: ALLOWED } });

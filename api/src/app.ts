@@ -145,7 +145,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
       const origin = request.headers.origin;
       const credentialed = request.url.startsWith(WEB_AUTH_PREFIX)
         && typeof origin === "string" && origins.includes(origin);
-      callback(null, { origin: origins, credentials: credentialed });
+      // The methods the API's routes use. The plugin's default is GET, HEAD
+      // and POST only, which made a browser refuse the company website's
+      // PATCH (correcting a driver invitation, D63) at the preflight.
+      callback(null, { origin: origins, credentials: credentialed, methods: ["GET", "HEAD", "POST", "PATCH"] });
     },
   });
 
