@@ -90,7 +90,11 @@ async function send<T>(
       response = await fetch(url, {
         method:  init.method,
         headers: {
-          "content-type": "application/json",
+          // Only a request WITH a JSON body says so (F-38): the API refuses
+          // `application/json` with an empty body, which had every bodyless
+          // POST — sign-out, the confirmation email, an invitation's answer —
+          // refused with 400 FST_ERR_CTP_EMPTY_JSON_BODY.
+          ...(init.payload === undefined ? {} : { "content-type": "application/json" }),
           accept:         "application/json",
           ...(init.token === undefined ? {} : { authorization: `Bearer ${init.token}` }),
         },
