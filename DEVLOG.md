@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-10-11 — D66 stage S1: measurement units
+
+**Built.**
+- Server: `DistanceUnit` / `VolumeUnit` enums; `Company` and
+  `PendingCompanyRegistration` units (nullable, never defaulted); company
+  registration requires both; confirmation copies them; `GET` / `PUT
+  /company/settings/units` behind the admin gate; every membership view
+  carries its company's units; CORS allows PUT. Additive migration.
+- Website: units at registration; Settings becomes a working area; Home
+  prompts a company with none.
+- App: units travel with memberships; the driver's own units for Personal
+  days (account-scoped file, F-31); a resolver decides the unit of a NEW
+  reading or quantity. Vehicle uses gain `odometerUnit`, fixed when created.
+  Fills became `quantity` + `volumeUnit`.
+
+**Two design choices, recorded because they are easy to undo by accident:**
+- A fill from before units keeps its stored `litres` field exactly and is
+  READ as litres (`fillAmount`, provenance `legacy-litres-label`).
+  Rewriting it into the new shape on read would change the D42 version of
+  every timesheet declared before units, making confirmed days read as
+  "changed since you confirmed it". A correction of such a fill writes
+  the new shape, in litres.
+- The odometer field keeps its old name (`startMileage`); it is a reading,
+  in `odometerUnit`. Renaming it would have the same D42 cost.
+
+**Changed on purpose:** readings from before units used to show "mi";
+they now show the bare number. Existing tests that pinned the membership
+field set, the company navigation, Home's request list, fills' stored
+shape and "mi" were updated to the new contract; test vehicles that stand
+for new records carry `odometerUnit: "mile"`, and legacy-day tests assert
+there is NO unit.
+
+**Evidence.** API 247 unit + 7 new DB tests (all DB 345); web 180
+(Settings 6, registration 2 new, Home 2 new) + Playwright 8/8; app 1514
+(16 new). 15 mutations, all killed (6 server, 9 app). Full gate below.
+
+**Open / risks.** During a deploy, the website and API change at
+slightly different moments; a company registration in that window can be
+refused once (private deployment — no customers). The driver's app
+gains units only when it reads the account again (Home's read).
+
+---
+
 ## 2026-10-11 — D66 stage S0: submission, review, PDF and email decided and recorded
 
 **Investigated first** (no code changed): the phone's finished days,
