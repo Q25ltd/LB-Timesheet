@@ -305,13 +305,13 @@ test("DR7. two SIMULTANEOUS acceptances of one invitation: exactly one succeeds,
   assert.equal(await prisma.companyMembership.count({ where: { userId: me.userId, companyId: admin.companyId } }), 1);
 });
 
-test("DR8. a FORMER driver who rejoins gets their old membership back — the same row, active again, with the new payroll reference — never a second one", async () => {
+test("DR8. a REMOVED driver who rejoins gets their old membership back — the same row, active again, with the new payroll reference — never a second one", async () => {
   const admin = await companyAdmin("Rejoin");
   const email = freshEmail();
   const me = await driver(email);
   const first = await invite(admin, email);
   const joined = stringField(field((await accept(me.identityToken, first)).body, "membership"), "membershipId");
-  await prisma.companyMembership.update({ where: { id: joined }, data: { active: false } });
+  await prisma.companyMembership.update({ where: { id: joined }, data: { active: false, removedAt: new Date() } });
 
   const second = await invite(admin, email, { payrollRef: "EMP-NEW" });
   const res = await accept(me.identityToken, second);
@@ -320,6 +320,7 @@ test("DR8. a FORMER driver who rejoins gets their old membership back — the sa
   assert.equal(stringField(field(res.body, "membership"), "membershipId"), joined, "the same membership row");
   const row = await prisma.companyMembership.findUniqueOrThrow({ where: { id: joined } });
   assert.equal(row.active, true);
+  assert.equal(row.removedAt, null, "back on the company's list (D65)");
   assert.equal(row.payrollRef, "EMP-NEW");
   assert.equal(await prisma.companyMembership.count({ where: { userId: me.userId } }), 1);
 });

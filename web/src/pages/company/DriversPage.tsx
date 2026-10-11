@@ -3,29 +3,43 @@ import { useAuth } from "../../auth/AuthProvider";
 import type { ApiResult } from "../../auth/http";
 import { Field, FormMessage } from "../../components/Field";
 import { usePageTitle } from "../../usePageTitle";
+import { changeDriver, listDrivers, type CompanyDriver, type DriverAction } from "./companyDriversApi";
 import {
   addDriver, cancelInvitation, correctInvitation, listInvitations,
   type DriverInvitation, type InvitationStatus,
 } from "./driverInvitationsApi";
 
 /**
- * DRIVERS — the company adds its drivers (D63, stage 4; `/company/drivers`).
+ * DRIVERS — the company's drivers and its invitations (`/company/drivers`).
  *
  * The company types a driver's name and email address (and its own payroll
  * reference); that is an INVITATION, which the driver accepts in the phone
- * app with that address confirmed. Nothing here looks a driver up: the list
- * is what the company typed and what each driver answered. An invitation
+ * app with that address confirmed (D63). Once they have, they are one of
+ * the company's drivers, listed with the account's name and email, and the
+ * company can deactivate, reactivate or remove them (D65). An invitation
  * that is still open can be corrected or cancelled; nothing else can.
  */
+interface Lists { drivers: CompanyDriver[]; invitations: DriverInvitation[] }
+
+/** What an action on a driver or an invitation came to — said above the lists, which may lose the row it was about. */
+interface Notice { tone: "success" | "error"; text: string }
+type Notify = (notice: Notice | null) => void;
+
 export function DriversPage() {
   usePageTitle("Drivers");
   const { withCompany } = useAuth();
-  const [invitations, setInvitations] = useState<DriverInvitation[] | "loading" | "failed" | "forbidden">("loading");
+  const [lists, setLists] = useState<Lists | "loading" | "failed" | "forbidden">("loading");
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const reload = useCallback(async () => {
-    const result = await listInvitations(withCompany);
-    if (result.kind === "ok") setInvitations(result.value);
-    else setInvitations(result.kind === "refused" && result.status === 403 ? "forbidden" : "failed");
+    const [drivers, invitations] = await Promise.all([listDrivers(withCompany), listInvitations(withCompany)]);
+    if (drivers.kind === "ok" && invitations.kind === "ok") {
+      // An accepted invitation is a driver now, listed as one.
+      setLists({ drivers: drivers.value, invitations: invitations.value.filter(invitation => invitation.status !== "accepted") });
+      return;
+    }
+    const forbidden = [drivers, invitations].some(result => result.kind === "refused" && result.status === 403);
+    setLists(forbidden ? "forbidden" : "failed");
   }, [withCompany]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -40,28 +54,144 @@ export function DriversPage() {
         </p>
       </header>
 
-      {invitations === "forbidden" ? (
+      {lists === "forbidden" ? (
         <p className="drivers__notice" role="alert">Your account is not allowed to manage drivers for this company.</p>
       ) : (
         <>
           <AddDriver onAdded={reload} />
           <section className="drivers__list" aria-labelledby="drivers-list-title">
             <h2 id="drivers-list-title" className="company-section-title">Your drivers</h2>
-            {invitations === "loading" ? <p className="drivers__notice" role="status">Loading your drivers…</p> : null}
-            {invitations === "failed" ? (
+            {notice === null ? null : (
+              <p className="drivers__notice" role={notice.tone === "error" ? "alert" : "status"} data-tone={notice.tone}>{notice.text}</p>
+            )}
+            {lists === "loading" ? <p className="drivers__notice" role="status">Loading your drivers…</p> : null}
+            {lists === "failed" ? (
               <p className="drivers__notice" role="alert">
                 We could not load your drivers just now. Nothing has changed — try again in a moment.
                 {" "}<button className="button button--secondary" type="button" onClick={() => void reload()}>Try again</button>
               </p>
             ) : null}
-            {Array.isArray(invitations) && invitations.length === 0 ? (
+            {typeof lists === "object" && lists.drivers.length === 0 && lists.invitations.length === 0 ? (
               <p className="drivers__notice">No drivers yet. Add your first driver above.</p>
             ) : null}
-            {Array.isArray(invitations) && invitations.length > 0 ? <DriverTable invitations={invitations} onChanged={reload} /> : null}
+            {typeof lists === "object" && lists.drivers.length === 0 && lists.invitations.length > 0 ? (
+              <p className="drivers__notice">No one has joined yet. Invited drivers appear here once they accept.</p>
+            ) : null}
+            {typeof lists === "object" && lists.drivers.length > 0 ? <MemberTable drivers={lists.drivers} onChanged={reload} onNotice={setNotice} /> : null}
           </section>
+          {typeof lists === "object" && lists.invitations.length > 0 ? (
+            <section className="drivers__list" aria-labelledby="invitations-list-title">
+              <h2 id="invitations-list-title" className="company-section-title">Invitations</h2>
+              <InvitationTable invitations={lists.invitations} onChanged={reload} onNotice={setNotice} />
+            </section>
+          ) : null}
         </>
       )}
     </div>
+  );
+}
+
+const MEMBER_LABEL: Record<CompanyDriver["status"], string> = { active: "Active", inactive: "Deactivated" };
+
+const DONE: Record<DriverAction, string> = {
+  deactivate: "is deactivated. They cannot start new shifts for your company; a shift they had already started can still be finished.",
+  reactivate: "is active again and can start shifts for your company.",
+  remove:     "is removed from your drivers. Their records are kept, and you can invite them again.",
+};
+
+function actionRefusal(name: string, result: Exclude<ApiResult<unknown>, { kind: "ok" }>): string {
+  if (result.kind === "refused") {
+    if (result.code === "MEMBERSHIP_STATE") return `${name}'s status had already changed. The list shows where they stand now.`;
+    if (result.status === 404) return `${name} is no longer one of your drivers.`;
+    if (result.status === 403) return "Your account is not allowed to manage drivers for this company.";
+  }
+  return `We could not change ${name} just now. Nothing was changed — try again in a moment.`;
+}
+
+function MemberTable({ drivers, onChanged, onNotice }: { drivers: CompanyDriver[]; onChanged: () => Promise<void>; onNotice: Notify }) {
+  return (
+    <>
+      <table className="drivers__table" aria-labelledby="drivers-list-title">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Email address</th>
+            <th scope="col">Payroll reference</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span className="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {drivers.map(driver => <MemberRow key={driver.membershipId} driver={driver} onChanged={onChanged} onNotice={onNotice} />)}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function MemberRow({ driver, onChanged, onNotice }: {
+  driver: CompanyDriver;
+  onChanged: () => Promise<void>;
+  onNotice: Notify;
+}) {
+  const { withCompany } = useAuth();
+  const [confirming, setConfirming] = useState<"deactivate" | "remove" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const name = `${driver.firstName} ${driver.lastName}`;
+  const active = driver.status === "active";
+
+  async function run(action: DriverAction) {
+    // One action at a time: a second click while one is on its way does nothing.
+    if (busy) return;
+    setBusy(true);
+    onNotice(null);
+    const result = await changeDriver(withCompany, driver.membershipId, action);
+    onNotice(result.kind === "ok" ? { tone: "success", text: `${name} ${DONE[action]}` } : { tone: "error", text: actionRefusal(name, result) });
+    await onChanged();
+    setBusy(false);
+    setConfirming(null);
+  }
+
+  return (
+    <tr className="drivers__row" data-status={driver.status}>
+      <td>{name}</td>
+      <td>{driver.email}</td>
+      <td>{driver.payrollRef ?? ""}</td>
+      <td>
+        <span className="drivers__status" data-status={driver.status}>{MEMBER_LABEL[driver.status]}</span>
+        {active ? null : <span className="drivers__status-note">cannot start new shifts</span>}
+      </td>
+      <td>
+        <div className="drivers__actions">
+          {confirming === null ? (
+            <>
+              {active
+                ? <button className="button button--secondary" type="button" disabled={busy} onClick={() => { setConfirming("deactivate"); }} aria-label={`Deactivate ${name}`}>Deactivate</button>
+                : <button className="button button--secondary" type="button" disabled={busy} onClick={() => void run("reactivate")} aria-label={`Reactivate ${name}`}>{busy ? "Reactivating…" : "Reactivate"}</button>}
+              <button className="button button--secondary" type="button" disabled={busy} onClick={() => { setConfirming("remove"); }} aria-label={`Remove ${name}`}>Remove</button>
+            </>
+          ) : null}
+          {confirming === "deactivate" ? (
+            <>
+              <span className="drivers__confirm">
+                Deactivate {name}? They will not be able to start new shifts for your company. A shift already started can still be finished, and their records are kept.
+              </span>
+              <button className="button button--primary" type="button" disabled={busy} onClick={() => void run("deactivate")}>{busy ? "Deactivating…" : "Yes, deactivate"}</button>
+              <button className="button button--secondary" type="button" disabled={busy} onClick={() => { setConfirming(null); }}>No</button>
+            </>
+          ) : null}
+          {confirming === "remove" ? (
+            <>
+              <span className="drivers__confirm">
+                Remove {name} from your drivers? They lose access to your company and leave this list. A shift already started can still be finished, their records are kept, and you can invite them again.
+              </span>
+              <button className="button button--primary" type="button" disabled={busy} onClick={() => void run("remove")}>{busy ? "Removing…" : "Yes, remove"}</button>
+              <button className="button button--secondary" type="button" disabled={busy} onClick={() => { setConfirming(null); }}>No</button>
+            </>
+          ) : null}
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -79,6 +209,7 @@ function checked(fields: typeof EMPTY): Errors {
 function addRefusal(result: Exclude<ApiResult<unknown>, { kind: "ok" }>): string {
   if (result.kind === "refused") {
     if (result.code === "ALREADY_A_DRIVER") return "This person is already one of your drivers.";
+    if (result.code === "DRIVER_INACTIVE") return "This person is one of your drivers, deactivated. Reactivate them in Your drivers instead.";
     if (result.code === "INVITATION_EXISTS") return "This email address already has an open invitation. You can correct or cancel it below.";
     if (result.code === "INVITATION_LIMIT") return "You have added the most drivers allowed in one day. Try again tomorrow.";
     if (result.status === 400) return "Check the driver's details and try again.";
@@ -156,12 +287,10 @@ function dateOf(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function DriverTable({ invitations, onChanged }: { invitations: DriverInvitation[]; onChanged: () => Promise<void> }) {
-  const [problem, setProblem] = useState<string | null>(null);
+function InvitationTable({ invitations, onChanged, onNotice }: { invitations: DriverInvitation[]; onChanged: () => Promise<void>; onNotice: Notify }) {
   return (
     <>
-      {problem === null ? null : <p className="drivers__notice" role="alert">{problem}</p>}
-      <table className="drivers__table" aria-labelledby="drivers-list-title">
+      <table className="drivers__table" aria-labelledby="invitations-list-title">
         <thead>
           <tr>
             <th scope="col">Name</th>
@@ -173,7 +302,7 @@ function DriverTable({ invitations, onChanged }: { invitations: DriverInvitation
         </thead>
         <tbody>
           {invitations.map(invitation => (
-            <DriverRow key={invitation.id} invitation={invitation} onChanged={onChanged} onProblem={setProblem} />
+            <InvitationRow key={invitation.id} invitation={invitation} onChanged={onChanged} onNotice={onNotice} />
           ))}
         </tbody>
       </table>
@@ -181,10 +310,10 @@ function DriverTable({ invitations, onChanged }: { invitations: DriverInvitation
   );
 }
 
-function DriverRow({ invitation, onChanged, onProblem }: {
+function InvitationRow({ invitation, onChanged, onNotice }: {
   invitation: DriverInvitation;
   onChanged: () => Promise<void>;
-  onProblem: (problem: string | null) => void;
+  onNotice: Notify;
 }) {
   const { withCompany } = useAuth();
   const [mode, setMode] = useState<"view" | "edit" | "confirm-cancel">("view");
@@ -197,11 +326,11 @@ function DriverRow({ invitation, onChanged, onProblem }: {
     setBusy(false);
     setMode("view");
     if (result.kind !== "ok") {
-      onProblem(result.kind === "refused" && result.code === "INVITATION_NOT_PENDING"
-        ? `The invitation for ${name} is no longer open — it was answered, or it expired. Its current status is shown below.`
-        : `We could not change the invitation for ${name} just now. Nothing was changed.`);
+      onNotice({ tone: "error", text: result.kind === "refused" && result.code === "INVITATION_NOT_PENDING"
+        ? `The invitation for ${name} is no longer open — it was answered, or it expired. The lists show where it now stands.`
+        : `We could not change the invitation for ${name} just now. Nothing was changed.` });
     } else {
-      onProblem(null);
+      onNotice(null);
     }
     await onChanged();
   }

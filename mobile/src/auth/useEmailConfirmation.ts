@@ -10,7 +10,7 @@
  * is renewed rather than failing.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchEmailVerification, requestEmailVerification } from "../api/account";
+import { requestEmailVerification } from "../api/account";
 import type { ApiResult } from "../api/client";
 import { useAuth } from "./AuthContext";
 
@@ -37,7 +37,7 @@ function sendFailure(result: ApiResult<unknown>): string {
 }
 
 export function useEmailConfirmation(email: string, onConfirmed?: () => void): EmailConfirmation {
-  const { withIdentity } = useAuth();
+  const { withIdentity, refreshAccount } = useAuth();
   const [state, setState] = useState<ConfirmationState>("checking");
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -47,11 +47,12 @@ export function useEmailConfirmation(email: string, onConfirmed?: () => void): E
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
+  // The same read brings the account's companies up to date (D65).
   const read = useCallback(async (): Promise<ConfirmationState> => {
-    const result = await withIdentity(token => fetchEmailVerification(token));
-    if (result.kind !== "ok") return "unknown";
-    return result.value.emailVerified ? "confirmed" : "unconfirmed";
-  }, [withIdentity]);
+    const result = await refreshAccount();
+    if (result === null) return "unknown";
+    return result.emailVerified ? "confirmed" : "unconfirmed";
+  }, [refreshAccount]);
 
   useEffect(() => {
     void read().then(found => { if (mounted.current) setState(found); });

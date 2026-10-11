@@ -44,7 +44,7 @@ import {
 } from "./secureStore";
 import { authenticateLocally, biometricCapability, type BiometricCapability } from "./biometrics";
 import {
-  fetchAccount, logoutSession, refreshSession, switchCompany,
+  fetchAccount, fetchAccountStatus, logoutSession, refreshSession, switchCompany,
   type AccountMembership, type AccountUser, type AuthenticatedAccount,
 } from "../api/account";
 import type { ApiResult } from "../api/client";
@@ -110,6 +110,15 @@ interface AuthValue {
    * the account shown is then left as it was.
    */
   reloadAccount: () => Promise<boolean>;
+  /**
+   * Home's and Settings' account read (D63, D65): the same `GET /auth/me`
+   * that says whether the email address is confirmed also brings the
+   * account's companies up to date, so a company that deactivated or removed
+   * the driver is no longer offered at Start Shift — with no request of its
+   * own. Null when it could not be read; the account shown is then left as
+   * it was (offline: the companies as of the last read).
+   */
+  refreshAccount: () => Promise<{ emailVerified: boolean } | null>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -412,6 +421,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   }, [withIdentity]);
 
+  const refreshAccount = useCallback(async (): Promise<{ emailVerified: boolean } | null> => {
+    const attempt = generation.current;
+    const state = await withIdentity(token => fetchAccountStatus(token));
+    if (state.kind !== "ok" || attempt !== generation.current) return null;
+    setAccount({ user: state.value.user, memberships: state.value.memberships });
+    return { emailVerified: state.value.emailVerified };
+  }, [withIdentity]);
+
   /** App start: read the device's capability and preference, then restore. */
   useEffect(() => {
     let cancelled = false;
@@ -540,11 +557,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       chooseCompany,
       withIdentity,
       reloadAccount,
+      refreshAccount,
     }),
     [
       logoutCleanupError, serverSignOut, registerAccessRevoker, status, account, identityToken, tenantToken, restoreOutcome, biometrics,
       biometricUnlockEnabled, signIn, signOut, unlock, enableBiometricUnlock,
-      disableBiometricUnlock, chooseCompany, withIdentity, reloadAccount,
+      disableBiometricUnlock, chooseCompany, withIdentity, reloadAccount, refreshAccount,
     ],
   );
 

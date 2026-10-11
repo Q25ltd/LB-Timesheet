@@ -44,6 +44,7 @@ async function verifiedDriverEmail(identity: IdentityContext, accounts: Identity
 function settled<T>(outcome: AnswerOutcome<T>): T {
   if (outcome.kind === "not_found") throw notFound();
   if (outcome.kind === "not_pending") throw notPending();
+  if (outcome.kind === "inactive") throw new AppError(409, "This company has deactivated your access. Ask them to reactivate you.", "DRIVER_INACTIVE");
   return outcome.value;
 }
 

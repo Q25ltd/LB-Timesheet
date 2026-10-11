@@ -9,8 +9,8 @@
  * is read only to decide whether to send an email — never shown, never rows.
  *
  * Nothing here looks up a LogisticBay account for the company, except
- * `isActiveDriver`: whether the address is one of the company's OWN active
- * drivers, which the company already knows.
+ * `driverStanding`: whether the address is one of the company's OWN drivers,
+ * active or deactivated, which the company already knows.
  */
 import type { DriverInvitationStatus } from "../generated/enums.js";
 import { DriverInvitationStatus as STATUS } from "../generated/enums.js";
@@ -81,6 +81,9 @@ function firstValue(rows: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** Where an address stands among one company's drivers (D65). A removed driver is `none`. */
+export type DriverStanding = "active" | "inactive" | "none";
+
 /** The outcome of adding a driver. */
 export type CreateOutcome =
   | { kind: "created"; invitation: DriverInvitationRow }
@@ -97,16 +100,22 @@ export function driverInvitationRepository(db: DriverInvitationDatabase) {
       return db.driverInvitation.count({ where: { companyId: ctx.companyId, createdAt: { gt: since } } });
     },
 
-    /** Is `email` one of THIS company's active drivers? By the account's unique key and the company's own membership. */
-    async isActiveDriver(ctx: TenantContext, email: string): Promise<boolean> {
+    /**
+     * Where `email` stands among THIS company's drivers (D65): `active`,
+     * `inactive` (deactivated — the company reactivates them, never invites),
+     * or `none` (never joined, or removed). By the account's unique key and
+     * the company's own membership.
+     */
+    async driverStanding(ctx: TenantContext, email: string): Promise<DriverStanding> {
       const found = await db.$queryRaw`
-        SELECT m."id" AS value
+        SELECT CASE WHEN m."active" THEN 'active' ELSE 'inactive' END AS value
           FROM "User" u
           JOIN "CompanyMembership" m ON m."userId" = u."id"
          WHERE u."accountKind" = 'driver' AND u."email" = ${email}
-           AND m."companyId" = ${ctx.companyId} AND m."active"
+           AND m."companyId" = ${ctx.companyId} AND m."removedAt" IS NULL
          LIMIT 1`;
-      return firstValue(found) !== null;
+      const value = firstValue(found);
+      return value === "active" || value === "inactive" ? value : "none";
     },
 
     /**

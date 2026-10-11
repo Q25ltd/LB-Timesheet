@@ -564,6 +564,12 @@
 .drivers__status[data-status="pending"] { background: var(--amber-soft); color: var(--amber-ink); }
 .drivers__status[data-status="accepted"] { background: var(--success-bg); color: var(--success); }
 .drivers__status[data-status="declined"] { background: var(--danger-bg); color: var(--danger); }
+/* D65: a member driver's standing. Deactivated is muted, never alarming. */
+.drivers__status[data-status="active"] { background: var(--success-bg); color: var(--success); }
+.drivers__status[data-status="inactive"] { background: var(--neutral-selected); color: var(--text-muted); }
+
+.drivers__notice[data-tone="success"] { color: var(--success); }
+.drivers__notice[data-tone="error"] { color: var(--danger); }
 
 .drivers__status-note {
   display: block;
@@ -582,6 +588,8 @@
 
 .drivers__confirm {
   font-weight: 700;
+  max-width: 32rem;
+  text-align: right;
 }
 
 .drivers__edit {

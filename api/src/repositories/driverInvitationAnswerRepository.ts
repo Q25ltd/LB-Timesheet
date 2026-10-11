@@ -10,13 +10,15 @@
  * its name.
  *
  * Accepting is ONE transaction: the membership is created (or the driver's
- * former one reactivated — `@@unique([companyId, userId])` means never a
- * second) and the invitation moved from pending to accepted, bound to it, by
- * a conditional write that only one of any number of concurrent acceptances
- * can make. The loser's transaction rolls back whole.
+ * REMOVED one brought back — `@@unique([companyId, userId])` means never a
+ * second), the transition recorded in `MembershipEvent` (D65), and the
+ * invitation moved from pending to accepted, bound to it, by a conditional
+ * write that only one of any number of concurrent acceptances can make. The
+ * loser's transaction rolls back whole. A DEACTIVATED membership is never
+ * reactivated by an invitation (D65): only the company does that.
  */
-import type { DriverInvitationStatus } from "../generated/enums.js";
-import { DriverInvitationStatus as STATUS } from "../generated/enums.js";
+import type { DriverInvitationStatus, MembershipEventKind } from "../generated/enums.js";
+import { DriverInvitationStatus as STATUS, MembershipEventKind as EVENT } from "../generated/enums.js";
 import { prismaErrorCode, UNIQUE_VIOLATION_CODE } from "./startShiftRepository.js";
 
 export interface OpenInvitation {
@@ -38,7 +40,9 @@ export type AnswerOutcome<T> =
   /** Not this driver's — or no such invitation. One answer for both. */
   | { kind: "not_found" }
   /** This driver's, but cancelled, expired or already answered. */
-  | { kind: "not_pending" };
+  | { kind: "not_pending" }
+  /** The company has DEACTIVATED this driver: it reactivates them, an invitation does not (D65). */
+  | { kind: "inactive" };
 
 interface InvitationRow {
   id: string;
@@ -69,12 +73,21 @@ interface AnswerTransaction {
     }): Promise<{ count: number }>;
   };
   companyMembership: {
-    findUnique(args: { where: { companyId_userId: { companyId: string; userId: string } }; select: { id: true } }): Promise<{ id: string } | null>;
+    findUnique(args: {
+      where: { companyId_userId: { companyId: string; userId: string } };
+      select: { id: true; active: true; removedAt: true };
+    }): Promise<{ id: string; active: boolean; removedAt: Date | null } | null>;
     create(args: {
       data: { companyId: string; userId: string; accountKind: "driver"; role: "driver"; active: true; payrollRef: string | null };
       select: { id: true };
     }): Promise<{ id: string }>;
-    update(args: { where: { id: string }; data: { active: true; payrollRef: string | null }; select: { id: true } }): Promise<{ id: string }>;
+    updateMany(args: {
+      where: { id: string; active: boolean; removedAt: { not: null } | null };
+      data: { active: true; removedAt: null; payrollRef: string | null };
+    }): Promise<{ count: number }>;
+  };
+  membershipEvent: {
+    create(args: { data: { companyId: string; membershipId: string; kind: MembershipEventKind; actorUserId: string; occurredAt: Date } }): Promise<unknown>;
   };
 }
 
@@ -125,27 +138,47 @@ export function driverInvitationAnswerRepository(db: DriverInvitationAnswerDatab
 
           const existing = await tx.companyMembership.findUnique({
             where:  { companyId_userId: { companyId: invitation.companyId, userId } },
-            select: { id: true },
+            select: { id: true, active: true, removedAt: true },
           });
-          // Rejoining reactivates the SAME row (D63); the company's payroll
-          // reference is the one on the invitation the driver accepted.
-          const membership = existing === null
-            ? await tx.companyMembership.create({
+          if (existing !== null && !existing.active && existing.removedAt === null) return { kind: "inactive" } as const;
+
+          // A new driver joins; a REMOVED one comes back on the SAME row (D63,
+          // D65). The company's payroll reference is the one on the
+          // invitation the driver accepted. Each is a conditional write on the
+          // state just read, so a concurrent company action rolls this back.
+          let membershipId: string;
+          let kind: MembershipEventKind | null;
+          if (existing === null) {
+            membershipId = (await tx.companyMembership.create({
               data:   { companyId: invitation.companyId, userId, accountKind: "driver", role: "driver", active: true, payrollRef: invitation.payrollRef },
               select: { id: true },
-            })
-            : await tx.companyMembership.update({ where: { id: existing.id }, data: { active: true, payrollRef: invitation.payrollRef }, select: { id: true } });
+            })).id;
+            kind = EVENT.joined;
+          } else {
+            const back = await tx.companyMembership.updateMany({
+              where: { id: existing.id, active: existing.active, removedAt: existing.removedAt === null ? null : { not: null } },
+              data:  { active: true, removedAt: null, payrollRef: invitation.payrollRef },
+            });
+            if (back.count !== 1) throw new AnsweredMeanwhile();
+            membershipId = existing.id;
+            // Already active is no transition (D63 refuses inviting one, so
+            // only an invitation older than the membership gets here).
+            kind = existing.active ? null : EVENT.rejoined;
+          }
+          if (kind !== null) {
+            await tx.membershipEvent.create({ data: { companyId: invitation.companyId, membershipId, kind, actorUserId: userId, occurredAt: now } });
+          }
 
           const { count } = await tx.driverInvitation.updateMany({
             where: { id, status: STATUS.pending, expiresAt: { gt: now } },
-            data:  { status: STATUS.accepted, respondedAt: now, membershipId: membership.id },
+            data:  { status: STATUS.accepted, respondedAt: now, membershipId },
           });
           if (count !== 1) throw new AnsweredMeanwhile();
-          return { kind: "done", value: { membershipId: membership.id, companyId: invitation.companyId, companyName: invitation.company.name } } as const;
+          return { kind: "done", value: { membershipId, companyId: invitation.companyId, companyName: invitation.company.name } } as const;
         });
       } catch (error) {
-        // A concurrent acceptance committed first: its membership insert or
-        // its conditional write won, and this transaction rolled back whole.
+        // A concurrent acceptance (or company action) committed first: its
+        // insert or conditional write won, and this transaction rolled back whole.
         if (error instanceof AnsweredMeanwhile || prismaErrorCode(error) === UNIQUE_VIOLATION_CODE) return { kind: "not_pending" };
         throw error;
       }

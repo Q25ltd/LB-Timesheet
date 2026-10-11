@@ -53,6 +53,8 @@ const SCOPE = scopeFor("user_finish_1");
 // Screens act for this test's driver. The real hook's sign-in / sign-out
 // behaviour is proven in accountSwitchRoute.test.tsx.
 jest.mock("../shift/useAccountScope", () => ({ useAccountScope: () => mockScope }));
+// No company is withdrawn in these screens' days (D65: membershipWithdrawal.test.tsx).
+jest.mock("../auth/useActiveMemberships", () => ({ useActiveMemberships: () => null }));
 const mockScope = SCOPE;
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() };

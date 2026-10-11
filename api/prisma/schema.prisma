@@ -161,6 +161,8 @@ model User {
 
   memberships   CompanyMembership[]
   sessions      Session[]
+  /// The membership transitions this account made (D65).
+  membershipEventsActed MembershipEvent[]
   accountTokens AccountToken[]
   pendingCompanyRegistration PendingCompanyRegistration?
   emailMessages EmailMessage[]
@@ -344,6 +346,10 @@ model CompanyMembership {
   accountKind AccountKind
   role       MembershipRole @default(driver)
   active     Boolean  @default(true)
+  /// When the company REMOVED this driver (D65). Soft: the row, its shifts and
+  /// the driver's account stay. A removed membership is never active (a CHECK);
+  /// an accepted invitation brings the same row back and clears this.
+  removedAt  DateTime?
   /// Company's own payroll/employee reference for this driver, if they use one.
   payrollRef String?
   joinedAt   DateTime @default(now())
@@ -355,6 +361,8 @@ model CompanyMembership {
   shifts     Shift[]
   /// The invitations that brought this driver in (D63).
   acceptedInvitations DriverInvitation[]
+  /// Every transition of this membership (D65).
+  events     MembershipEvent[]
 
   @@unique([companyId, userId])
   /// Target for DriverInvitation's composite foreign key: an accepted
@@ -367,6 +375,39 @@ model CompanyMembership {
   @@unique([id, companyId, userId])
   @@index([userId, active])
   @@index([companyId, active])
+}
+
+/// What happened to a membership (D65). `joined` and `rejoined` are the
+/// driver's acceptance of an invitation (a new row, or a removed one back);
+/// the others are the company's actions.
+enum MembershipEventKind {
+  joined
+  rejoined
+  deactivated
+  reactivated
+  removed
+}
+
+/// The audit log of membership transitions (D65): written in the same
+/// transaction as the transition it records, never updated.
+model MembershipEvent {
+  id           String              @id @default(cuid())
+  companyId    String
+  membershipId String
+  kind         MembershipEventKind
+  /// Who did it: the company's administrator, or the driver who accepted.
+  /// Null only if that account has since been deleted.
+  actorUserId  String?
+  occurredAt   DateTime            @default(now())
+
+  /// An event belongs to a membership of its OWN company — the composite key
+  /// makes that the database's guarantee.
+  membership   CompanyMembership   @relation(fields: [membershipId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: NoAction)
+  actor        User?               @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([membershipId, occurredAt])
+  @@index([companyId, occurredAt])
+  @@index([actorUserId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

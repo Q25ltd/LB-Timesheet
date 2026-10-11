@@ -13,7 +13,7 @@
  * only when a JSON body is.
  */
 import {
-  acceptInvitation, declineInvitation, fetchAccount, fetchEmailVerification, listInvitations,
+  acceptInvitation, declineInvitation, fetchAccount, fetchAccountStatus, listInvitations,
   logoutSession, refreshSession, requestEmailVerification, signIn,
 } from "../api/account";
 
@@ -36,7 +36,7 @@ test.each([
   ["accepting an invitation (D63 stage 5)", () => acceptInvitation("id.token", "inv-1"), "POST /driver/invitations/inv-1/accept"],
   ["declining an invitation (D63 stage 5)", () => declineInvitation("id.token", "inv-1"), "POST /driver/invitations/inv-1/decline"],
   ["reading the account", () => fetchAccount("id.token"), "GET /auth/me"],
-  ["reading the email status", () => fetchEmailVerification("id.token"), "GET /auth/me"],
+  ["reading the email status and companies (D65)", () => fetchAccountStatus("id.token"), "GET /auth/me"],
   ["listing invitations", () => listInvitations("id.token"), "GET /driver/invitations"],
 ] as const)("BODYLESS — %s: no Content-Type and no body; the token and Accept still sent", async (_what, call, request) => {
   const sent = capture();

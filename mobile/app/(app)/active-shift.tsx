@@ -19,9 +19,11 @@ import { Restoring } from "../../src/components/Restoring";
 import { DiscardIncompleteError, USAGE_STATE, clearOpenShift, readOpenShift, type LocalShift } from "../../src/shift/localShift";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
+import { useActiveMemberships } from "../../src/auth/useActiveMemberships";
 
 export default function ActiveShiftRoute() {
   const scope = useAccountScope();
+  const memberships = useActiveMemberships();
   const [shift, setShift] = useState<LocalShift | null | "loading">("loading");
 
   useFocusEffect(useCallback(() => {
@@ -39,9 +41,16 @@ export default function ActiveShiftRoute() {
   // No open shift — nothing to be active about. Back to the tabs.
   if (shift === null) return <Redirect href="/today" />;
 
+  // The day's company is not among the account's ACTIVE companies as last
+  // read from the server: it deactivated or removed the driver (D65). Said,
+  // never acted on — the day stays the driver's to finish (Option A).
+  const withdrawn = shift.workingFor.kind === "company" && memberships !== null
+    && !memberships.some(membership => shift.workingFor.kind === "company" && membership.membershipId === shift.workingFor.membershipId);
+
   return (
     <ActiveShiftScreen
       shift={shift}
+      companyWithdrawn={withdrawn}
       onDiscard={() => { discard(scope); }}
       onFinish={() => { router.push("/finish-shift"); }}
       onAddVehicle={() => { router.push("/add-vehicle"); }}

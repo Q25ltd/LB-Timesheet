@@ -173,13 +173,24 @@ function isEmailVerification(value: unknown): value is EmailVerification {
 }
 
 /** Whether the account has proved it owns its email address (D47) — what D63's invitations require. */
-export interface EmailVerification {
+interface EmailVerification {
   emailVerified: boolean;
 }
 
-/** Where the signed-in account's email address stands — read from `GET /auth/me`. */
-export function fetchEmailVerification(identityToken: string): Promise<ApiResult<EmailVerification>> {
-  return checked(getJson<unknown>("/auth/me", identityToken), isEmailVerification);
+/** The account as it now stands, and whether its email address is confirmed — one `GET /auth/me`. */
+export type AccountStatus = AccountState & EmailVerification;
+
+function isAccountStatus(value: unknown): value is AccountStatus {
+  return isAccountState(value) && isEmailVerification(value);
+}
+
+/**
+ * Where the signed-in account stands — read from `GET /auth/me`: its email
+ * confirmation (D63) and its ACTIVE companies, which a company's
+ * deactivation or removal takes away (D65).
+ */
+export function fetchAccountStatus(identityToken: string): Promise<ApiResult<AccountStatus>> {
+  return checked(getJson<unknown>("/auth/me", identityToken), isAccountStatus);
 }
 
 /**

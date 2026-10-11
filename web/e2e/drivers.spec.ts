@@ -1,8 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { verificationTokenSentTo } from "./mailbox";
 
 /**
- * D63, stage 4 — the Drivers page in a real browser against the real API on
- * another origin: add a driver, correct the invitation, cancel it.
+ * D63, stage 4, and D65 — the Drivers page in a real browser against the
+ * real API on another origin: add a driver, correct the invitation, cancel
+ * it; and, once a driver has joined, deactivate, reactivate and remove them.
  *
  * Written after the fake-API unit tests passed while the browser itself would
  * have refused the correction: the API's CORS allowed GET, HEAD and POST
@@ -11,6 +13,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 const WEB = "http://localhost:4175";
+const API = "http://localhost:3100";
 
 // Its own client, as Railway's edge would name it (F-15): the suite registers
 // more companies than one client's 5 per hour, and this spec is one more.
@@ -57,7 +60,7 @@ test("a company adds a driver, corrects the invitation and cancels it — throug
   await page.getByRole("button", { name: "Add driver" }).click();
   await expect(page.getByRole("status")).toContainText("You have invited John Smith");
 
-  const table = page.getByRole("table", { name: "Your drivers" });
+  const table = page.getByRole("table", { name: "Invitations" });
   const row = table.getByRole("row").filter({ hasText: driverEmail });
   await expect(row).toContainText("John Smith");
   await expect(row).toContainText("EMP-7");
@@ -79,5 +82,61 @@ test("a company adds a driver, corrects the invitation and cancels it — throug
 
   // A reload: the list is the server's, not the page's memory.
   await page.reload();
-  await expect(page.getByRole("table", { name: "Your drivers" }).getByRole("row").filter({ hasText: driverEmail })).toContainText("Cancelled");
+  await expect(page.getByRole("table", { name: "Invitations" }).getByRole("row").filter({ hasText: driverEmail })).toContainText("Cancelled");
+});
+
+/** A driver, as the phone app would be: registered, email confirmed, invitation accepted — straight to the API. */
+async function driverAccepts(request: APIRequestContext, email: string): Promise<void> {
+  const headers = { "x-real-ip": "198.51.100.25" };
+  const registered = await request.post(`${API}/auth/register`, { headers, data: { firstName: "Dee", lastName: "River", email, password: PASSWORD } });
+  expect(registered.status()).toBe(201);
+  const body: unknown = await registered.json();
+  const token = typeof body === "object" && body !== null && "identityToken" in body && typeof body.identityToken === "string" ? body.identityToken : "";
+  const auth = { ...headers, authorization: `Bearer ${token}` };
+  expect((await request.post(`${API}/auth/email-verification`, { headers: auth })).status()).toBe(204);
+  const confirmed = await request.post(`${API}/auth/email-verification/confirm`, { headers, data: { token: await verificationTokenSentTo(email) } });
+  expect(confirmed.status()).toBe(200);
+  const open: unknown = await (await request.get(`${API}/driver/invitations`, { headers: auth })).json();
+  const invitations = typeof open === "object" && open !== null && "invitations" in open && Array.isArray(open.invitations) ? open.invitations as unknown[] : [];
+  const first = invitations[0];
+  const id = typeof first === "object" && first !== null && "id" in first && typeof first.id === "string" ? first.id : "";
+  expect((await request.post(`${API}/driver/invitations/${id}/accept`, { headers: auth })).status()).toBe(200);
+}
+
+test("D65: a driver who joined is deactivated, reactivated and removed — each asked first where it matters — through the real API", async ({ page, request }) => {
+  await registeredCompany(page, emailFor("members-admin"), "E2E Members Haulage UAB");
+  await page.goto("/company/drivers");
+
+  const driverEmail = emailFor("member");
+  await page.getByLabel("First name").fill("Dee");
+  await page.getByLabel("Last name").fill("River");
+  await page.getByLabel("Email address").fill(driverEmail);
+  await page.getByRole("button", { name: "Add driver" }).click();
+  await expect(page.getByRole("status")).toContainText("You have invited Dee River");
+
+  await driverAccepts(request, driverEmail);
+  await page.reload();
+
+  const members = page.getByRole("table", { name: "Your drivers" });
+  const row = members.getByRole("row").filter({ hasText: driverEmail });
+  await expect(row).toContainText("Active");
+  await expect(page.getByRole("table", { name: "Invitations" })).toHaveCount(0);
+
+  await row.getByRole("button", { name: "Deactivate Dee River" }).click();
+  await row.getByRole("button", { name: "Yes, deactivate" }).click();
+  await expect(row).toContainText("Deactivated");
+  await expect(page.getByRole("status")).toContainText("Dee River is deactivated");
+
+  await row.getByRole("button", { name: "Reactivate Dee River" }).click();
+  await expect(row).not.toContainText("Deactivated");
+  await expect(row).toContainText("Active");
+
+  await row.getByRole("button", { name: "Remove Dee River" }).click();
+  await row.getByRole("button", { name: "Yes, remove" }).click();
+  await expect(page.getByRole("status")).toContainText("Dee River is removed");
+  await expect(page.getByRole("table", { name: "Your drivers" })).toHaveCount(0);
+
+  // A reload: the server's list, not the page's memory.
+  await page.reload();
+  await expect(page.getByText("No drivers yet. Add your first driver above.")).toBeVisible();
 });

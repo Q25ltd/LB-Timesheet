@@ -108,6 +108,12 @@ function assetWords(vehicleClass: VehicleClass | null) {
 
 interface ActiveShiftScreenProps {
   shift: LocalShift;
+  /**
+   * The company this day is for no longer lists the driver as an active
+   * driver — deactivated or removed since the day began (D65). The day is
+   * the driver's all the same: it is finished as any other (Option A).
+   */
+  companyWithdrawn?: boolean;
   /** Abandon the day. Called ONLY after the driver confirms. */
   onDiscard: () => void;
   /** Open the Finish flow. Finishes nothing by itself. */
@@ -139,7 +145,7 @@ interface ActiveShiftScreenProps {
 }
 
 export function ActiveShiftScreen({
-  shift, onDiscard, onFinish, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage,
+  shift, companyWithdrawn = false, onDiscard, onFinish, onAddVehicle, onVehicleChecks, onChangeVehicle, onFill, onOpenUsage,
   onAddTrailer, onChangeTrailer, onFridgeDiesel, onTrailerChecks, onOpenTrailerUsage, onCorrectPlate, onCorrectTrailerNumber,
 }: ActiveShiftScreenProps) {
   const insets = useSafeAreaInsets();
@@ -286,6 +292,11 @@ export function ActiveShiftScreen({
               testID="shift-working-for"
             />
           </View>
+          {companyWithdrawn && shift.workingFor.kind === "company" ? (
+            <Text style={styles.withdrawn} testID="shift-company-withdrawn" accessibilityLiveRegion="polite">
+              {`${shift.workingFor.companyName} no longer lists you as an active driver. You can still finish this day — everything you have recorded stays on this phone.`}
+            </Text>
+          ) : null}
         </View>
 
         <Text style={styles.sectionLabel} testID="current-asset-label">{words.section}</Text>
@@ -906,6 +917,7 @@ const styles = StyleSheet.create({
   // other grows downward; stretched columns would centre nothing but still
   // leave the two coupled in a way that is easy to break later.
   statusFacts: { flexDirection: "row", alignItems: "flex-start", gap: spacing.lg, marginTop: spacing.lg },
+  withdrawn:   { marginTop: spacing.md, fontSize: 14, lineHeight: 20, color: colors.text },
   fact: { flex: 1 },
   factLabel: { ...typography.helper, fontSize: 12 },
   factStrong: { fontSize: 17, fontWeight: "700", color: colors.text, marginTop: 2 },

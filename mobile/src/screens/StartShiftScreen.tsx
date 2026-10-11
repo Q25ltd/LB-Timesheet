@@ -59,7 +59,11 @@ interface StartShiftScreenProps {
 
 export function StartShiftScreen({ memberships, onBack, onStart }: StartShiftScreenProps) {
   const insets = useSafeAreaInsets();
-  const [working, setWorking] = useState<WorkingContext>(PERSONAL);
+  const [chosen, setWorking] = useState<WorkingContext>(PERSONAL);
+  // A company chosen here and then withdrawn while the screen is open — the
+  // account was read again (D65) — is no longer a choice: back to Personal,
+  // never a day started for a company that has just withdrawn the driver.
+  const working: WorkingContext = chosen.kind === "company" && !memberships.some(m => m.membershipId === chosen.membershipId) ? PERSONAL : chosen;
 
   /**
    * The clock is read ONCE, when the screen opens (`useTimeOfDay`).

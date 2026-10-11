@@ -327,7 +327,7 @@ test("DI5. adding an email answers IDENTICALLY whether no account, a driver acco
   for (const shape of shapes) assert.deepEqual(shape, shapes[0]);
 });
 
-test("DI6. the one refusal that names a person is the company's OWN active driver; a former driver may be invited again", async () => {
+test("DI6. the refusals that name a person are the company's OWN drivers — active, or deactivated (reactivate instead, D65); a REMOVED driver may be invited again", async () => {
   const admin = await companyAdmin("OwnDrivers");
   const email = freshEmail();
   const driver = await driverOf(admin.companyId, email);
@@ -338,8 +338,14 @@ test("DI6. the one refusal that names a person is the company's OWN active drive
   assert.equal(invitationEmailsTo(email).length, 0);
 
   await prisma.companyMembership.updateMany({ where: { userId: driver.userId }, data: { active: false } });
+  const deactivated = await invite(admin.token, newDriver(email));
+  assert.equal(deactivated.statusCode, 409, `got ${deactivated.raw}`);
+  assert.equal(field(deactivated.body, "code"), "DRIVER_INACTIVE", "an invitation never undoes a deactivation (D65)");
+  assert.equal(invitationEmailsTo(email).length, 0);
+
+  await prisma.companyMembership.updateMany({ where: { userId: driver.userId }, data: { removedAt: new Date() } });
   const rejoin = await invite(admin.token, newDriver(email));
-  assert.equal(rejoin.statusCode, 201, `rejoining needs a new invitation — and is allowed one (D63) — got ${rejoin.raw}`);
+  assert.equal(rejoin.statusCode, 201, `rejoining needs a new invitation — and is allowed one (D63, D65) — got ${rejoin.raw}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

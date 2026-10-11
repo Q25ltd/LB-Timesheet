@@ -111,9 +111,15 @@ export async function addDriver(
   if (await invitations.countCreatedSince(ctx, new Date(now.getTime() - DAY_MS)) >= INVITATIONS_PER_COMPANY_PER_DAY) {
     throw new AppError(429, "You have added the most drivers allowed in one day. Try again tomorrow.", "INVITATION_LIMIT");
   }
-  // The one refusal that names a person: the company's OWN active driver.
-  if (await invitations.isActiveDriver(ctx, email)) {
+  // The refusals that name a person: the company's OWN drivers, which it
+  // already knows. A deactivated driver is reactivated, never invited (D65):
+  // an invitation never undoes a deactivation.
+  const standing = await invitations.driverStanding(ctx, email);
+  if (standing === "active") {
     throw new AppError(409, "This person is already one of your drivers", "ALREADY_A_DRIVER");
+  }
+  if (standing === "inactive") {
+    throw new AppError(409, "This person is one of your drivers, deactivated. Reactivate them instead.", "DRIVER_INACTIVE");
   }
 
   const outcome = await invitations.create(ctx, {

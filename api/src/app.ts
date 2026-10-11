@@ -33,6 +33,8 @@ import { driverInvitationRepository, type DriverInvitationDatabase } from "./rep
 import { registerCompanyDriverRoutes } from "./routes/companyDrivers.js";
 import { driverInvitationAnswerRepository, type DriverInvitationAnswerDatabase } from "./repositories/driverInvitationAnswerRepository.js";
 import { registerDriverInvitationRoutes } from "./routes/driverInvitations.js";
+import { companyDriverRepository, type CompanyDriverDatabase } from "./repositories/companyDriverRepository.js";
+import { registerCompanyDriverMembershipRoutes } from "./routes/companyDriverMemberships.js";
 import { authRateLimits, EMAILS_PER_ADDRESS_PER_HOUR } from "./lib/authRateLimits.js";
 import { sendThrottle } from "./lib/sendThrottle.js";
 
@@ -52,7 +54,7 @@ import { sendThrottle } from "./lib/sendThrottle.js";
  * keeps every contributor's requirements simultaneously in force instead of
  * making one of them win.
  */
-export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & {
+export type AppDatabase = AuthQueryable & StartShiftDatabase & IdentityDatabase & RefreshDatabase & AccountTokenDatabase & PasswordDatabase & EmailDeliveryDatabase & EmailCorrectionDatabase & DriverInvitationDatabase & DriverInvitationAnswerDatabase & CompanyDriverDatabase & {
   $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
 };
 
@@ -330,6 +332,10 @@ export async function buildApp(prisma: AppDatabase, options: AppOptions = {}): P
   // driver with no company has no tenant token. Only a verified driver
   // account's own invitations are reachable (the service decides).
   registerDriverInvitationRoutes(app, identityRepository(prisma), driverInvitationAnswerRepository(prisma));
+
+  // A company deactivates, reactivates and removes its drivers (D65). Tenant
+  // posture; the service applies the company-admin gate (D54).
+  registerCompanyDriverMembershipRoutes(app, companyDriverRepository(prisma));
 
   // LIVENESS: the process is up and answering. Touches nothing else, so a
   // database outage never makes a supervisor restart a healthy process.
