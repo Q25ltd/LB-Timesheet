@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-10-11 — D63 stage 3: a driver lists, accepts and declines invitations (API)
+
+**Owner decision first:** declining is visible to the company as Declined.
+It reveals an account exists, but only through the driver's own answer; the
+app will say so before a driver declines. Recorded in D63.
+
+**Built.**
+- **Routes:** `GET /driver/invitations`, and `POST .../:id/accept` and
+  `/decline`, all identity posture.
+- **Who can answer:** only a DRIVER account with a VERIFIED email, and only
+  invitations to that email (read from the account, never from the request).
+- **Accepting** is one transaction: create the membership or reactivate the
+  former one (the same row; `@@unique([companyId, userId])`), then a
+  conditional pending→accepted write bound to it. A losing concurrent
+  acceptance rolls back whole: its membership insert collides, or its
+  conditional write changes nothing.
+- **Migration** `20261011100000_driver_invitation_response` (additive):
+  - two enum values, `respondedAt` and `membershipId`;
+  - a unique `(id, companyId)` on `CompanyMembership`, backing a composite
+    foreign key so an accepted invitation's membership is of the same
+    company;
+  - CHECKs that compare the status as text, so the new enum values are not
+    used inside the migration that adds them.
+- **The company's list** now shows accepted and declined.
+
+**Evidence.**
+- RED: 11/11 `driverInvitationResponse.test.ts` failed (no routes).
+  GREEN: 11/11, stage 1's tests unchanged.
+- Mutation: 11 mutants; 10 killed, each by its intended test. One is
+  equivalent: without the early expiry check, the conditional write still
+  refuses an expired invitation.
+- Gate. The first full run timed stage 1's `driverInvitations.test.ts` out
+  at the 60 s per-file limit: 27 s alone, but bcrypt-heavy, and run beside
+  the others while a FamFusion dev server held the CPU (up to 256%). Split,
+  not given a longer limit: `driverInvitationRecords.test.ts` now holds
+  DI10–DI18, each file with its own TAG. Next run: one timeout, in the
+  untouched `passwordRecovery` (as earlier today); the database stage rerun
+  passed 318 with 0 failures. Every stage passes on this tree: rules,
+  api 244, mobile 1465 + 7 restart checks, web 143, db 318, backup 12,
+  build, smoke.
+
+**Next (stage 4, awaiting approval):** the website's Drivers page.
+
+---
+
 ## 2026-10-11 — D63 stage 2: drivers confirm their email in the app
 
 **Two problems found before building**, both decided by the owner (D64):

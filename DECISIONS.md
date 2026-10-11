@@ -2481,6 +2481,16 @@ driver's list, accept and decline API; (4) the website's Drivers page;
 company's typed name and the driver's account name differ (decided with
 submission); invitation bounce handling; the removal screen.
 
+**Declining is visible to the company** (owner decision, 2026-10-11, stage
+3). The company sees Declined rather than an invitation left unanswered. It
+reveals that the address has an account — but only through the driver's own
+deliberate answer to that one company, never through any lookup; the app
+tells the driver so before they decline (stage 5). An invitation shows a
+driver only the company's name, the names the company typed and its expiry —
+nothing of the company's internals (no payroll reference, no company id).
+The database binds an accepted invitation to a membership of the SAME
+company (a composite foreign key) and requires an answer to carry its time.
+
 ### D64 — The app confirms the driver's email, renews its token, and Home may read the account's own status (2026-10-10)
 
 Owner decisions taken while building D63's stage 2.
