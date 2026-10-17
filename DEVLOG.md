@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-10-17 — pushed and deployed: `9b29cfa`, `f199a46`, `240d157`
+
+CI `ci` and `e2e` succeeded on `240d157`; Railway deployment `afefe1e2`
+(commit `240d157`) SUCCESS at 11:08 UTC. Pre-deploy `prisma migrate deploy`:
+24 migrations found, none pending (S5 adds none). Production checks, all
+read-only: `/health/live` and `/health` 200 (db up); unknown route 404 in the
+error envelope; the D66 routes and company settings 401 without a token;
+CORS preflight from the website allows GET, HEAD, POST, PATCH, PUT, and a
+foreign origin gets no allow-origin; the website serves; no error-level
+runtime log since start. The PDF renderer is in the build but nothing calls
+it. Owner decisions recorded: identifier lengths (D66, 16 / 64, never
+truncate); the intermittent web test stays open (STATUS backlog).
+
+---
+
 ## 2026-10-17 — D66 stage S5: the timesheet PDF (implemented, not integrated)
 
 **Built** (`f199a46`). Template `timesheet-pdf/1` (`api/src/pdf/`). It draws

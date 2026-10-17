@@ -2735,6 +2735,13 @@ companies they have left — subject to the future retention policy.
 **LIMITS.** About 50 submissions per membership per day; replays of an
 already-accepted request are never counted or refused by it.
 
+**IDENTIFIER LENGTHS** *(owner decision, 2026-10-17)*. A vehicle
+registration is at most **16** characters and a trailer identifier at most
+**64**, the same on the phone, the server and the snapshot. The phone enforces
+them at entry when that validation is built; an existing longer record is
+NEVER truncated — it is shown as needing action. (The server snapshot has
+enforced both since S4.)
+
 **RETENTION.** Storage supports holds and future policy; nothing is deleted
 automatically. The retention policy and its legal / privacy implications
 are presented for approval before public release (O1 stays open).
