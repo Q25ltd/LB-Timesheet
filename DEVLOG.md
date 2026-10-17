@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-10-17 — localhost restored; S3–S4 security review prepared
+
+**Cause.** The local development database (`localhost:5544/lb_timesheet`)
+was five migrations behind the code (D65 and D66 S1–S4): `npm run check`
+builds its own throwaway database, and the deploys migrate production, so
+nothing applies migrations to the local one. The API started and `/health`
+stayed green (it only pings the database), but every account read failed
+with `column c.distanceUnit does not exist` — so signing in on
+`http://localhost:5173` failed.
+
+**Fix.** `npx prisma migrate deploy` against the local database only:
+additive, no data reset or removed, production untouched. Verified: the
+account read succeeds, CORS from 5173 allows the website's methods, the
+sign-in page renders; a 401 from `/auth/web/refresh` with no session is the
+normal answer. Working URLs: website `http://localhost:5173`, API
+`http://localhost:3000`. After pulling a migration, run
+`cd api && npx prisma migrate deploy` before starting the API.
+
+**Security review.** S3 and S4 need the independent read-only review of
+AGENT_WORKFLOW §20 before S6. The brief for a separate reviewer —
+baseline, files, the ten guarantees to falsify — is
+`audits/d66-s3-s4-security-review-brief.md`. Not self-certified; not yet run.
+
+---
+
 ## 2026-10-11 — D66 stage S4: the submission API
 
 **Built.** `POST /driver/timesheets` — revision 1. Server-side validation
