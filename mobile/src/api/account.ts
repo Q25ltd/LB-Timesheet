@@ -323,3 +323,18 @@ export function sendTimesheet(
 ): Promise<ApiResult<{ timesheet: SubmittedTimesheet }>> {
   return checked(postJson<unknown>("/driver/timesheets", body, identityToken), isSubmittedTimesheet);
 }
+
+/** What `GET /driver/capabilities` advertises: the submission protocol this API speaks (D66). */
+export interface ApiCapabilities {
+  timesheetSubmissionProtocol: string;
+}
+
+function isApiCapabilities(value: unknown): value is ApiCapabilities {
+  const r = record(value);
+  return r !== null && text(r["timesheetSubmissionProtocol"]);
+}
+
+/** `GET /driver/capabilities` — the identity token. An older API has no such route (404). */
+export function fetchCapabilities(identityToken: string): Promise<ApiResult<ApiCapabilities>> {
+  return checked(getJson<unknown>("/driver/capabilities", identityToken), isApiCapabilities);
+}

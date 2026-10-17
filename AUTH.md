@@ -658,6 +658,24 @@ SubmissionContext { userId, membershipId, companyId, membershipActive }
   that user's memberships, to that user alone. No company learns of another.
 - **Company review** of these timesheets is company-web authority (D54) and
   goes through `authorizeCompanyAdmin`, never through this context.
+- **The submission contract is versioned** (`api/src/lib/submissionContract.ts`).
+  `replay-first-1` means: authorise → an identical replay of a kept day is
+  answered 200 and different bytes 409 `SUBMISSION_MISMATCH`, before anything
+  is validated → only a NEW day is validated, and only `400 TIMESHEET_REJECTED`
+  proves nothing is kept under its id. `GET /driver/capabilities` (identity
+  posture; a tenant token or none → 401) answers
+  `{ "timesheetSubmissionProtocol": "replay-first-1" }`, and every
+  `POST /driver/timesheets` answer — success, replay, conflict, refusal, 401,
+  413 and 500 alike — carries `X-LB-Submission-Contract: replay-first-1`. Any
+  change to those semantics is a NEW name, never an edit of this one.
+- **The phone relies on it, not on the status alone** (`mobile/src/sync/`): it
+  asks the capability once per sync run before the first timesheet would go,
+  and sends nothing to an API that does not advertise `replay-first-1` (a 404
+  from an older API, another protocol) or that it could not ask — the records
+  stay exactly as they are. A refusal whose answer does not name the contract
+  (an API rolled back since the check) proves nothing: kept, locked,
+  uncertain, replayed. A conflict stays a conflict; a success without the
+  header is kept as submitted (it locks, and unlocks nothing).
 
 ## Contract tests — write these before the implementation
 

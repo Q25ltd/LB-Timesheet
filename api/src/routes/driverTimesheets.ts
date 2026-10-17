@@ -5,13 +5,16 @@
  *
  *   POST /driver/shift-receipts   a start receipt for an ACTIVE membership
  *   POST /driver/timesheets       submit a timesheet (revision 1) — verified,
- *                                 or pending the company's review
+ *                                 or pending the company's review; EVERY answer
+ *                                 names the contract it was given under
+ *   GET  /driver/capabilities     the submission contract this API keeps
  *
  * Routes only parse, and hand the parsed input on.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IdentityContext } from "../lib/auth.js";
 import { invalidRequest } from "../lib/requestValidation.js";
+import { SUBMISSION_CONTRACT, SUBMISSION_CONTRACT_HEADER } from "../lib/submissionContract.js";
 import type { SubmissionMembershipLookup } from "../lib/submissionAuthorization.js";
 import type { StartReceiptRepository } from "../repositories/startReceiptRepository.js";
 import type { TimesheetSubmissionRepository } from "../repositories/timesheetSubmissionRepository.js";
@@ -45,9 +48,28 @@ export function registerDriverTimesheetRoutes(
     },
   );
 
+  // What this API keeps, for the phone to check before it sends (`lib/submissionContract.ts`).
+  app.get(
+    "/driver/capabilities",
+    { config: { authPosture: "identity" } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      identified(request.identity);
+      return reply.send({ timesheetSubmissionProtocol: SUBMISSION_CONTRACT });
+    },
+  );
+
   app.post(
     "/driver/timesheets",
-    { config: { authPosture: "identity" }, bodyLimit: SUBMISSION_BODY_LIMIT },
+    {
+      config: { authPosture: "identity" },
+      bodyLimit: SUBMISSION_BODY_LIMIT,
+      // EVERY answer of this route — stored, replayed, refused, failed — names the contract it was
+      // given under. The phone still classifies by status and code; the header says only which API answered.
+      onSend: (_request, reply, payload, done) => {
+        reply.header(SUBMISSION_CONTRACT_HEADER, SUBMISSION_CONTRACT);
+        done(null, payload);
+      },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = SubmitTimesheetBody.safeParse(request.body);
       if (!parsed.success) throw invalidRequest(parsed.error);

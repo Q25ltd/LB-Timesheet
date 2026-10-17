@@ -22,7 +22,7 @@ import { readOpenShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { RECEIPT_STATE, listReceipts, queueStartReceipt, saveReceipt, type QueuedReceipt } from "./receiptQueue";
 import { SEND_TIMESHEETS } from "./sending";
-import { resolveSubmission, sendSubmission, type WithIdentity } from "./submissionQueue";
+import { discoverCompatibility, noteSignInNeeded, resolveSubmission, sendSubmission, type Compatibility, type WithIdentity } from "./submissionQueue";
 import { SUBMISSION_STATE, isSendable, submissionDayIds } from "./submissionStore";
 
 export type { WithIdentity } from "./submissionQueue";
@@ -84,8 +84,15 @@ async function syncOnce(scope: AccountScope, withIdentity: WithIdentity, now: ()
   return report;
 }
 
-/** Every queued timesheet of this account, oldest day first — after the receipts that evidence them. */
+/**
+ * Every queued timesheet of this account, oldest day first — after the
+ * receipts that evidence them. The API is asked what it speaks ONCE a run,
+ * before the first timesheet would go, and only when one would: an API not
+ * known to speak `replay-first-1` is sent nothing, and every record is left
+ * exactly as it is, for the next run.
+ */
 async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, now: () => Date, report: SyncReport): Promise<void> {
+  let compatibility: Compatibility | null = null;
   for (const dayId of submissionDayIds(scope)) {
     try {
       // Only a record the recovery layer verified may be sent — never one it could not vouch for.
@@ -97,7 +104,14 @@ async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, n
         continue;
       }
       if (!isSendable(resolution.submission.record.state)) continue;
-      const after = await sendSubmission(scope, resolution.submission, withIdentity, now());
+      compatibility ??= await discoverCompatibility(withIdentity);
+      if (compatibility.kind !== "compatible") {
+        if (compatibility.kind === "unknown") noteSignInNeeded(scope, resolution.submission, compatibility.failure);
+        report.timesheetsWaiting += 1;
+        report.retryLater = true;
+        continue;
+      }
+      const after = await sendSubmission(scope, resolution.submission, compatibility.api, withIdentity, now());
       const state = after?.state ?? SUBMISSION_STATE.sending;
       if (state === SUBMISSION_STATE.submitted || state === SUBMISSION_STATE.pendingReview) report.timesheetsSent += 1;
       else if (isSendable(state)) {

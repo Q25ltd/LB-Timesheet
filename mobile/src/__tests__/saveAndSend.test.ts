@@ -24,7 +24,7 @@ import {
 import type { AccountScope } from "../shift/accountScope";
 import { SESSION_RENEWAL_UNAVAILABLE } from "../auth/sessionRenewal";
 import { runSync, type WithIdentity } from "../sync/syncRunner";
-import { queueTimesheet, resolveSubmission, sendSubmission } from "../sync/submissionQueue";
+import { discoverCompatibility, queueTimesheet, resolveSubmission, sendSubmission } from "../sync/submissionQueue";
 import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, writeSeal, writeSubmission, type TimesheetSubmissionRecord } from "../sync/submissionStore";
 import { submissionStatusOf } from "../sync/submissionStatus";
 import { correctDeclared, finishDeclared } from "./declared";
@@ -44,8 +44,18 @@ const identity: WithIdentity = call => call("id.token");
 interface Sent { raw: string; body: { membershipId: string; clientEventId: string; revision: number; snapshot: unknown }; authorization: string | null }
 type Answer = () => Promise<Response>;
 
-const respond = (status: number, body: unknown): Answer => () =>
-  Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(body) } as unknown as Response);
+/** The contract a current API names on every submission answer; `null` for an older API's answer. */
+const CONTRACT = "replay-first-1";
+const respond = (status: number, body: unknown, contract: string | null = CONTRACT): Answer => () =>
+  Promise.resolve({
+    ok: status < 300, status, json: () => Promise.resolve(body),
+    headers: new Headers(contract === null ? {} : { "x-lb-submission-contract": contract }),
+  } as unknown as Response);
+
+/** What `GET /driver/capabilities` answers — a current API by default; a test may change it. */
+let capability: Answer = respond(200, { timesheetSubmissionProtocol: CONTRACT }, null);
+let capabilityCalls = 0;
+beforeEach(() => { capability = respond(200, { timesheetSubmissionProtocol: CONTRACT }, null); capabilityCalls = 0; });
 const accepted = (reference = "TS-AAAA1111", standing = "accepted"): Answer =>
   respond(201, { timesheet: { reference, revision: 1, standing, verification: standing === "accepted" ? "membership_active" : "unverified", receivedAt: "2026-10-11T15:00:01.000Z" } });
 const replayed = (reference = "TS-AAAA1111"): Answer =>
@@ -58,6 +68,10 @@ function server(...answers: Answer[]): Sent[] {
   const sent: Sent[] = [];
   let call = 0;
   jest.spyOn(global, "fetch").mockImplementation(((input: string, init: RequestInit = {}) => {
+    if (String(input).endsWith("/driver/capabilities")) {
+      capabilityCalls += 1;
+      return capability();
+    }
     if (!String(input).endsWith("/driver/timesheets")) return Promise.reject(new Error(`unexpected request ${String(input)}`));
     const raw = typeof init.body === "string" ? init.body : "";
     sent.push({ raw, body: JSON.parse(raw) as Sent["body"], authorization: new Headers(init.headers).get("authorization") });
@@ -533,7 +547,9 @@ test("SI7. stopped after marking it SENDING, before the request left: the next r
   // The request never left: the app died inside it (this process's request is
   // held open, and only released — as a failure — once the test is done).
   let die: (error: Error) => void = () => undefined;
-  jest.spyOn(global, "fetch").mockImplementation(() => new Promise<Response>((_resolve, reject) => { die = reject; }));
+  jest.spyOn(global, "fetch").mockImplementation(((input: string) => String(input).endsWith("/driver/capabilities")
+    ? capability()
+    : new Promise<Response>((_resolve, reject) => { die = reject; })) as unknown as typeof fetch);
   const dead = runSync(SCOPE, identity);
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.sending);
@@ -708,7 +724,9 @@ test("SR4. a crash while SENDING is an unknown outcome too: a 400 that follows k
   const day = await finishedDay(SCOPE, NORTHGATE);
   await queued(SCOPE, day);
   let die: (error: Error) => void = () => undefined;
-  jest.spyOn(global, "fetch").mockImplementation(() => new Promise<Response>((_resolve, reject) => { die = reject; }));
+  jest.spyOn(global, "fetch").mockImplementation(((input: string) => String(input).endsWith("/driver/capabilities")
+    ? capability()
+    : new Promise<Response>((_resolve, reject) => { die = reject; })) as unknown as typeof fetch);
   const dead = runSync(SCOPE, identity);
   await new Promise(resolve => setTimeout(resolve, 20));
   jest.restoreAllMocks();
@@ -1077,7 +1095,11 @@ test("RT-E. after a RESTART, with the stale record and newer evidence on disk: b
 
 /** An identity step that yields — as renewal does — and lets `during` change the disk before the request is made. */
 function pausingIdentity(during: () => void, token = "id.token"): WithIdentity {
+  // A run's first call is the compatibility check; the change lands in the identity step of the SEND that follows.
+  let calls = 0;
   return async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    calls += 1;
+    if (calls === 1) return call(token);
     await new Promise(resolve => setTimeout(resolve, 0));
     during();
     return call(token);
@@ -1139,7 +1161,9 @@ test("DB-D. a MARKER-ONLY change after verification invalidates it: a verified s
   restoreMarker();
   const sent = server(accepted());
 
-  await sendSubmission(SCOPE, resolution.submission, identity, at(17));
+  const compatibility = await discoverCompatibility(identity);
+  if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
+  await sendSubmission(SCOPE, resolution.submission, compatibility.api, identity, at(17));
 
   expect(sent).toEqual([]);
 });
@@ -1222,6 +1246,7 @@ test("DB-K. NOTHING can fall between the final check and the request leaving: a 
   sealPath(day.id, 2).delete();
   const markerAtFetch: boolean[] = [];
   jest.spyOn(global, "fetch").mockImplementation(((input: string) => {
+    if (String(input).endsWith("/driver/capabilities")) return capability();
     if (String(input).endsWith("/driver/timesheets")) markerAtFetch.push(markerPath(day.id, 2).exists);
     return respond(201, { timesheet: { reference: "TS-AAAA1111", revision: 1, standing: "accepted", verification: "membership_active", receivedAt: "2026-10-11T15:00:01.000Z" } })();
   }) as unknown as typeof fetch);
@@ -1231,4 +1256,205 @@ test("DB-K. NOTHING can fall between the final check and the request leaving: a 
 
   expect(markerAtFetch.length).toBeGreaterThan(0);
   expect(markerAtFetch.every(present => !present)).toBe(true);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Versioned API compatibility: replay-first-1
+// ═══════════════════════════════════════════════════════════════════════════
+
+const legacy = (status: number, body: unknown): Answer => respond(status, body, null);
+
+test("CA-A. a COMPATIBLE API: it is asked once a run, then the sealed bytes go and land", async () => {
+  const sent = server(accepted());
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+
+  await runSync(SCOPE, identity);
+
+  expect(capabilityCalls).toBe(1);
+  expect(sent).toHaveLength(1);
+  expect(snapshotBytes(sent[0])).toBe(readSeal(SCOPE, day.id, 1)?.snapshotJson);
+});
+
+test.each([
+  ["an older API without the capability (404)", legacy(404, { error: "Not found", code: "NOT_FOUND" })],
+  ["an API advertising another protocol", respond(200, { timesheetSubmissionProtocol: "replay-first-2" }, null)],
+  ["an answer that is not a capability", respond(200, { nonsense: true }, null)],
+  ["no connection during discovery", OFFLINE],
+  ["a server fault during discovery", legacy(503, { error: "x" })],
+])("CA-B/F. %s: NOTHING is sent — the record untouched, locked, waiting", async (_name, answer) => {
+  const sent = server(accepted());
+  capability = answer;
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const before = await queued(SCOPE, day);
+
+  const report = await runSync(SCOPE, identity);
+
+  expect(sent).toEqual([]);
+  expect(recordOf(SCOPE, day.id)).toEqual(before);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(report.retryLater).toBe(true);
+});
+
+test.each([
+  ["400 VALIDATION", legacy(400, { error: "x", code: "VALIDATION" })],
+  ["400 TIMESHEET_INVALID", legacy(400, { error: "x", code: "TIMESHEET_INVALID" })],
+  ["400 TIMESHEET_REJECTED with no contract", legacy(400, { error: "x", code: "TIMESHEET_REJECTED" })],
+  ["404 NOT_FOUND", legacy(404, { error: "x", code: "NOT_FOUND" })],
+  ["403 FORBIDDEN", legacy(403, { error: "x", code: "FORBIDDEN" })],
+])("CA-C/D. a refusal WITHOUT the contract (an older API, or a rollback since the check) — %s — is not proof: kept, LOCKED, uncertain, retried", async (_name, answer) => {
+  server(answer);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const before = await queued(SCOPE, day);
+
+  await runSync(SCOPE, identity);
+
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true, problem: { kind: "incompatible" } });
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(JSON.stringify(recordOf(SCOPE, day.id).snapshot)).toBe(JSON.stringify(before.snapshot));
+  expect(submissionStatusOf(SCOPE, day)).toMatchObject({ label: "Waiting to confirm", locked: true });
+});
+
+test("CA-E. MIXED versions: a contract-less 400 proves nothing; the compatible API's TIMESHEET_REJECTED then does — and only then does the day unlock", async () => {
+  const sent = server(legacy(400, { error: "x", code: "VALIDATION" }), refusal(400, "TIMESHEET_REJECTED"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+
+  await runSync(SCOPE, identity);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  await runSync(SCOPE, identity);
+
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.needsCorrection);
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+});
+
+test("CA-G. no answer AFTER the request left (compatible API): uncertain, locked, replayed later", async () => {
+  server(OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true });
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+test("CA-H. the session RENEWED during discovery: the renewed identity finds the compatible API, and the day goes", async () => {
+  const sent = server(accepted());
+  let firstCapability = true;
+  capability = () => {
+    if (firstCapability) { firstCapability = false; return legacy(401, { error: "Not authenticated", code: "UNAUTHENTICATED" })(); }
+    return respond(200, { timesheetSubmissionProtocol: CONTRACT }, null)();
+  };
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const renewing: WithIdentity = async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const first = await call("old.token");
+    if (!(first.kind === "api" && first.status === 401)) return first;
+    return call("new.token");
+  };
+
+  await runSync(SCOPE, renewing);
+
+  expect(capabilityCalls).toBe(2);
+  expect(sent).toHaveLength(1);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.submitted);
+});
+
+test("CA-J/K. a historical identical REPLAY lands as submitted; a CONFLICT stays locked whether or not it names the contract", async () => {
+  server(replayed("TS-HIST0001"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-HIST0001" } });
+  jest.restoreAllMocks();
+
+  for (const answer of [refusal(409, "SUBMISSION_MISMATCH"), legacy(409, { error: "x", code: "SUBMISSION_MISMATCH" })]) {
+    wipe(SCOPE);
+    server(answer);
+    const other = await finishedDay(SCOPE, NORTHGATE);
+    await queued(SCOPE, other);
+    await runSync(SCOPE, identity);
+    expect(recordOf(SCOPE, other.id).state).toBe(SUBMISSION_STATE.conflict);
+    expect(isDayLocked(SCOPE, other.id)).toBe(true);
+    jest.restoreAllMocks();
+  }
+});
+
+test("CA-L. the compatible API's DEFINITIVE rejection still permits correction", async () => {
+  server(refusal(400, "TIMESHEET_REJECTED"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.needsCorrection);
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+});
+
+test("CA-M. a SUCCESS with no contract header is kept as submitted — it unlocks nothing; the day stays locked with the server's reference", async () => {
+  server(legacy(201, { timesheet: { reference: "TS-OLDAPI01", revision: 1, standing: "accepted", verification: "membership_active", receivedAt: "2026-10-11T15:00:01.000Z" } }));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-OLDAPI01" } });
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+test("CA-N. the compatibility check changes nothing of the submission: the same id, revision and sealed bytes, and the check never travels with them", async () => {
+  const sent = server(OFFLINE, accepted());
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  await runSync(SCOPE, identity);
+  expect(capabilityCalls).toBe(2);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(sent[0]?.body).toMatchObject({ clientEventId: day.id, revision: 1 });
+  expect(Object.keys(sent[0]?.body ?? {}).sort()).toEqual(["clientEventId", "membershipId", "revision", "snapshot"]);
+});
+
+test.each([
+  ["a contract-less 400 from the renewed request stays LOCKED", legacy(400, { error: "x", code: "VALIDATION" }), SUBMISSION_STATE.waiting, true],
+  ["the compatible API's TIMESHEET_REJECTED to the renewed request permits correction", refusal(400, "TIMESHEET_REJECTED"), SUBMISSION_STATE.needsCorrection, false],
+])("CA-I. RENEWAL during the submission — %s", async (_name, renewedAnswer, state, locked) => {
+  const sent = server(refusal(401, "UNAUTHENTICATED"), renewedAnswer);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const renewing: WithIdentity = async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const first = await call("old.token");
+    if (!(first.kind === "api" && first.status === 401)) return first;
+    return call("new.token");
+  };
+
+  await runSync(SCOPE, renewing);
+
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(recordOf(SCOPE, day.id).state).toBe(state);
+  expect(isDayLocked(SCOPE, day.id)).toBe(locked);
+});
+
+test("CA-O. NOTHING QUEUED: a run asks the API nothing — not even what it speaks", async () => {
+  const sent = server(accepted());
+  await finishedDay(SCOPE, NORTHGATE);
+  await runSync(SCOPE, identity);
+  expect(capabilityCalls).toBe(0);
+  expect(sent).toEqual([]);
+});
+
+test("CA-P. signed out at DISCOVERY: the waiting record only says 'sign in' — the snapshot, seal, generation and lock are untouched, nothing is sent", async () => {
+  const sent = server(accepted());
+  capability = legacy(401, { error: "Not authenticated", code: "UNAUTHENTICATED" });
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const before = await queued(SCOPE, day);
+  const seal = readSeal(SCOPE, day.id, 1)?.snapshotJson;
+
+  await runSync(SCOPE, identity);
+
+  expect(sent).toEqual([]);
+  const after = recordOf(SCOPE, day.id);
+  expect(after).toMatchObject({ state: SUBMISSION_STATE.waiting, generation: before.generation, uncertain: before.uncertain, problem: { kind: "session" } });
+  expect(JSON.stringify(after.snapshot)).toBe(JSON.stringify(before.snapshot));
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(seal);
+  expect(markerPath(day.id, 1).exists).toBe(false);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
 });

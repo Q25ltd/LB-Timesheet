@@ -30,7 +30,7 @@
  * kept (a replay), never a second timesheet. What a failure means is decided
  * by `submissionErrors.ts`; nothing recoverable ever discards a record.
  */
-import { sendTimesheet } from "../api/account";
+import { fetchCapabilities, sendTimesheet } from "../api/account";
 import type { ApiResult } from "../api/client";
 import { withFinishedDay } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
@@ -226,6 +226,59 @@ function sealedBytes(scope: AccountScope, record: TimesheetSubmissionRecord): st
 /** The problem a refusal is recorded as while it proves nothing (`submissionStatus.ts` explains it). */
 export const UNCONFIRMED = "unconfirmed";
 
+/** The problem a refusal is recorded as when the API answering it did not name the contract: it proves nothing either. */
+export const INCOMPATIBLE = "incompatible";
+
+/**
+ * The one submission contract this app speaks (`api/src/lib/submissionContract.ts`):
+ * authorise, then a replay is answered before anything is validated, and only
+ * `400 TIMESHEET_REJECTED` proves nothing is kept. Any change to that is a new name.
+ */
+const SUBMISSION_CONTRACT = "replay-first-1";
+
+/**
+ * The API, asked this run, said it speaks `SUBMISSION_CONTRACT`. Made only by
+ * `discoverCompatibility`: nominal, like `Verified`, so nothing can send
+ * without asking first.
+ */
+class Compatible {
+  readonly #compatible = true;
+  isCompatible(): boolean { return this.#compatible; }
+}
+export type CompatibleApi = Compatible;
+
+/**
+ * What the API says it is — asked before anything is sent:
+ *   compatible    it advertises `SUBMISSION_CONTRACT`
+ *   incompatible  it answered, and does not (an older API's 404, another protocol)
+ *   unknown       no usable answer (no connection, a session not renewed, a fault)
+ * Neither of the last two sends anything, and neither touches a record.
+ */
+export type Compatibility =
+  | { kind: "compatible"; api: CompatibleApi }
+  | { kind: "incompatible" }
+  | { kind: "unknown"; failure: Exclude<ApiResult<unknown>, { kind: "ok" }> };
+
+export async function discoverCompatibility(withIdentity: WithIdentity): Promise<Compatibility> {
+  const result = await withIdentity(token => fetchCapabilities(token));
+  if (result.kind === "ok") {
+    return result.value.timesheetSubmissionProtocol === SUBMISSION_CONTRACT ? { kind: "compatible", api: new Compatible() } : { kind: "incompatible" };
+  }
+  return result.kind === "api" && result.status === 404 ? { kind: "incompatible" } : { kind: "unknown", failure: result };
+}
+
+/**
+ * Discovery could not ask because the driver must sign in again: a WAITING
+ * record says so — its state, snapshot, seal and uncertainty untouched, and
+ * nothing sent. Any other record, or any other failure, is left exactly as it is.
+ */
+export function noteSignInNeeded(scope: AccountScope, verified: VerifiedSubmission, failure: Exclude<ApiResult<unknown>, { kind: "ok" }>): TimesheetSubmissionRecord | null {
+  if (!verified.isVerified()) return null;
+  const { record } = verified;
+  if (record.state !== SUBMISSION_STATE.waiting || classifyFailure(failure) !== FAILURE.session) return null;
+  return advance(scope, record, { ...record, seq: record.seq + 1, problem: problemOf(failure, FAILURE.session) });
+}
+
 const STATE_FOR: Record<Exclude<Failure, "session" | "temporary">, TimesheetSubmissionRecord["state"]> = {
   [FAILURE.invalid]:  SUBMISSION_STATE.needsCorrection,
   [FAILURE.refused]:  SUBMISSION_STATE.refused,
@@ -287,8 +340,8 @@ function confirmAtDispatch(scope: AccountScope, sending: TimesheetSubmissionReco
 const NOT_DISPATCHED: { kind: "network"; message: string; detail: null } = { kind: "network", message: "Not dispatched: the evidence changed", detail: null };
 
 /** Send one queued record; the record as it now stands, or `null` when it could not be advanced. */
-export async function sendSubmission(scope: AccountScope, verified: VerifiedSubmission, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
-  if (!verified.isVerified()) return null;
+export async function sendSubmission(scope: AccountScope, verified: VerifiedSubmission, compatible: CompatibleApi, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
+  if (!verified.isVerified() || !compatible.isCompatible()) return null;
   const { record } = verified;
   const bytes = sealedBytes(scope, record);
   if (bytes === null) return null;
@@ -333,7 +386,12 @@ export async function sendSubmission(scope: AccountScope, verified: VerifiedSubm
     const failure = classifyFailure(result);
     const uncertain = sending.uncertain || outcomeUnknown(result);
     const unlocking = failure === FAILURE.invalid || failure === FAILURE.refused;
-    if (unlocking && uncertain && !provesNothingKept(result)) {
+    // Only an answer naming the contract speaks for a compatible API — the one checked may have been rolled back since.
+    const compatibleAnswer = result.kind === "api" && result.contract === SUBMISSION_CONTRACT;
+    if (unlocking && !compatibleAnswer) {
+      // Not this contract's answer: what it refused proves nothing about what is kept. Kept, locked, uncertain, replayed.
+      next = { ...sending, seq: sending.seq + 1, uncertain: true, state: SUBMISSION_STATE.waiting, problem: { ...problemOf(result, failure), kind: INCOMPATIBLE } };
+    } else if (unlocking && uncertain && !provesNothingKept(result)) {
       // The server may keep an earlier transmission of these bytes: nothing is proven. Kept, locked, replayed.
       next = { ...sending, seq: sending.seq + 1, uncertain, state: SUBMISSION_STATE.waiting, problem: { ...problemOf(result, failure), kind: UNCONFIRMED } };
     } else {

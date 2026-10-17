@@ -57,7 +57,7 @@ function freshEmail(): string {
 const outbox: MailMessage[] = [];
 const capturingMailer: Mailer = { send(message) { outbox.push(message); return Promise.resolve(null); } };
 
-interface Injected { statusCode: number; body: unknown; raw: string }
+interface Injected { statusCode: number; body: unknown; raw: string; contract: string | null }
 
 async function inject(options: { url: string; method?: "GET" | "POST" | "PUT"; payload?: object; token?: string; web?: boolean }): Promise<Injected> {
   const app = await buildApp(prisma, { mailer: capturingMailer });
@@ -69,7 +69,8 @@ async function inject(options: { url: string; method?: "GET" | "POST" | "PUT"; p
       method: options.method ?? "POST", url: options.url, headers,
       ...(options.payload === undefined ? {} : { payload: options.payload }),
     });
-    return { statusCode: res.statusCode, body: res.body === "" ? null : (JSON.parse(res.body) as unknown), raw: res.body };
+    const contract = res.headers["x-lb-submission-contract"];
+    return { statusCode: res.statusCode, body: res.body === "" ? null : (JSON.parse(res.body) as unknown), raw: res.body, contract: typeof contract === "string" ? contract : null };
   } finally {
     await app.close();
   }
@@ -773,4 +774,62 @@ test("TS25. a replay is never an ORACLE or a key: another driver — same day id
   const own = await submit(other, bodyFor(other, { clientEventId: kept.clientEventId }, acceptedUnderOlderRules(me.userId)));
   assert.equal(own.statusCode, 400, `got ${own.raw}`);
   assert.deepEqual(await recordsOf(me.membershipId), unchanged);
+});
+
+// ── The submission contract: replay-first-1 (versioned API compatibility) ───
+
+const CONTRACT = "replay-first-1";
+
+test("TS26. the API ADVERTISES its submission contract — to a signed-in driver (identity token) only", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+
+  const own = await inject({ url: "/driver/capabilities", method: "GET", token: me.identityToken });
+  assert.equal(own.statusCode, 200, `got ${own.raw}`);
+  assert.deepEqual(own.body, { timesheetSubmissionProtocol: CONTRACT });
+
+  assert.equal((await inject({ url: "/driver/capabilities", method: "GET" })).statusCode, 401);
+  assert.equal((await inject({ url: "/driver/capabilities", method: "GET", token: admin.token })).statusCode, 401, "a tenant token is the wrong kind");
+});
+
+test("TS27. EVERY answer to POST /driver/timesheets names the contract — stored, replayed, conflict, rejected, not yours, malformed envelope, unauthenticated, too large", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const other = await driverOf(admin);
+  const body = bodyFor(me);
+
+  const answers: [string, Injected, number][] = [
+    ["stored", await submit(me, body), 201],
+    ["replayed", await submit(me, body), 200],
+    ["conflict", await submit(me, { ...body, snapshot: snapshot(me.userId, { day: { startedAt: START, endedAt: END, nightOut: false, notes: null } }) }), 409],
+    ["rejected", await submit(me, bodyFor(me, {}, { ...snapshot(me.userId), extra: true })), 400],
+    ["not yours", await submit(me, bodyFor(me, { membershipId: other.membershipId })), 404],
+    ["malformed envelope", await submit(me, bodyFor(me, { revision: 2 })), 400],
+    ["unauthenticated", await inject({ url: SUBMIT, payload: body }), 401],
+    ["too large", await submit(me, bodyFor(me, {}, { ...snapshot(me.userId), padding: "x".repeat(600 * 1024) })), 413],
+  ];
+  for (const [what, res, status] of answers) {
+    assert.equal(res.statusCode, status, `${what}: got ${res.statusCode} ${res.raw.slice(0, 120)}`);
+    assert.equal(res.contract, CONTRACT, `${what}: no contract header`);
+  }
+});
+
+test("TS28. a SERVER FAULT still names the contract — and stays a 500, which the phone never reads as final", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const failing = new Proxy(prisma, {
+    get(target, key) {
+      if (key === "$transaction") return () => Promise.reject(new Error("synthetic fault"));
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function" ? (...args: unknown[]): unknown => Reflect.apply(value, target, args) : value;
+    },
+  });
+  const app = await buildApp(failing, { mailer: capturingMailer });
+  try {
+    const res = await app.inject({ method: "POST", url: SUBMIT, headers: { authorization: `Bearer ${me.identityToken}` }, payload: bodyFor(me) });
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.headers["x-lb-submission-contract"], CONTRACT);
+  } finally {
+    await app.close();
+  }
 });

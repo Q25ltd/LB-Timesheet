@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-10-17 — S6: versioned API submission compatibility (`replay-first-1`)
+
+**Retest of `5f5efea`: PASS** — S6-lost-record CLOSED (FINDINGS). Enabling
+sending still needed the API-compatibility guarantee proposed below; this
+builds it. Not pushed, not deployed; sending stays off (`SEND_TIMESHEETS`).
+
+**API.** `lib/submissionContract.ts` names the contract: authorise → replay
+(200) or conflict (409) before validation → only `400 TIMESHEET_REJECTED`
+proves nothing is kept; any change is a new name. `GET /driver/capabilities`
+(identity posture) advertises it; a route-level `onSend` hook puts
+`X-LB-Submission-Contract: replay-first-1` on every `POST /driver/timesheets`
+answer — the root hook's 401, 413 and 500 included. AUTH.md records both.
+
+**Phone.** The runner asks the capability once per run, only when a timesheet
+would go; `sendSubmission` now requires a nominal `CompatibleApi` only that
+discovery makes. Not advertised (404, another protocol, an unreadable answer)
+or not askable (no connection, a fault): nothing is sent and the records stay
+as they are; signed out, a waiting record is only marked "sign in" (state,
+snapshot, seal, generation and uncertainty untouched). After a send, a
+refusal that does not name the contract — an API rolled back since the check,
+or mixed versions behind a balancer — proves nothing: kept, locked,
+`uncertain`, problem `incompatible` ("Waiting to confirm"), replayed. A 409
+stays a conflict; a success without the header is kept as submitted (it
+locks and unlocks nothing). `confirmAtDispatch` is unchanged: still inside
+the `withIdentity` callback, the request started in the same synchronous turn.
+
+**Test fixtures adjusted, not weakened:** a run's first identity call is now
+discovery, so `pausingIdentity` lands its change in the SEND's identity step
+(as before), and SI7/SR4's held request now holds the submission, not the
+discovery. **Deployment order (unchanged from the proposal):** the API is
+deployed and its capability and header verified in production before any
+sending-enabled build; an API rollback then pauses sending instead of
+misreading its 400s.
+
+**Evidence.** API TS26–TS28 (TS26/TS27 RED first); phone CA-A–CA-P (14 RED
+first; CA-I/O/P added after). Mutations: 2 server, both killed; 11 phone —
+9 killed (discovery always compatible, protocol unchecked, response contract
+unverified, contract-less refusal unlocks, not uncertain, runner sends anyway,
+client drops the header, an async gap before the request, no sign-in note),
+2 equivalent (a success's contract dropped — nothing reads it, so the field
+was removed; `sendSubmission`'s token guard — `Compatible` is made only by
+discovery, as `Verified` is by resolution). `npm run check` exit 0 (API 293, mobile 1647, web 186, DB 401, backup 12,
+build, smoke).
+
+---
+
 ## 2026-10-17 — S6 retest: dispatch freshness; the final check at the request
 
 **Retest of `d6060a8`:** the stale-record defect FIXED; S6-status-lock

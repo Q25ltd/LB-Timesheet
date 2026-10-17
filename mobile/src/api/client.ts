@@ -19,13 +19,30 @@ interface ApiErrorBody {
   details?: { path: string; message: string }[];
 }
 
+/**
+ * `contract` is the submission contract the server named on a refusal
+ * (`x-lb-submission-contract`, D66) — absent when it named none, as an older
+ * API does. Read here, judged by the caller (`submissionQueue.ts`).
+ */
 export type ApiResult<T> =
   | { kind: "ok"; value: T }
-  | { kind: "api"; status: number; body: ApiErrorBody }
+  | { kind: "api"; status: number; body: ApiErrorBody; contract?: string }
   // `detail` is DEVELOPMENT-ONLY and is null in a production build. A
   // connection failure while developing is nearly always a wrong address,
   // and "check your signal" points the reader at the wrong thing entirely.
   | { kind: "network"; message: string; detail: string | null };
+
+const CONTRACT_HEADER = "x-lb-submission-contract";
+
+/** The contract header's value, or nothing — never a guess, whatever the answer object looks like. */
+function contractOf(response: Response): { contract?: string } {
+  const headers: unknown = Reflect.get(response, "headers");
+  if (typeof headers !== "object" || headers === null) return {};
+  const get: unknown = Reflect.get(headers, "get");
+  if (typeof get !== "function") return {};
+  const value: unknown = Reflect.apply(get, headers, [CONTRACT_HEADER]);
+  return typeof value === "string" ? { contract: value } : {};
+}
 
 /** How long to wait for the WHOLE answer, body included, before calling it a network failure. */
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -115,10 +132,10 @@ async function send<T>(
       if (controller.signal.aborted) return { kind: "network", message: "The response timed out", detail: unreachable(url) };
       // A body we cannot read is only a problem when the status says failure;
       // a 2xx with no body is still a success for callers expecting nothing.
-      if (!response.ok) return { kind: "api", status: response.status, body: { error: "Something went wrong" } };
+      if (!response.ok) return { kind: "api", status: response.status, body: { error: "Something went wrong" }, ...contractOf(response) };
     }
 
-    if (!response.ok) return { kind: "api", status: response.status, body: asErrorBody(parsed) };
+    if (!response.ok) return { kind: "api", status: response.status, body: asErrorBody(parsed), ...contractOf(response) };
     // Unchecked here: a caller that relies on the shape validates it (`account.ts`).
     return { kind: "ok", value: parsed as T };
   } finally {

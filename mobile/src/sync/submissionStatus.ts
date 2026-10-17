@@ -10,7 +10,7 @@
 import { declarationHolds, effectiveFacts, type CompletedShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { FAILURE } from "./submissionErrors";
-import { UNCONFIRMED } from "./submissionQueue";
+import { INCOMPATIBLE, UNCONFIRMED } from "./submissionQueue";
 import { SEND_TIMESHEETS } from "./sending";
 import { SUBMISSION_STATE, highestSentGeneration, isDayLocked, isLocking, readSubmission, type TimesheetSubmissionRecord } from "./submissionStore";
 
@@ -37,7 +37,7 @@ function statusOfRecord(record: TimesheetSubmissionRecord, declared: boolean): S
   const locked = isLocking(record.state);
   switch (record.state) {
     case SUBMISSION_STATE.waiting:
-      if (record.problem?.kind === UNCONFIRMED) {
+      if (record.problem?.kind === UNCONFIRMED || record.problem?.kind === INCOMPATIBLE) {
         return {
           label: "Waiting to confirm",
           detail: `${company} may already have this timesheet. It is kept exactly as sent, and checked with ${company} again — it can't be changed until that is settled.`,
