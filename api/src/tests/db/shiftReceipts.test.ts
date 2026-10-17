@@ -391,11 +391,15 @@ test("SR11. (R4) an UPPERCASE UUID is the same id: kept in canonical lowercase (
   assert.deepEqual(stored.map(row => row.clientEventId), [id]);
 
   const lower = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: id, startedAt });
+  // The reviewer's literal input.
+  const reviewed = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: "ABCDEFAB-1234-4234-8234-ABCDEFABCDEF", startedAt });
+  assert.equal(reviewed.statusCode, 201, `got ${reviewed.raw}`);
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId, clientEventId: "abcdefab-1234-4234-8234-abcdefabcdef" } }), 1);
   assert.equal(lower.statusCode, 200, "the same day in another case is a replay");
   assert.deepEqual(lower.body, upper.body);
   const mixed = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: `${id.slice(0, 18).toUpperCase()}${id.slice(18)}`, startedAt });
   assert.equal(mixed.statusCode, 200);
-  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 1);
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 2);
 });
 
 test("SR12. (R3) a receipt that holds the membership's lock FIRST is issued before the withdrawal — and the withdrawal, waiting for it, is recorded no earlier than the receipt", async () => {

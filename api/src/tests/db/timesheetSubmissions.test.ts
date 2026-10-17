@@ -624,3 +624,67 @@ test("TS20. (R4) an UPPERCASE day id is the same day: it finds the lowercase rec
   const shifts = await prisma.shift.findMany({ where: { membershipId: me.membershipId } });
   assert.deepEqual(shifts.map(shift => shift.clientEventId), [id]);
 });
+
+// ── R1 at the API, with the reviewer's own inputs ───────────────────────────
+
+/** The day's unit check, replaced by `check`. */
+function withUnitCheck(userId: string, check: Record<string, unknown>): Record<string, unknown> {
+  const base = snapshot(userId);
+  const vehicles = Array.isArray(base.vehicles) ? base.vehicles : [];
+  const unit: unknown = vehicles[0];
+  return { ...base, vehicles: [{ ...(typeof unit === "object" && unit !== null ? unit : {}), checks: [check] }] };
+}
+
+function unitCheck(userId: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "c1111111-2222-4333-8444-555555555555", checklist: "hgv-unit", checklistVersion: 1, status: "completed",
+    startedAt: START, completedAt: "2026-10-11T04:10:00.000Z", completedBy: userId,
+    items: hgvRows(), revisions: [], ...over,
+  };
+}
+
+function hgvRows(over: Record<string, Record<string, unknown>> = {}): Record<string, unknown>[] {
+  return (checklistKeys("hgv-unit", 1) ?? []).map(key => ({ key, label: key, section: null, result: "pass", note: null, ...over[key] }));
+}
+
+test("TS21. (R1) an incomplete or undescribed CERTIFICATE is refused with nothing stored — the reviewer's one-row check, partial correction and null description", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const wipersDefect = { wipers: { result: "fail", note: "Nearside blade split" } };
+  const cases: [string, Record<string, unknown>][] = [
+    ["one answered row certified", unitCheck(me.userId, { items: [{ key: "front-view", label: "Front view", section: null, result: "pass", note: null }] })],
+    ["a certified defect with no description", unitCheck(me.userId, { items: hgvRows({ wipers: { result: "fail", note: null } }) })],
+    ["a correction holding only a passing row, dropping the defect", unitCheck(me.userId, {
+      items: hgvRows(wipersDefect),
+      revisions: [{ id: randomUUID(), revisedAt: END, revisedBy: me.userId, items: [{ key: "front-view", label: "front-view", section: null, result: "pass", note: null }] }],
+    })],
+    ["a whole correction with an undescribed defect", unitCheck(me.userId, {
+      items: hgvRows(wipersDefect),
+      revisions: [{ id: randomUUID(), revisedAt: END, revisedBy: me.userId, items: hgvRows({ wipers: { result: "fail", note: null } }) }],
+    })],
+  ];
+  for (const [name, check] of cases) {
+    const res = await submit(me, bodyFor(me, {}, withUnitCheck(me.userId, check)));
+    assert.equal(res.statusCode, 400, `${name}: got ${res.raw}`);
+    assert.equal(field(res.body, "code"), "TIMESHEET_INVALID", name);
+  }
+  const stored = await recordsOf(me.membershipId);
+  assert.deepEqual([stored.shifts.length, stored.submissions.length, stored.events.length, stored.deliveries.length], [0, 0, 0, 0], "a refused certificate left records");
+});
+
+test("TS22. (R1) what is TRUE still goes through: a whole certificate, a whole correction that clears a defect, and a partial draft with a defect not yet described", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const valid: [string, Record<string, unknown>][] = [
+    ["a whole certificate with a described defect", unitCheck(me.userId, { items: hgvRows({ wipers: { result: "fail", note: "Nearside blade split" } }) })],
+    ["a whole correction clearing the defect", unitCheck(me.userId, {
+      items: hgvRows({ wipers: { result: "fail", note: "Nearside blade split" } }),
+      revisions: [{ id: randomUUID(), revisedAt: END, revisedBy: me.userId, items: hgvRows() }],
+    })],
+    ["a partial draft", unitCheck(me.userId, { status: "draft", completedAt: null, completedBy: null, items: hgvRows({ wipers: { result: "fail", note: null } }).slice(0, 4) })],
+  ];
+  for (const [name, check] of valid) {
+    const res = await submit(me, bodyFor(me, {}, withUnitCheck(me.userId, check)));
+    assert.equal(res.statusCode, 201, `${name}: got ${res.raw}`);
+  }
+});

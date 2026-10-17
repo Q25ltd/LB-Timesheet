@@ -36,6 +36,23 @@ deterministic), TS19, TS19b, TS20. Existing fixtures that held 2-row
 build and smoke start. Not pushed or deployed. The fixes need the
 reviewer's verification before S6.
 
+**Checked against the full review report** (received after `0a94e47`).
+Added the API-level proof the reviewer's S6 gate names — TS21: the
+reviewer's one-row certificate, a correction keeping only a passing row, and
+null defect descriptions are each 400 `TIMESHEET_INVALID` with no header,
+revision, event or delivery stored (with R1 disabled it gets exactly the
+reviewer's result: 201, accepted, `membership_active`); TS22: a whole
+certificate, a whole correction clearing a defect and a partial draft still
+201 — and the reviewer's literal uppercase id in SR11. The reviewer's own
+adversarial suite (`/private/tmp/d66-adversarial.test.mts`, which asserts the
+vulnerable behaviour) was run unchanged and as a copy whose only change is a
+whole certificate in its fixture: A2, A3, A6, A7, A8 and A14 no longer
+reproduce; A9–A13 (ownership 404s, rollback, immutability, conflicting
+submissions, body and diary limits) still hold; A1 and A5, which the
+reviewer did not classify, behave as before. A4 cannot observe the fix — its
+hook wraps the client outside the new transaction — and SR10 covers its
+schedule.
+
 **Residual (not part of R1–R4, unchanged):** a submission's verification
 still uses the membership state read at its authorisation, so a withdrawal
 committing mid-request does not change that request's "received while
