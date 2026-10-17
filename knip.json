@@ -39,8 +39,6 @@
       ],
       "ignoreDependencies": [
         "@prisma/client",
-        "pdfkit",
-        "@types/pdfkit",
         "@types/bcryptjs"
       ]
     }

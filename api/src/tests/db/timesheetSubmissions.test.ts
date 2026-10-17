@@ -19,6 +19,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { canonicalJson } from "../../lib/timesheetSnapshot.js";
 import { createHash } from "node:crypto";
 import type { MailMessage, Mailer } from "../../lib/mailer.js";
+import { renderTimesheetPdf } from "../../pdf/timesheetPdf.js";
+import { readPdf } from "../pdfReader.js";
 
 const connectionString = process.env.DATABASE_URL;
 if (connectionString === undefined || connectionString === "") {
@@ -503,4 +505,34 @@ test("TS17. at most 50 NEW submissions per membership a day — a replay of one 
   const fiftyFirst = await submit(me, bodyFor(me));
   assert.equal(fiftyFirst.statusCode, 429, `got ${fiftyFirst.raw}`);
   assert.equal((await submit(me, kept)).statusCode, 200, "the replay still answers");
+});
+
+test("TS18. (S5) the PDF is drawn from the STORED revision: the JSON column's payload still hashes to what was stored, is attached exactly, and draws the same bytes twice", async () => {
+  const admin = await companyAdmin({ timeZone: "Asia/Tokyo" });
+  const me = await driverOf(admin);
+  const snap = snapshot(me.userId, { day: { startedAt: START, endedAt: END, nightOut: true, notes: "Wartezeit — שלום (נמל) — مرحبا ١٢٣ — नमस्ते — 東京 — 🚚" } });
+  assert.equal((await submit(me, bodyFor(me, {}, snap))).statusCode, 201);
+
+  const shift = await prisma.shift.findFirstOrThrow({ where: { membershipId: me.membershipId } });
+  const submission = await prisma.timesheetSubmission.findUniqueOrThrow({ where: { shiftId_revision: { shiftId: shift.id, revision: 1 } } });
+  const decision = await prisma.timesheetReviewDecision.findUnique({ where: { shiftId_revision: { shiftId: shift.id, revision: 1 } } });
+  assert.ok(shift.reference !== null && shift.companyName !== null);
+  const source = {
+    reference: shift.reference, driverName: shift.driverName, payrollRef: shift.payrollRef, companyName: shift.companyName,
+    submission: {
+      revision: submission.revision, schemaVersion: submission.schemaVersion, payload: submission.payload,
+      payloadSha256: submission.payloadSha256, declaredBy: submission.declaredBy, receivedAt: submission.receivedAt,
+      verification: submission.verification, filedInTimezone: submission.filedInTimezone,
+    },
+    decision,
+  };
+
+  const first = await renderTimesheetPdf(source);
+  const second = await renderTimesheetPdf(source);
+  assert.ok(first.pdf.equals(second.pdf));
+  assert.equal(first.missingGlyphs, true, "the emoji is marked, not dropped");
+  const attached = readPdf(first.pdf).attachments.get(`${shift.reference}-revision-1.json`);
+  assert.ok(attached !== undefined);
+  assert.equal(createHash("sha256").update(attached).digest("hex"), submission.payloadSha256);
+  assert.deepEqual(JSON.parse(attached.toString("utf8")), snap);
 });
