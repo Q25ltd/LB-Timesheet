@@ -245,6 +245,47 @@ function advance(scope: AccountScope, from: TimesheetSubmissionRecord, next: Tim
   return next;
 }
 
+/**
+ * THE FINAL CHECK, at the dispatch boundary (independent retest of d6060a8):
+ * is this record STILL the authoritative generation, now — after however
+ * long the identity step took? Re-read from disk: the record (owner, day,
+ * generation, sequence, `sending`), every seal, staged seal and sent-marker
+ * of the day (nothing beyond this generation), and this generation's own
+ * seal (owner, the exact bytes, the membership). Returns the bytes to send,
+ * or `null`: send nothing.
+ *
+ * It runs inside the `withIdentity` callback — on every call, a renewed one
+ * included — and the request is started in the SAME synchronous turn: the
+ * API client reaches `fetch` before its first `await`. JavaScript runs one
+ * turn to completion, and every write this app makes to submission files is
+ * synchronous (`submissionStore.ts`), so no application change can fall
+ * between the check and the request leaving — with no lock held across the
+ * network, and none taken that `withIdentity`, the runner or the store's
+ * write queue could wait on.
+ *
+ * ASSUMPTION (outside the app's control): another process changing these
+ * files in that same instant — a backup restore, a file manager — is not
+ * excluded. It is caught at the next run's resolution.
+ */
+function confirmAtDispatch(scope: AccountScope, sending: TimesheetSubmissionRecord): string | null {
+  const read = readSubmission(scope, sending.dayId);
+  if (read.kind !== "ok") return null;
+  const current = read.record;
+  if (current.ownerUserId !== scope.userId || current.dayId !== sending.dayId || current.generation !== sending.generation
+    || current.seq !== sending.seq || current.state !== SUBMISSION_STATE.sending) return null;
+  // Any evidence of a later generation — a marker above all — and this one is no longer authoritative.
+  if (highestEvidenceGeneration(scope, sending.dayId) > sending.generation) return null;
+  const sent = highestSentGeneration(scope, sending.dayId);
+  if (sent !== null && sent > sending.generation) return null;
+  const seal = readSeal(scope, sending.dayId, sending.generation);
+  if (seal === null || seal.ownerUserId !== scope.userId || seal.membershipId !== current.membershipId
+    || seal.snapshotJson !== JSON.stringify(current.snapshot)) return null;
+  return seal.snapshotJson;
+}
+
+/** What `withIdentity` is answered with when the final check refused: nothing left the phone. */
+const NOT_DISPATCHED: { kind: "network"; message: string; detail: null } = { kind: "network", message: "Not dispatched: the evidence changed", detail: null };
+
 /** Send one queued record; the record as it now stands, or `null` when it could not be advanced. */
 export async function sendSubmission(scope: AccountScope, verified: VerifiedSubmission, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
   if (!verified.isVerified()) return null;
@@ -261,13 +302,24 @@ export async function sendSubmission(scope: AccountScope, verified: VerifiedSubm
   // Before the request may leave: from now on, "never sent" can no longer be assumed.
   markSent(scope, sending.dayId, sending.generation);
 
-  const result = await withIdentity(token => sendTimesheet(token, {
-    membershipId:  sending.membershipId,
-    clientEventId: sending.dayId,
-    revision:      sending.revision,
-    // The SEAL's bytes — exactly what was frozen, every time.
-    snapshot:      sealed,
-  }));
+  let refusedAtDispatch = false;
+  const result = await withIdentity(token => {
+    // The final check and the request leaving: one synchronous turn (`confirmAtDispatch`).
+    const final = confirmAtDispatch(scope, sending);
+    if (final === null || final !== bytes) {
+      refusedAtDispatch = true;
+      return Promise.resolve(NOT_DISPATCHED);
+    }
+    return sendTimesheet(token, {
+      membershipId:  sending.membershipId,
+      clientEventId: sending.dayId,
+      revision:      sending.revision,
+      // The SEAL's bytes — exactly what was frozen, every time.
+      snapshot:      sealed,
+    });
+  });
+  // The evidence changed while the identity step ran: nothing more is written here; the next run re-resolves.
+  if (refusedAtDispatch) return null;
 
   let next: TimesheetSubmissionRecord;
   if (result.kind === "ok") {

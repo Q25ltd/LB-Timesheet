@@ -7,7 +7,10 @@
  * Sending is switched ON for this file (`sending.ts` is mocked): the app
  * ships with it off until S8 (`saveAndSendDisabled.test.ts`).
  */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { File } from "expo-file-system";
+import type { ApiResult } from "../api/client";
 import {
   TimesheetLockedError,
   USAGE_STATE,
@@ -21,8 +24,8 @@ import {
 import type { AccountScope } from "../shift/accountScope";
 import { SESSION_RENEWAL_UNAVAILABLE } from "../auth/sessionRenewal";
 import { runSync, type WithIdentity } from "../sync/syncRunner";
-import { queueTimesheet } from "../sync/submissionQueue";
-import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, writeSeal, type TimesheetSubmissionRecord } from "../sync/submissionStore";
+import { queueTimesheet, resolveSubmission, sendSubmission } from "../sync/submissionQueue";
+import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, writeSeal, writeSubmission, type TimesheetSubmissionRecord } from "../sync/submissionStore";
 import { submissionStatusOf } from "../sync/submissionStatus";
 import { correctDeclared, finishDeclared } from "./declared";
 import { accountDirectoryOf, scopeFor } from "./testScope";
@@ -1065,4 +1068,167 @@ test("RT-E. after a RESTART, with the stale record and newer evidence on disk: b
   await runInFreshProcess("user_send_1");
   expect(sent).toHaveLength(1);
   expect(snapshotBytes(sent[0])).toBe(second);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Independent retest of d6060a8 (2026-10-17): the evidence must still be
+// authoritative AT DISPATCH — after the identity step, however long it took
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** An identity step that yields — as renewal does — and lets `during` change the disk before the request is made. */
+function pausingIdentity(during: () => void, token = "id.token"): WithIdentity {
+  return async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    during();
+    return call(token);
+  };
+}
+
+/** The reviewer's set-up: the stale generation-1 WAITING record in place, generation 2's marker briefly unavailable. */
+async function markerAwayDuringResolution(): Promise<{ day: CompletedShift; second: string; marker: string; restoreMarker: () => void }> {
+  const { day, second } = await staleFirstOverUncertainSecond();
+  const marker = markerPath(day.id, 2).textSync();
+  markerPath(day.id, 2).delete();
+  return {
+    day, second, marker,
+    restoreMarker: () => { markerPath(day.id, 2).create({ overwrite: true }); markerPath(day.id, 2).write(marker); },
+  };
+}
+
+test("DB-A. generation 2's marker comes back DURING the identity step, its seal missing: the final check at dispatch sends NOTHING — and the day stays locked", async () => {
+  const { day, restoreMarker } = await markerAwayDuringResolution();
+  sealPath(day.id, 2).delete();
+  const sent = server(accepted());
+
+  await runSync(SCOPE, pausingIdentity(restoreMarker));
+
+  expect(sent).toEqual([]);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  await runSync(SCOPE, identity);
+  expect(sent).toEqual([]);
+});
+
+test("DB-B. the same with generation 2's seal DAMAGED: nothing sent", async () => {
+  const { day, restoreMarker } = await markerAwayDuringResolution();
+  sealPath(day.id, 2).write("{ damaged");
+  const sent = server(accepted());
+
+  await runSync(SCOPE, pausingIdentity(restoreMarker));
+  await runSync(SCOPE, identity);
+
+  expect(sent).toEqual([]);
+});
+
+test("DB-C. the same with generation 2's seal INTACT: generation 1 is never sent — only generation 2's exact sealed bytes, once recovered", async () => {
+  const { day, second, restoreMarker } = await markerAwayDuringResolution();
+  const sent = server(replayed("TS-GEN20006"));
+
+  await runSync(SCOPE, pausingIdentity(restoreMarker));
+  expect(sent).toEqual([]);
+  await runSync(SCOPE, identity);
+
+  expect(sent.length).toBeGreaterThan(0);
+  expect(sent.every(request => snapshotBytes(request) === second)).toBe(true);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ generation: 2, state: SUBMISSION_STATE.submitted });
+});
+
+test("DB-D. a MARKER-ONLY change after verification invalidates it: a verified submission is not sent once newer sent evidence appears", async () => {
+  const { day, restoreMarker } = await markerAwayDuringResolution();
+  const resolution = await resolveSubmission(SCOPE, day.id);
+  if (resolution.kind !== "current") throw new Error(`expected the stale record to look current: ${resolution.kind}`);
+  restoreMarker();
+  const sent = server(accepted());
+
+  await sendSubmission(SCOPE, resolution.submission, identity, at(17));
+
+  expect(sent).toEqual([]);
+});
+
+test("DB-E. the RECORD changing during the identity step (its sequence moved on) invalidates the verification: nothing sent", async () => {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const sent = server(accepted());
+  const bump = () => {
+    const now = recordOf(SCOPE, day.id);
+    writeSubmission(SCOPE, { ...now, seq: now.seq + 1 });
+  };
+
+  await runSync(SCOPE, pausingIdentity(bump));
+
+  expect(sent).toEqual([]);
+});
+
+test("DB-F. after a RESTART with newer evidence on disk, the stale generation is never dispatched", async () => {
+  const { day, restoreMarker } = await markerAwayDuringResolution();
+  restoreMarker();
+  sealPath(day.id, 2).delete();
+  const sent = server(accepted());
+
+  await runInFreshProcess("user_send_1");
+
+  expect(sent).toEqual([]);
+});
+
+test("DB-G. ISOLATION at dispatch: another account's evidence appearing during the identity step changes nothing — this account's own day still goes", async () => {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const sent = server(accepted());
+  const foreign = () => {
+    const file = new File(accountDirectoryOf(OTHER), `${SUBMISSION_FILE_PREFIX}seal-${day.id}-g5.sent.json`);
+    file.create({ overwrite: true });
+    file.write(JSON.stringify({ ownerUserId: OTHER.userId, dayId: day.id, generation: 5 }));
+  };
+
+  await runSync(SCOPE, pausingIdentity(foreign));
+
+  expect(sent).toHaveLength(1);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.submitted);
+});
+
+test("DB-I. ordinary RENEWAL with nothing changed: the first request is refused (401), the renewed one is sent — both pass the final check, the same bytes", async () => {
+  const sent = server(refusal(401, "UNAUTHENTICATED"), accepted("TS-RENEW001"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const renewing: WithIdentity = async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const first = await call("old.token");
+    if (!(first.kind === "api" && first.status === 401)) return first;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return call("new.token");
+  };
+
+  await runSync(SCOPE, renewing);
+
+  expect(sent.map(request => request.authorization)).toEqual(["Bearer old.token", "Bearer new.token"]);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-RENEW001" } });
+});
+
+test("DB-J. the DISPATCH PATH is one: only the submission queue calls the API's send, and only through the final check", () => {
+  const callers = (dir: string): string[] => readdirSync(dir).flatMap(name => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return name === "__tests__" ? [] : callers(path);
+    return /\.tsx?$/.test(name) && readFileSync(path, "utf8").includes("sendTimesheet(") ? [name] : [];
+  });
+  expect([...callers(join(process.cwd(), "src")), ...callers(join(process.cwd(), "app"))].sort()).toEqual(["account.ts", "submissionQueue.ts"]);
+  // Inside the queue, the one call is the final check's: it sends nothing unless the check passes in the same turn.
+  const queue = readFileSync(join(process.cwd(), "src", "sync", "submissionQueue.ts"), "utf8");
+  expect(queue.match(/sendTimesheet\(/g)).toHaveLength(1);
+  expect(queue).toMatch(/confirmAtDispatch\([^)]*\)[\s\S]{0,400}sendTimesheet\(/);
+});
+
+test("DB-K. NOTHING can fall between the final check and the request leaving: a change queued to land right after the check finds the request already gone", async () => {
+  const { day, restoreMarker } = await markerAwayDuringResolution();
+  // No newer evidence at all at the moment of the check: generation 1 may rightly go.
+  sealPath(day.id, 2).delete();
+  const markerAtFetch: boolean[] = [];
+  jest.spyOn(global, "fetch").mockImplementation(((input: string) => {
+    if (String(input).endsWith("/driver/timesheets")) markerAtFetch.push(markerPath(day.id, 2).exists);
+    return respond(201, { timesheet: { reference: "TS-AAAA1111", revision: 1, standing: "accepted", verification: "membership_active", receivedAt: "2026-10-11T15:00:01.000Z" } })();
+  }) as unknown as typeof fetch);
+
+  // The change is queued during the identity step, to land at the first chance after the check.
+  await runSync(SCOPE, pausingIdentity(() => { queueMicrotask(restoreMarker); }));
+
+  expect(markerAtFetch.length).toBeGreaterThan(0);
+  expect(markerAtFetch.every(present => !present)).toBe(true);
 });

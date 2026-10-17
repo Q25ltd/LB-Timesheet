@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-10-17 — S6 retest: dispatch freshness; the final check at the request
+
+**Retest of `d6060a8`:** the stale-record defect FIXED; S6-status-lock
+CLOSED; deploy with sending off APPROVED; activation BLOCKED by a new
+Medium: `VerifiedSubmission` proved verification HAPPENED, not that it was
+still true at dispatch — a stale generation-1 record, verified while
+generation 2's marker was briefly away, was sent after the asynchronous
+identity step though the marker had come back meanwhile.
+
+**Design.** `confirmAtDispatch` re-reads, from disk: the record (owner, day,
+generation, sequence, `sending`), every seal, staged seal and sent-marker of
+the day (nothing beyond this generation), and this generation's own seal
+(owner, exact bytes, membership). It runs INSIDE the `withIdentity`
+callback — on every call, a renewed one included — and the request is
+started in the same synchronous turn (the API client reaches `fetch` before
+its first `await`); every app write to submission files is synchronous, so
+nothing the app does can fall between check and request. No lock is held
+across the network or taken where `withIdentity`, the runner or the store's
+write queue could wait. Refused → nothing sent and nothing written; the next
+run re-resolves (recovering the newer generation from its own seal, or
+blocked). `sendSubmission` remains the one caller of the API's send (DB-J
+checks the source). **Assumption, outside the app's control:** another
+process changing these files in that same instant is not excluded; the next
+run's resolution catches it.
+
+**Evidence.** DB-A–DB-E RED first; DB-J's caller check passed, its
+final-check clause failed first; DB-K (a change queued to land right after
+the check) written for the boundary mutant — first written vacuously (the
+seal left in place correctly blocked the request) and fixed after the gate
+caught it. DB-F (restart), DB-G (isolation), DB-I (ordinary renewal) are
+guards. 10 new tests; `npm run check` exit 0 (API 293, mobile 1625, web
+186, DB 398, backup 12, build, smoke). 6 mutations — no final check,
+marker-only changes ignored, the check only before the identity step,
+fallback to the older generation, a gap between check and request, the
+sequence not re-checked — all killed. Not pushed.
+
+---
+
 ## 2026-10-17 — S6 retest: stale record over blocked recovery; explicit recovery outcomes
 
 **Retest of `3031ce2`:** the earlier recovery defects PASS; S6-status-lock
