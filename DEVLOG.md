@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-10-17 — S3–S4 security review FAIL: R1–R4 remediated (`0a94e47`)
+
+**Review.** The independent read-only review returned FAIL with four
+findings (FINDINGS.md, under the reviewer's labels; no F-numbers assigned,
+§19). Each was reproduced RED before any fix — R1: partial and undescribed
+"certified" checks accepted; R2: 54 receipts and 54 submissions under a cap
+of 50 when five requests passed the count together; R3: a receipt issued
+after a withdrawal committed, and a withdrawal dated 75 ms before the receipt
+it had waited for; R4: an uppercase id → 500 on receipts, and a different,
+unverified day on submissions.
+
+**Fixed.** R1 in the snapshot validator (whole certificates, readable defect
+descriptions; drafts unchanged) and the PDF (refusal; corrected defects kept
+in the summary). R2/R3 by one row lock on the driver's own membership
+(`membershipLock.ts`) under which receipts and submissions decide replay,
+cap, active state and write; the withdrawal takes the same lock first and is
+dated after it. R4 by one shared day-id schema normalising to lowercase. No
+database constraint was weakened; no migration.
+
+**Decision recorded:** `timesheet-pdf/1` was changed in place (R1's
+defect summary). That is allowed only because no PDF of that template has
+ever been produced — nothing calls the renderer. Once one has, a change is a
+new template version.
+
+**Evidence.** New: SN0–SN7, TP17–TP18, SR9–SR12 (SR9b/SR9c, SR10, SR12
+deterministic), TS19, TS19b, TS20. Existing fixtures that held 2-row
+"certified" checks — exactly R1's defect — now hold whole certificates.
+11 mutations, all killed (two survived a first pass and gained SR9c/TS19b).
+`npm run check` exit 0: API 292, mobile 1530, web 186, DB 393, backup 12,
+build and smoke start. Not pushed or deployed. The fixes need the
+reviewer's verification before S6.
+
+**Residual (not part of R1–R4, unchanged):** a submission's verification
+still uses the membership state read at its authorisation, so a withdrawal
+committing mid-request does not change that request's "received while
+active". The audit rule (D66: active when the server receives it) was left
+as decided.
+
+---
+
 ## 2026-10-17 — pushed and deployed: `9b29cfa`, `f199a46`, `240d157`
 
 CI `ci` and `e2e` succeeded on `240d157`; Railway deployment `afefe1e2`
