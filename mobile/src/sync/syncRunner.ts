@@ -89,8 +89,8 @@ async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, n
   for (const dayId of submissionDayIds(scope)) {
     try {
       let read = readSubmission(scope, dayId);
-      // Damaged, or gone while a request may have left: restored from its seal, never rebuilt.
-      if (read.kind !== "ok" && await recoverRecord(scope, dayId, now())) read = readSubmission(scope, dayId);
+      // Damaged, gone, or older than a generation that may have left: restored from its seal, never rebuilt.
+      if (await recoverRecord(scope, dayId, now())) read = readSubmission(scope, dayId);
       if (read.kind !== "ok") {
         // Still unreadable: kept, locked, never sent as a guess.
         if (read.kind === "unreadable") report.retryLater = true;

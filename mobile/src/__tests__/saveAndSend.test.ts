@@ -796,3 +796,167 @@ test("SR9. ISOLATION holds for markers and seals: another account's never lock, 
   expect(isDayLocked(OTHER, mine.id)).toBe(false);
   expect(sent).toEqual([]);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Independent review of S6 (2026-10-17): surviving evidence must never be
+// ignored — gaps between generations, a marker with no seal, a blank marker
+// ═══════════════════════════════════════════════════════════════════════════
+
+const sealPath = (dayId: string, generation: number) => new File(accountDirectoryOf(SCOPE), `${SUBMISSION_FILE_PREFIX}seal-${dayId}-g${String(generation)}.json`);
+const markerPath = (dayId: string, generation: number) => new File(accountDirectoryOf(SCOPE), `${SUBMISSION_FILE_PREFIX}seal-${dayId}-g${String(generation)}.sent.json`);
+
+/** A day whose generation 1 was REJECTED and whose generation 2 then went out with no answer. */
+async function secondGenerationUncertain(): Promise<{ day: CompletedShift; second: string }> {
+  server(refusal(400, "TIMESHEET_REJECTED"), OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE, "First");
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  const corrected = await correct(SCOPE, day, "Second");
+  if (corrected === null) throw new Error("the correction was refused");
+  await queued(SCOPE, corrected);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ generation: 2, uncertain: true });
+  jest.restoreAllMocks();
+  return { day, second: readSeal(SCOPE, day.id, 2)?.snapshotJson ?? "" };
+}
+
+test("RV1. (review) the record AND its seal lost, the sent-marker kept: the day stays LOCKED — no edit, no new queue, nothing sent — and says it needs checking", async () => {
+  server(OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  jest.restoreAllMocks();
+  liveFile(SCOPE, day.id).delete();
+  sealPath(day.id, 1).delete();
+  expect(markerPath(day.id, 1).exists).toBe(true);
+
+  const sent = server(accepted());
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  await expect(correct(SCOPE, day, "Changed")).rejects.toBeInstanceOf(TimesheetLockedError);
+  expect((await queueTimesheet(SCOPE, day.id)).kind).toBe("locked");
+  await runSync(SCOPE, identity);
+  expect(sent).toEqual([]);
+  expect(submissionStatusOf(SCOPE, day)).toMatchObject({ locked: true, canSend: false, actionNeeded: true });
+});
+
+test("RV2. (review) generation 2 in doubt, its record AND generation 1's seal lost: generation 2's surviving seal and marker are FOUND — the day stays locked and generation 2's bytes are replayed; generation 1 is never reused", async () => {
+  const { day, second } = await secondGenerationUncertain();
+  liveFile(SCOPE, day.id).delete();
+  sealPath(day.id, 1).delete();
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  const current = await readCompletedShift(SCOPE, day.id);
+  if (current === null) throw new Error("the day is gone");
+  await expect(correct(SCOPE, current, "Third", "corr-2")).rejects.toBeInstanceOf(TimesheetLockedError);
+  expect(await queueTimesheet(SCOPE, day.id)).toMatchObject({ kind: "queued", record: { generation: 2, uncertain: true } });
+
+  const sent = server(replayed("TS-GEN20001"));
+  await runSync(SCOPE, identity);
+  expect(snapshotBytes(sent[0])).toBe(second);
+  expect(readSeal(SCOPE, day.id, 1)).toBeNull();
+  expect(sealPath(day.id, 1).exists).toBe(false);
+});
+
+test("RV3. (review) a sent-marker damaged to valid but EMPTY JSON is still evidence: the day stays locked and is restored from its seal as uncertain", async () => {
+  server(OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  jest.restoreAllMocks();
+  liveFile(SCOPE, day.id).delete();
+  markerPath(day.id, 1).write("{}");
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  await expect(correct(SCOPE, day, "Changed")).rejects.toBeInstanceOf(TimesheetLockedError);
+  expect(await queueTimesheet(SCOPE, day.id)).toMatchObject({ kind: "queued", record: { generation: 1, uncertain: true } });
+});
+
+test("RV4. a generation number is NEVER reused: behind a gap (generation 1's seal lost) an orphan generation-2 seal is still seen — the next snapshot is generation 3, and every seal stays as it was", async () => {
+  server(refusal(400, "TIMESHEET_REJECTED"));
+  const day = await finishedDay(SCOPE, NORTHGATE, "First");
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  jest.restoreAllMocks();
+  // Generation 2: sealed, then the app stopped before its record — never sent.
+  const second = await correct(SCOPE, day, "Second");
+  if (second === null) throw new Error("the correction was refused");
+  failWriteMatching(/"state":"waiting"/);
+  expect((await queueTimesheet(SCOPE, day.id)).kind).toBe("failed");
+  jest.restoreAllMocks();
+  const orphan = readSeal(SCOPE, day.id, 2)?.snapshotJson;
+  expect(orphan).toContain("Second");
+  sealPath(day.id, 1).delete();
+
+  const third = await correct(SCOPE, second, "Third", "corr-2");
+  if (third === null) throw new Error("the correction was refused");
+  expect(await queued(SCOPE, third)).toMatchObject({ generation: 3 });
+  expect(readSeal(SCOPE, day.id, 2)?.snapshotJson).toBe(orphan);
+  expect(readSeal(SCOPE, day.id, 3)?.snapshotJson).toContain("Third");
+});
+
+test("RV5. (review) the STATUS agrees with the lock: a day whose record is gone but whose evidence survives is never shown as 'Not sent' or offered Save & Send", async () => {
+  const { day } = await secondGenerationUncertain();
+  liveFile(SCOPE, day.id).delete();
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  const status = submissionStatusOf(SCOPE, day);
+  expect(status).toMatchObject({ locked: true, canSend: false });
+  expect(status?.label).not.toBe("Not sent");
+});
+
+test("RV6. only a marker that EXPLICITLY names another account is set aside; everything else that cannot be read counts as evidence", async () => {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const marker = markerPath(day.id, 1);
+  marker.create({ overwrite: true });
+
+  marker.write(JSON.stringify({ ownerUserId: "someone_else", dayId: day.id, generation: 1 }));
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+  for (const damaged of ["{}", "[]", "null", "not json", JSON.stringify({ ownerUserId: SCOPE.userId })]) {
+    marker.write(damaged);
+    expect([damaged, isDayLocked(SCOPE, day.id)]).toEqual([damaged, true]);
+  }
+});
+
+test("RV7. a STALE record (it still says generation 1 was rejected) beside a sent-marker for generation 2: newer evidence wins — locked, generation 2 restored from its seal and replayed, never a new snapshot", async () => {
+  server(refusal(400, "TIMESHEET_REJECTED"), OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE, "First");
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  const stale = liveFile(SCOPE, day.id).textSync(); // generation 1, rejected
+  const corrected = await correct(SCOPE, day, "Second");
+  if (corrected === null) throw new Error("the correction was refused");
+  await queued(SCOPE, corrected);
+  await runSync(SCOPE, identity); // generation 2 left, no answer
+  jest.restoreAllMocks();
+  const second = readSeal(SCOPE, day.id, 2)?.snapshotJson;
+  liveFile(SCOPE, day.id).write(stale);
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(submissionStatusOf(SCOPE, day)).toMatchObject({ locked: true, canSend: false });
+  expect(await queueTimesheet(SCOPE, day.id)).toMatchObject({ kind: "queued", record: { generation: 2, uncertain: true } });
+  const sent = server(replayed("TS-GEN20002"));
+  await runSync(SCOPE, identity);
+  expect(snapshotBytes(sent[0])).toBe(second);
+});
+
+test("RV8. the same stale record, generation 2's seal ALSO lost: locked, nothing sent, and generation 2 is never written again with other bytes", async () => {
+  server(refusal(400, "TIMESHEET_REJECTED"), OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE, "First");
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  const stale = liveFile(SCOPE, day.id).textSync();
+  const corrected = await correct(SCOPE, day, "Second");
+  if (corrected === null) throw new Error("the correction was refused");
+  await queued(SCOPE, corrected);
+  await runSync(SCOPE, identity);
+  jest.restoreAllMocks();
+  liveFile(SCOPE, day.id).write(stale);
+  sealPath(day.id, 2).delete();
+
+  const sent = server(accepted());
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect((await queueTimesheet(SCOPE, day.id)).kind).toBe("locked");
+  await runSync(SCOPE, identity);
+  expect(sent).toEqual([]);
+  expect(sealPath(day.id, 2).exists).toBe(false);
+});

@@ -12,7 +12,7 @@ import type { AccountScope } from "../shift/accountScope";
 import { FAILURE } from "./submissionErrors";
 import { UNCONFIRMED } from "./submissionQueue";
 import { SEND_TIMESHEETS } from "./sending";
-import { SUBMISSION_STATE, isLocking, readSubmission, type TimesheetSubmissionRecord } from "./submissionStore";
+import { SUBMISSION_STATE, isDayLocked, isLocking, readSubmission, type TimesheetSubmissionRecord } from "./submissionStore";
 
 export interface SubmissionStatus {
   /** One line, for the list and the top of the detail. */
@@ -94,7 +94,9 @@ export function submissionStatusOf(scope: AccountScope, day: CompletedShift): Su
   } catch {
     read = { kind: "unreadable" };
   }
-  if (read.kind === "unreadable") {
+  // No record, but evidence that a request may have left (a sent-marker): what the lock says, the status says.
+  // The record cannot be read — or evidence the lock trusts says more than the record does: the status says what the lock says.
+  if (read.kind === "unreadable" || (isDayLocked(scope, day.id) && (read.kind === "none" || !isLocking(read.record.state)))) {
     return { label: "Action needed — being checked", detail: "This timesheet's sending record needs checking. It is kept as it is and nothing more is sent until it is.", actionNeeded: true, locked: true, canSend: false };
   }
   if (read.kind === "none") {

@@ -38,6 +38,7 @@ import { FAILURE, classifyFailure, outcomeUnknown, provesNothingKept, type Failu
 import {
   SUBMISSION_STATE,
   SubmissionSaveError,
+  highestEvidenceGeneration,
   highestSealGeneration,
   highestSentGeneration,
   isLocking,
@@ -108,9 +109,11 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
     const existing = readSubmission(scope, dayId);
     if (existing.kind === "unreadable") return { kind: "locked" };
     if (existing.kind === "ok" && isLocking(existing.record.state)) return { kind: "queued", record: existing.record };
-    if (existing.kind === "none" && highestSentGeneration(scope, dayId) !== null) {
-      // Its record is gone but a request may have left: restored from the seal — never a new snapshot.
-      const restored = restoreFromSeal(scope, dayId, now);
+    const sent = highestSentGeneration(scope, dayId);
+    if (sent !== null && (existing.kind === "none" || sent > existing.record.generation)) {
+      // Its record is gone — or older than a generation that may have left: restored from that
+      // generation's seal, never a new snapshot; with no readable seal, locked.
+      const restored = restoreFromSeal(scope, dayId, now, existing.kind === "ok" ? existing.record.seq : 0);
       return restored === null ? { kind: "locked" } : { kind: "queued", record: restored };
     }
 
@@ -119,7 +122,7 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
     // Only a snapshot the server proved it keeps nothing of is followed — as the NEXT generation,
     // beside every earlier seal, which is never replaced.
     const previous = existing.kind === "ok" ? existing.record : null;
-    const generation = Math.max(previous?.generation ?? 0, highestSealGeneration(scope, dayId)) + 1;
+    const generation = Math.max(previous?.generation ?? 0, highestEvidenceGeneration(scope, dayId)) + 1;
     const next = firstRecord(scope, dayId, built, now, previous, generation);
     try {
       // The seal first: no record — no lock, nothing sent — without its exact bytes.
@@ -148,7 +151,7 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
  * unknown, so the next run replays the same bytes and the server answers
  * with what it keeps. `null` when no readable seal is there to restore from.
  */
-function restoreFromSeal(scope: AccountScope, dayId: string, now: Date): TimesheetSubmissionRecord | null {
+function restoreFromSeal(scope: AccountScope, dayId: string, now: Date, afterSeq: number): TimesheetSubmissionRecord | null {
   const sent = highestSentGeneration(scope, dayId);
   const generation = sent ?? highestSealGeneration(scope, dayId);
   const seal = generation === 0 ? null : readSeal(scope, dayId, generation);
@@ -157,7 +160,7 @@ function restoreFromSeal(scope: AccountScope, dayId: string, now: Date): Timeshe
   const restored: TimesheetSubmissionRecord = {
     ownerUserId: scope.userId, dayId, membershipId: seal.membershipId, companyName: seal.companyName, revision: 1,
     snapshot, declaredVersion: seal.declaredVersion, generation: seal.generation,
-    seq: 1, queuedAt: now.toISOString(), state: sent === null ? SUBMISSION_STATE.waiting : SUBMISSION_STATE.sending, attempts: 0,
+    seq: afterSeq + 1, queuedAt: now.toISOString(), state: sent === null ? SUBMISSION_STATE.waiting : SUBMISSION_STATE.sending, attempts: 0,
     lastAttemptAt: null, result: null, problem: null, uncertain: sent !== null, earlier: [],
   };
   writeSubmission(scope, restored);
@@ -173,12 +176,13 @@ function restoreFromSeal(scope: AccountScope, dayId: string, now: Date): Timeshe
 export function recoverRecord(scope: AccountScope, dayId: string, now: Date = new Date()): Promise<boolean> {
   return withFinishedDay(scope, dayId, (): boolean => {
     const read = readSubmission(scope, dayId);
-    if (read.kind === "ok") return false;
-    if (read.kind === "none" && highestSentGeneration(scope, dayId) === null) return false;
-    const generation = highestSentGeneration(scope, dayId) ?? highestSealGeneration(scope, dayId);
+    const sent = highestSentGeneration(scope, dayId);
+    if (read.kind === "ok" && (sent === null || sent <= read.record.generation)) return false;
+    if (read.kind === "none" && sent === null) return false;
+    const generation = sent ?? highestSealGeneration(scope, dayId);
     if (generation === 0 || readSeal(scope, dayId, generation) === null) return false;
     if (read.kind === "unreadable") setAsideUnreadable(scope, dayId, now);
-    return restoreFromSeal(scope, dayId, now) !== null;
+    return restoreFromSeal(scope, dayId, now, read.kind === "ok" ? read.record.seq : 0) !== null;
   });
 }
 

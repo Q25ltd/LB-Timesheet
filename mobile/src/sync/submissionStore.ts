@@ -250,11 +250,12 @@ export function readSubmission(scope: AccountScope, dayId: string): ReadSubmissi
 export function isDayLocked(scope: AccountScope, dayId: string): boolean {
   if (!DAY_ID.test(dayId)) return false;
   const read = readSubmission(scope, dayId);
-  if (read.kind === "none") {
-    // The record is gone, but a request may have left: locked until restored (`submissionQueue.ts`).
-    return highestSentGeneration(scope, dayId) !== null;
-  }
-  return read.kind === "unreadable" || isLocking(read.record.state);
+  if (read.kind === "unreadable") return true;
+  const sent = highestSentGeneration(scope, dayId);
+  // The record is gone — or older than a generation that may have left — while a request may
+  // be on its way: newer evidence wins; locked until restored (`submissionQueue.ts`).
+  if (read.kind === "none") return sent !== null;
+  return isLocking(read.record.state) || (sent !== null && sent > read.record.generation);
 }
 
 /** Write a record: in full to its next copy, read back, then moved into place. */
@@ -376,11 +377,38 @@ export function writeSeal(scope: AccountScope, seal: SubmissionSeal): void {
   }
 }
 
-/** The highest generation with a seal FILE — readable or not: the next snapshot takes the one after it. */
+/**
+ * Every generation a day has ANY evidence of — a seal, a seal's staged copy,
+ * a sent-marker — found by listing the account's directory, never by counting
+ * up from 1: a lost seal leaves a gap, and evidence beyond it still counts
+ * (independent S6 review, 2026-10-17).
+ */
+function evidenceOf(scope: AccountScope, dayId: string): { seals: Set<number>; markers: Set<number>; all: Set<number> } {
+  const seals = new Set<number>();
+  const markers = new Set<number>();
+  const all = new Set<number>();
+  if (!DAY_ID.test(dayId)) return { seals, markers, all };
+  const name = new RegExp(`^${SUBMISSION_FILE_PREFIX}${SEAL_INFIX}${dayId.replace(/-/g, "\\-")}-g(\\d+)(\\.sent|\\.next)?\\.json$`);
+  for (const entry of accountDirectory(scope).list()) {
+    if (!(entry instanceof File)) continue;
+    const found = name.exec(entry.name);
+    const generation = Number(found?.[1] ?? "0");
+    if (found === null || !Number.isSafeInteger(generation) || generation < 1) continue;
+    all.add(generation);
+    if (found[2] === ".sent") markers.add(generation);
+    else if (found[2] === undefined) seals.add(generation);
+  }
+  return { seals, markers, all };
+}
+
+/** The highest generation with any evidence — seal, staged seal or marker: a new snapshot takes one past it, never one already used. */
+export function highestEvidenceGeneration(scope: AccountScope, dayId: string): number {
+  return Math.max(0, ...evidenceOf(scope, dayId).all);
+}
+
+/** The highest generation that has a seal file (readable or not) — `0` when none. */
 export function highestSealGeneration(scope: AccountScope, dayId: string): number {
-  let generation = 0;
-  while (sealFile(scope, dayId, generation + 1).exists) generation += 1;
-  return generation;
+  return Math.max(0, ...evidenceOf(scope, dayId).seals);
 }
 
 // ── The sent-marker: "a request of this generation may have left" ───────────
@@ -391,17 +419,18 @@ function sentFile(scope: AccountScope, dayId: string, generation: number): File 
 }
 
 /**
- * Whether a request of this generation may have left: a marker of THIS
- * account — or one that cannot be read (fail safe). Another account's marker
- * says nothing about this account's day.
+ * Whether a request of this generation may have left. CONSERVATIVE: a marker
+ * file is evidence unless it is readable and EXPLICITLY names another account
+ * — empty, malformed, partial or unreadable, it still says a request may have
+ * left (independent S6 review, 2026-10-17).
  */
 function mayHaveBeenSent(scope: AccountScope, dayId: string, generation: number): boolean {
   const file = sentFile(scope, dayId, generation);
   if (!file.exists) return false;
   try {
     const r = record(JSON.parse(file.textSync()));
-    if (r === null) return true;
-    return r["ownerUserId"] === scope.userId && r["dayId"] === dayId && r["generation"] === generation;
+    const owner = r?.["ownerUserId"];
+    return !(typeof owner === "string" && owner !== "" && owner !== scope.userId);
   } catch {
     return true;
   }
@@ -417,10 +446,8 @@ export function markSent(scope: AccountScope, dayId: string, generation: number)
   if (file.textSync() !== serialised) throw new Error("The sent-marker was not written in full");
 }
 
-/** The highest generation that may have been sent — `null` when none of this account's was. */
+/** The highest generation that may have been sent — whatever gaps lie below it; `null` when none. */
 export function highestSentGeneration(scope: AccountScope, dayId: string): number | null {
-  for (let generation = highestSealGeneration(scope, dayId); generation >= 1; generation -= 1) {
-    if (mayHaveBeenSent(scope, dayId, generation)) return generation;
-  }
-  return null;
+  const sent = [...evidenceOf(scope, dayId).markers].filter(generation => mayHaveBeenSent(scope, dayId, generation));
+  return sent.length === 0 ? null : Math.max(...sent);
 }

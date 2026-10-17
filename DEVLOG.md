@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-10-17 — independent S6 review: A PASS, B FAIL; recovery evidence re-remediated
+
+**Review result** (separate session, `ac22828` + `b26e5cd`): deploy with
+`SEND_TIMESHEETS = false` PASS; enable sending FAIL. Blocking: recovery
+evidence could survive and be ignored — seals and markers were found by
+counting up from generation 1, so a gap hid later ones; a marker with no seal
+was missed; a blank `{}` marker counted as "never sent". Low: the status said
+"Not sent" where the store was (rightly) locked. Confirmed by the author.
+
+**Fixed (local).** `evidenceOf` lists the account's directory for a day's
+seals, staged seals and markers (gaps tolerated). A marker counts unless it
+is readable and explicitly names another account. A new generation is one
+past ALL evidence. Found while fixing it: a STALE record (still saying an
+older generation was rejected) beside a newer sent-marker unlocked the day —
+newer evidence now wins in the lock, queueing, recovery and the status, and
+that generation is restored from its seal or the day stays locked.
+
+**Evidence.** RV1–RV8 (the reviewer's three probes RED first; RV4, RV7 and
+RV8 written after a mutant survived), 8 tests; `npm run check` exit 0 (API
+293, mobile 1609, web 186, DB 398, backup 12, build, smoke). 7 mutations: 6
+killed by the tests that exercise them; 1 equivalent — numbering past
+markers and staged seals as well as seals, kept as defence in depth: a
+counting marker beyond the record already locks the day, so numbering is
+never reached in that case.
+
+**Proposed, NOT built — the API compatibility guarantee B needs (owner chose
+"server capability + phone check"; to be approved in detail):** the API
+answers every `POST /driver/timesheets` with a header naming its submission
+contract (e.g. `X-LB-Submission-Contract: replay-first-1`). The phone records
+it per response and, before any request after an uncertain one — and before
+the first request of a record — requires it: a server without it is treated
+as "outcome unknown" (kept, locked, retried), never as a final answer. An API
+rollback past `b26e5cd` therefore pauses sending instead of misreading its
+400s. Deployment rule alongside it: the API is deployed and the header
+verified in production before any sending-enabled build is distributed.
+
+Next: independent retest of this fix; then, on approval, push `c27d06b`,
+`ac22828`, `b26e5cd` and this commit (switched off). Not pushed.
+
+---
+
 ## 2026-10-17 — S6 remediation: replay before validation; lost records stay locked
 
 **Root cause.** Two gaps the S6 author found while preparing the
