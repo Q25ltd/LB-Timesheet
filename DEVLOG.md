@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-10-17 — S6 pushed; compatible API deployed privately (sending off)
+
+**Independent review of `20c3b38`: PASS** — S6-replay CLOSED (`fc0330b`,
+docs only); S6-lost-record and S6-status-lock stay CLOSED. Pushed
+`4d0cc75..fc0330b` to `origin/main` — the seven S6 commits plus the
+docs-only `c27d06b` (the R1–R4 deployment record, their parent) and
+`fc0330b`. CI run 39066098952: `ci` and `e2e` success. **Railway**
+`c21a7569-9953-4aab-bc37-fe6b9aaf21f8` (`timesheets-api`, commit `fc0330b`):
+SUCCESS; pre-deploy `prisma migrate deploy` — 24 migrations, none pending; no
+ERROR lines in its logs. **Vercel** built `lb-timesheets-web` production
+`dpl_HVdhx2JTQutHXjFcdWqP1TsNYhj7` on the push (Ready; no `web/` change in
+these commits); `timesheets.logisticbay.com` 200.
+
+**Production checks (no token used, nothing written):** `/health` 200, db up.
+`GET /driver/capabilities` without a token, and with a malformed bearer → 401
+(an unknown `/driver/…` path → 404, so the route is live). `POST
+/driver/timesheets` without a token, and with a malformed bearer → 401 WITH
+`x-lb-submission-contract: replay-first-1` — the header survives Railway's
+edge; `/health` carries none. **Not checked here:** the advertised protocol
+with a real driver identity token, and refusal of a real tenant token — both
+need a signed-in production test account, which is the owner's to do.
+`SEND_TIMESHEETS = false` (`mobile/src/sync/sending.ts`); no timesheet was
+sent and no production record touched.
+
+---
+
 ## 2026-10-17 — S6 review of `2066ab3`: an incompatible 409 is not a conflict
 
 **Review:** capability, headers, pre-send protection, recovery, isolation and
