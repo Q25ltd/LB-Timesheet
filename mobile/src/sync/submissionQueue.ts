@@ -13,9 +13,16 @@
  * the record that locks the day (`submissionStore.ts`). Every send carries
  * the seal's bytes, and refuses to send when the record disagrees with them;
  * a damaged record is restored from its seal — never rebuilt from the day.
- * A seal with no record was never sent (a record is always `sending` before a
- * request), so it may be replaced; behind all of this the server refuses a
- * different snapshot under an id it already holds (409, kept locked).
+ * A seal is never replaced: a later snapshot is a later generation beside it.
+ * A record LOST whose generation has a sent-marker (written before any of its
+ * requests leaves) may have reached the server: the day stays locked and the
+ * record is restored from the seal and replayed. Behind all of this the
+ * server refuses a different snapshot under an id it already keeps (409).
+ *
+ * UNCERTAINTY. Once a transmission's outcome is unknown, the record is
+ * `uncertain`, and only the server's proof that it keeps nothing
+ * (TIMESHEET_REJECTED) may unlock the day; any other refusal keeps the
+ * frozen bytes and the lock, and the next replay settles it.
  *
  * SENDING marks the record `sending` before the request and writes the answer
  * after it. A crash, a kill or a lost answer in between leaves it `sending`:
@@ -27,11 +34,14 @@ import { sendTimesheet } from "../api/account";
 import type { ApiResult } from "../api/client";
 import { withFinishedDay } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
-import { FAILURE, classifyFailure, type Failure } from "./submissionErrors";
+import { FAILURE, classifyFailure, outcomeUnknown, provesNothingKept, type Failure } from "./submissionErrors";
 import {
   SUBMISSION_STATE,
   SubmissionSaveError,
+  highestSealGeneration,
+  highestSentGeneration,
   isLocking,
+  markSent,
   readSeal,
   readSubmission,
   sealExists,
@@ -62,7 +72,7 @@ export type QueueOutcome =
   /** The record could not be saved: nothing is queued and the day is as it was. */
   | { kind: "failed" };
 
-function firstRecord(scope: AccountScope, dayId: string, built: { snapshot: Record<string, unknown>; membershipId: string; companyName: string; declaredVersion: string }, now: Date, earlier: TimesheetSubmissionRecord | null): TimesheetSubmissionRecord {
+function firstRecord(scope: AccountScope, dayId: string, built: { snapshot: Record<string, unknown>; membershipId: string; companyName: string; declaredVersion: string }, now: Date, earlier: TimesheetSubmissionRecord | null, generation: number): TimesheetSubmissionRecord {
   return {
     ownerUserId: scope.userId,
     dayId,
@@ -71,7 +81,7 @@ function firstRecord(scope: AccountScope, dayId: string, built: { snapshot: Reco
     revision: 1,
     snapshot: built.snapshot,
     declaredVersion: built.declaredVersion,
-    generation: earlier === null ? 1 : earlier.generation + 1,
+    generation,
     seq: earlier === null ? 1 : earlier.seq + 1,
     queuedAt: now.toISOString(),
     state: SUBMISSION_STATE.waiting,
@@ -79,6 +89,7 @@ function firstRecord(scope: AccountScope, dayId: string, built: { snapshot: Reco
     lastAttemptAt: null,
     result: null,
     problem: null,
+    uncertain: false,
     earlier: earlier === null ? [] : [
       ...earlier.earlier,
       {
@@ -97,18 +108,25 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
     const existing = readSubmission(scope, dayId);
     if (existing.kind === "unreadable") return { kind: "locked" };
     if (existing.kind === "ok" && isLocking(existing.record.state)) return { kind: "queued", record: existing.record };
+    if (existing.kind === "none" && highestSentGeneration(scope, dayId) !== null) {
+      // Its record is gone but a request may have left: restored from the seal — never a new snapshot.
+      const restored = restoreFromSeal(scope, dayId, now);
+      return restored === null ? { kind: "locked" } : { kind: "queued", record: restored };
+    }
 
     const built = buildSnapshot(day);
     if (built.kind !== "ok") return built;
-    // Only a snapshot the server stored nothing for is ever replaced: the record above is not locking.
-    const next = firstRecord(scope, dayId, built, now, existing.kind === "ok" ? existing.record : null);
+    // Only a snapshot the server proved it keeps nothing of is followed — as the NEXT generation,
+    // beside every earlier seal, which is never replaced.
+    const previous = existing.kind === "ok" ? existing.record : null;
+    const generation = Math.max(previous?.generation ?? 0, highestSealGeneration(scope, dayId)) + 1;
+    const next = firstRecord(scope, dayId, built, now, previous, generation);
     try {
       // The seal first: no record — no lock, nothing sent — without its exact bytes.
-      // A seal of this generation with no record was never sent, so it may be replaced.
       writeSeal(scope, {
         ownerUserId: scope.userId, dayId, generation: next.generation, membershipId: next.membershipId,
         companyName: next.companyName, declaredVersion: next.declaredVersion, snapshotJson: JSON.stringify(next.snapshot),
-      }, true);
+      });
       writeSubmission(scope, next);
     } catch (error: unknown) {
       if (!(error instanceof SubmissionSaveError)) throw error;
@@ -123,29 +141,44 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
 }
 
 /**
- * A record that cannot be read — the disk damaged it. Its bytes are moved
- * aside, never lost, and the record is restored from its SEAL: the exact
- * snapshot frozen, the same identity and revision. Its outcome is unknown,
- * so it is restored as `sending`: the next run sends the same bytes again and
- * the server answers with what it holds. Nothing is rebuilt from the day.
- * With no readable seal the day stays locked and nothing is sent.
+ * Restore a day's record from its seal — the generation that may have been
+ * sent (a sent-marker), else the latest. The exact snapshot frozen, the same
+ * identity and revision; nothing is rebuilt from the day. A generation that
+ * may have been sent comes back `sending` and `uncertain`: its outcome is
+ * unknown, so the next run replays the same bytes and the server answers
+ * with what it keeps. `null` when no readable seal is there to restore from.
  */
-export function recoverUnreadable(scope: AccountScope, dayId: string, now: Date = new Date()): Promise<boolean> {
+function restoreFromSeal(scope: AccountScope, dayId: string, now: Date): TimesheetSubmissionRecord | null {
+  const sent = highestSentGeneration(scope, dayId);
+  const generation = sent ?? highestSealGeneration(scope, dayId);
+  const seal = generation === 0 ? null : readSeal(scope, dayId, generation);
+  if (seal === null) return null;
+  const snapshot: unknown = JSON.parse(seal.snapshotJson);
+  const restored: TimesheetSubmissionRecord = {
+    ownerUserId: scope.userId, dayId, membershipId: seal.membershipId, companyName: seal.companyName, revision: 1,
+    snapshot, declaredVersion: seal.declaredVersion, generation: seal.generation,
+    seq: 1, queuedAt: now.toISOString(), state: sent === null ? SUBMISSION_STATE.waiting : SUBMISSION_STATE.sending, attempts: 0,
+    lastAttemptAt: null, result: null, problem: null, uncertain: sent !== null, earlier: [],
+  };
+  writeSubmission(scope, restored);
+  return restored;
+}
+
+/**
+ * A record that cannot be read — the disk damaged it — or that is GONE while
+ * a request of it may have left. A damaged record's bytes are moved aside,
+ * never lost; the record is restored from its seal (`restoreFromSeal`). With
+ * no readable seal the day stays locked and nothing is sent.
+ */
+export function recoverRecord(scope: AccountScope, dayId: string, now: Date = new Date()): Promise<boolean> {
   return withFinishedDay(scope, dayId, (): boolean => {
-    if (readSubmission(scope, dayId).kind !== "unreadable") return false;
-    let generation = 0;
-    while (sealExists(scope, dayId, generation + 1)) generation += 1;
-    const seal = generation === 0 ? null : readSeal(scope, dayId, generation);
-    if (seal === null) return false;
-    setAsideUnreadable(scope, dayId, now);
-    const snapshot: unknown = JSON.parse(seal.snapshotJson);
-    writeSubmission(scope, {
-      ownerUserId: scope.userId, dayId, membershipId: seal.membershipId, companyName: seal.companyName, revision: 1,
-      snapshot, declaredVersion: seal.declaredVersion, generation: seal.generation,
-      seq: 1, queuedAt: now.toISOString(), state: SUBMISSION_STATE.sending, attempts: 0, lastAttemptAt: null,
-      result: null, problem: null, earlier: [],
-    });
-    return true;
+    const read = readSubmission(scope, dayId);
+    if (read.kind === "ok") return false;
+    if (read.kind === "none" && highestSentGeneration(scope, dayId) === null) return false;
+    const generation = highestSentGeneration(scope, dayId) ?? highestSealGeneration(scope, dayId);
+    if (generation === 0 || readSeal(scope, dayId, generation) === null) return false;
+    if (read.kind === "unreadable") setAsideUnreadable(scope, dayId, now);
+    return restoreFromSeal(scope, dayId, now) !== null;
   });
 }
 
@@ -162,12 +195,15 @@ function sealedBytes(scope: AccountScope, record: TimesheetSubmissionRecord): st
     writeSeal(scope, {
       ownerUserId: scope.userId, dayId: record.dayId, generation: record.generation, membershipId: record.membershipId,
       companyName: record.companyName, declaredVersion: record.declaredVersion, snapshotJson: frozen,
-    }, false);
+    });
   }
   const seal = readSeal(scope, record.dayId, record.generation);
   if (seal === null || seal.snapshotJson !== frozen || seal.membershipId !== record.membershipId) return null;
   return seal.snapshotJson;
 }
+
+/** The problem a refusal is recorded as while it proves nothing (`submissionStatus.ts` explains it). */
+export const UNCONFIRMED = "unconfirmed";
 
 const STATE_FOR: Record<Exclude<Failure, "session" | "temporary">, TimesheetSubmissionRecord["state"]> = {
   [FAILURE.invalid]:  SUBMISSION_STATE.needsCorrection,
@@ -195,8 +231,12 @@ export async function sendSubmission(scope: AccountScope, record: TimesheetSubmi
   const sealed: unknown = JSON.parse(bytes);
   const sending = advance(scope, record, {
     ...record, state: SUBMISSION_STATE.sending, attempts: record.attempts + 1, lastAttemptAt: at.toISOString(), seq: record.seq + 1,
+    // Found `sending`: the app stopped while a request may have been on its way.
+    uncertain: record.uncertain || record.state === SUBMISSION_STATE.sending,
   });
   if (sending === null) return null;
+  // Before the request may leave: from now on, "never sent" can no longer be assumed.
+  markSent(scope, sending.dayId, sending.generation);
 
   const result = await withIdentity(token => sendTimesheet(token, {
     membershipId:  sending.membershipId,
@@ -216,8 +256,15 @@ export async function sendSubmission(scope: AccountScope, record: TimesheetSubmi
     };
   } else {
     const failure = classifyFailure(result);
-    const state = failure === FAILURE.session || failure === FAILURE.temporary ? SUBMISSION_STATE.waiting : STATE_FOR[failure];
-    next = { ...sending, seq: sending.seq + 1, state, problem: problemOf(result, failure) };
+    const uncertain = sending.uncertain || outcomeUnknown(result);
+    const unlocking = failure === FAILURE.invalid || failure === FAILURE.refused;
+    if (unlocking && uncertain && !provesNothingKept(result)) {
+      // The server may keep an earlier transmission of these bytes: nothing is proven. Kept, locked, replayed.
+      next = { ...sending, seq: sending.seq + 1, uncertain, state: SUBMISSION_STATE.waiting, problem: { ...problemOf(result, failure), kind: UNCONFIRMED } };
+    } else {
+      const state = failure === FAILURE.session || failure === FAILURE.temporary ? SUBMISSION_STATE.waiting : STATE_FOR[failure];
+      next = { ...sending, seq: sending.seq + 1, uncertain, state, problem: problemOf(result, failure) };
+    }
   }
   // If this write fails the record stays `sending`: the next run replays it.
   return advance(scope, sending, next);

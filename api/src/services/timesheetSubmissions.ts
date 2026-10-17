@@ -17,7 +17,18 @@
  * IDEMPOTENT: one company timesheet per (membership, day id). The same
  * snapshot again (same SHA-256) is the same answer; a different one under
  * the same id is refused and changes nothing.
+ *
+ * ORDER (S6 remediation, 2026-10-17): authorise, THEN look for the day
+ * already kept, THEN validate. A day already kept is answered by its stored
+ * hash alone — a replay of the identical bytes gets what was kept even if
+ * today's rules would refuse those bytes (they were accepted under the rules
+ * of their day, and are immutable); different bytes are a conflict. Only a
+ * genuinely new day is validated, by today's rules, unweakened. A snapshot
+ * refused is answered `TIMESHEET_REJECTED`: issued only AFTER the server
+ * found nothing kept under this day id, so a phone may rely on it as proof
+ * that nothing exists — the one 400 it may unlock a sent day for.
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { IdentityContext } from "../lib/auth.js";
 import { ClientEventId } from "../lib/clientEventId.js";
@@ -25,7 +36,7 @@ import { AppError } from "../lib/errors.js";
 import { authorizeTimesheetSubmission, type SubmissionMembershipLookup } from "../lib/submissionAuthorization.js";
 import type { SubmissionContext } from "../lib/submissionContext.js";
 import { localCalendarDate } from "../lib/timezone.js";
-import { SNAPSHOT_SCHEMA_VERSION, TimesheetSnapshotV1, snapshotProblems, snapshotSha256, type TimesheetSnapshot } from "../lib/timesheetSnapshot.js";
+import { SNAPSHOT_SCHEMA_VERSION, TimesheetSnapshotV1, canonicalJson, snapshotProblems, snapshotSha256, type TimesheetSnapshot } from "../lib/timesheetSnapshot.js";
 import type { TimesheetVerification } from "../generated/enums.js";
 import type { SubmittedTimesheet, TimesheetSubmissionRepository } from "../repositories/timesheetSubmissionRepository.js";
 
@@ -68,16 +79,24 @@ function mismatch(): AppError {
   return new AppError(409, "This timesheet was already submitted with different content", "SUBMISSION_MISMATCH");
 }
 
-/** The snapshot's shape, then its meaning — each refusal said, never guessed around. */
+/**
+ * A NEW day's snapshot: its shape, then its meaning — each refusal said,
+ * never guessed around. Reached only once no day is kept under the id.
+ */
 function validSnapshot(raw: unknown, userId: string): TimesheetSnapshot {
   const parsed = TimesheetSnapshotV1.safeParse(raw);
   if (!parsed.success) {
     const details = parsed.error.issues.slice(0, 20).map(issue => ({ path: issue.path.join("."), message: issue.message }));
-    throw new AppError(400, "Invalid timesheet", "VALIDATION", details);
+    throw new AppError(400, "Invalid timesheet", "TIMESHEET_REJECTED", details);
   }
   const problems = snapshotProblems(parsed.data, userId);
-  if (problems.length > 0) throw new AppError(400, "The timesheet does not hold together", "TIMESHEET_INVALID", problems.slice(0, 20));
+  if (problems.length > 0) throw new AppError(400, "The timesheet does not hold together", "TIMESHEET_REJECTED", problems.slice(0, 20));
   return parsed.data;
+}
+
+/** The SHA-256 of what was sent, as sent — before anything reads it as a snapshot. A valid snapshot hashes the same parsed (no transforms). */
+function sentSha256(raw: unknown): string {
+  return createHash("sha256").update(canonicalJson(raw)).digest("hex");
 }
 
 /** How the start is evidenced — by the membership now, or a receipt the server received before the latest withdrawal. */
@@ -99,15 +118,19 @@ export async function submitTimesheet(
   submissions: TimesheetSubmissionRepository,
   now: Date = new Date(),
 ): Promise<SubmitResult> {
+  // 1. Who: the driver's own membership — before anything is looked up under it.
   const ctx = await authorizeTimesheetSubmission(identity, input.membershipId, memberships);
-  const snapshot = validSnapshot(input.snapshot, ctx.userId);
-  const hash = snapshotSha256(snapshot);
 
+  // 2. A day already kept under this id is answered by its stored hash — never re-validated.
   const earlier = await submissions.existing(ctx, input.clientEventId);
   if (earlier !== null) {
-    if (earlier.timesheet === null || earlier.payloadSha256 !== hash) throw mismatch();
+    if (earlier.timesheet === null || earlier.payloadSha256 !== sentSha256(input.snapshot)) throw mismatch();
     return { created: false, timesheet: viewOf(earlier.timesheet) };
   }
+
+  // 3. A new day: today's rules, in full.
+  const snapshot = validSnapshot(input.snapshot, ctx.userId);
+  const hash = snapshotSha256(snapshot);
 
   const { verification, receiptId } = await evidence(ctx, input.clientEventId, submissions);
   const facts = await submissions.facts(ctx);

@@ -25,6 +25,7 @@ import { readPdf } from "../pdfReader.js";
 import { AppError } from "../../lib/errors.js";
 import { submitTimesheet } from "../../services/timesheetSubmissions.js";
 import { submissionMembershipLookup } from "../../repositories/startReceiptRepository.js";
+import { authorizeTimesheetSubmission } from "../../lib/submissionAuthorization.js";
 import { timesheetSubmissionRepository } from "../../repositories/timesheetSubmissionRepository.js";
 
 const connectionString = process.env.DATABASE_URL;
@@ -457,6 +458,8 @@ test("TS14. every snapshot is validated by the server — shape and meaning — 
   for (const [why, envelope, snap] of cases) {
     const res = await submit(me, bodyFor(me, envelope, snap));
     assert.equal(res.statusCode, 400, `${why} — got ${res.statusCode}: ${res.raw.slice(0, 160)}`);
+    // The envelope is the route's (VALIDATION, before anything is looked up); a snapshot of a new day is TIMESHEET_REJECTED.
+    assert.equal(field(res.body, "code"), Object.keys(envelope).length > 0 ? "VALIDATION" : "TIMESHEET_REJECTED", why);
   }
   assert.equal(await prisma.shift.count({ where: { membershipId: me.membershipId } }), 0);
 });
@@ -666,7 +669,7 @@ test("TS21. (R1) an incomplete or undescribed CERTIFICATE is refused with nothin
   for (const [name, check] of cases) {
     const res = await submit(me, bodyFor(me, {}, withUnitCheck(me.userId, check)));
     assert.equal(res.statusCode, 400, `${name}: got ${res.raw}`);
-    assert.equal(field(res.body, "code"), "TIMESHEET_INVALID", name);
+    assert.equal(field(res.body, "code"), "TIMESHEET_REJECTED", name);
   }
   const stored = await recordsOf(me.membershipId);
   assert.deepEqual([stored.shifts.length, stored.submissions.length, stored.events.length, stored.deliveries.length], [0, 0, 0, 0], "a refused certificate left records");
@@ -687,4 +690,87 @@ test("TS22. (R1) what is TRUE still goes through: a whole certificate, a whole c
     const res = await submit(me, bodyFor(me, {}, withUnitCheck(me.userId, check)));
     assert.equal(res.statusCode, 201, `${name}: got ${res.raw}`);
   }
+});
+
+// ── Replay before validation (S6 remediation, 2026-10-17) ───────────────────
+
+/** A snapshot today's rules refuse — a certified check of two rows — as an older, looser server could have accepted it. */
+function acceptedUnderOlderRules(userId: string): Record<string, unknown> {
+  return withUnitCheck(userId, unitCheck(userId, { items: [
+    { key: "front-view", label: "Front view", section: null, result: "pass", note: null },
+    { key: "wipers", label: "Windscreen wipers", section: null, result: "fail", note: "Nearside blade split" },
+  ] }));
+}
+
+/**
+ * Store `snap` as revision 1 of a day exactly as an OLDER server with looser
+ * rules would have: through the S4 repository, which stores what it is given
+ * — today's validation lives in the service, above it.
+ */
+async function storedAsAccepted(me: { membershipId: string; userId: string; identityToken: string }, snap: Record<string, unknown>): Promise<{ clientEventId: string; reference: unknown }> {
+  const clientEventId = randomUUID();
+  const ctx = await authorizeTimesheetSubmission({ userId: me.userId, sessionId: "test" }, me.membershipId, submissionMembershipLookup(prisma));
+  const repository = timesheetSubmissionRepository(prisma);
+  const facts = await repository.facts(ctx);
+  const now = new Date();
+  const created = await repository.createRevisionOne(ctx, {
+    clientEventId, shiftDate: new Date("2026-10-11"), startedAt: new Date(START), endedAt: new Date(END), nightOut: true, notes: null,
+    declaredAt: new Date(END), declaredVersion: "v-older", schemaVersion: 1, payload: snap,
+    payloadSha256: createHash("sha256").update(canonicalJson(snap)).digest("hex"),
+    verification: "membership_active", receiptId: null, standing: "accepted", facts, now,
+  }, { max: 50, since: new Date(now.getTime() - 86_400_000) });
+  assert.equal(created.kind, "created");
+  return { clientEventId, reference: created.kind === "created" ? created.timesheet.reference : null };
+}
+
+test("TS23. accepted under OLDER rules, the answer lost, the rules tightened since: the IDENTICAL replay is answered with what was kept — never re-validated, never a 400", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const older = acceptedUnderOlderRules(me.userId);
+  const kept = await storedAsAccepted(me, older);
+  // Today's rules refuse it as a new submission...
+  const fresh = await submit(me, bodyFor(me, {}, older));
+  assert.equal(fresh.statusCode, 400, `got ${fresh.raw}`);
+
+  // ...but the day already kept is replayed, as it is.
+  const replay = await submit(me, bodyFor(me, { clientEventId: kept.clientEventId }, older));
+
+  assert.equal(replay.statusCode, 200, `got ${replay.raw}`);
+  assert.equal(field(view(replay), "reference"), kept.reference);
+  const { shifts, submissions } = await recordsOf(me.membershipId);
+  assert.deepEqual([shifts.length, submissions.length], [1, 1]);
+});
+
+test("TS24. a day already kept, sent again with DIFFERENT content — valid or not by today's rules — is a conflict (409), never a 400 and never a change", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const kept = await storedAsAccepted(me, acceptedUnderOlderRules(me.userId));
+  const unchanged = await recordsOf(me.membershipId);
+
+  const invalidDifferent = await submit(me, bodyFor(me, { clientEventId: kept.clientEventId }, { ...acceptedUnderOlderRules(me.userId), extra: true }));
+  const validDifferent = await submit(me, bodyFor(me, { clientEventId: kept.clientEventId }));
+
+  for (const res of [invalidDifferent, validDifferent]) {
+    assert.equal(res.statusCode, 409, `got ${res.raw}`);
+    assert.equal(field(res.body, "code"), "SUBMISSION_MISMATCH");
+  }
+  assert.deepEqual(await recordsOf(me.membershipId), unchanged);
+});
+
+test("TS25. a replay is never an ORACLE or a key: another driver — same day id, same bytes — gets the same 404 as for nobody's membership, and learns and changes nothing", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const other = await driverOf(admin);
+  const kept = await storedAsAccepted(me, acceptedUnderOlderRules(me.userId));
+  const unchanged = await recordsOf(me.membershipId);
+
+  const theirs = await submit(other, bodyFor(other, { membershipId: me.membershipId, clientEventId: kept.clientEventId }, acceptedUnderOlderRules(me.userId)));
+  const nobodys = await submit(other, bodyFor(other, { membershipId: "c" + "x".repeat(24), clientEventId: kept.clientEventId }, acceptedUnderOlderRules(me.userId)));
+
+  assert.equal(theirs.statusCode, 404);
+  assert.equal(theirs.raw, nobodys.raw);
+  // Their OWN membership, the same day id: a different day — nothing of mine.
+  const own = await submit(other, bodyFor(other, { clientEventId: kept.clientEventId }, acceptedUnderOlderRules(me.userId)));
+  assert.equal(own.statusCode, 400, `got ${own.raw}`);
+  assert.deepEqual(await recordsOf(me.membershipId), unchanged);
 });

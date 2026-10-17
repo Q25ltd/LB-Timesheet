@@ -22,7 +22,7 @@ import { readOpenShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { RECEIPT_STATE, listReceipts, queueStartReceipt, saveReceipt, type QueuedReceipt } from "./receiptQueue";
 import { SEND_TIMESHEETS } from "./sending";
-import { recoverUnreadable, sendSubmission, type WithIdentity } from "./submissionQueue";
+import { recoverRecord, sendSubmission, type WithIdentity } from "./submissionQueue";
 import { SUBMISSION_STATE, isSendable, readSubmission, submissionDayIds } from "./submissionStore";
 
 export type { WithIdentity } from "./submissionQueue";
@@ -89,7 +89,8 @@ async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, n
   for (const dayId of submissionDayIds(scope)) {
     try {
       let read = readSubmission(scope, dayId);
-      if (read.kind === "unreadable" && await recoverUnreadable(scope, dayId, now())) read = readSubmission(scope, dayId);
+      // Damaged, or gone while a request may have left: restored from its seal, never rebuilt.
+      if (read.kind !== "ok" && await recoverRecord(scope, dayId, now())) read = readSubmission(scope, dayId);
       if (read.kind !== "ok") {
         // Still unreadable: kept, locked, never sent as a guess.
         if (read.kind === "unreadable") report.retryLater = true;

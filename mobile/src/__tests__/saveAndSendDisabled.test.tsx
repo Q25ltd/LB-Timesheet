@@ -38,11 +38,11 @@ test("SD2. switched off: Save & Send queues nothing, the runner sends nothing â€
 
   // A genuine, sendable record and seal on disk (from a build with sending on) is still never sent.
   const snapshot = { schemaVersion: 1, day: {}, vehicles: [], trailers: [], declaration: {} };
-  writeSeal(SCOPE, { ownerUserId: SCOPE.userId, dayId: day.id, generation: 1, membershipId: "m_north", companyName: "Northgate Haulage", declaredVersion: "v", snapshotJson: JSON.stringify(snapshot) }, true);
+  writeSeal(SCOPE, { ownerUserId: SCOPE.userId, dayId: day.id, generation: 1, membershipId: "m_north", companyName: "Northgate Haulage", declaredVersion: "v", snapshotJson: JSON.stringify(snapshot) });
   writeSubmission(SCOPE, {
     ownerUserId: SCOPE.userId, dayId: day.id, membershipId: "m_north", companyName: "Northgate Haulage", revision: 1, snapshot,
     declaredVersion: "v", generation: 1, seq: 1, queuedAt: at(16).toISOString(), state: SUBMISSION_STATE.waiting,
-    attempts: 0, lastAttemptAt: null, result: null, problem: null, earlier: [],
+    attempts: 0, lastAttemptAt: null, result: null, problem: null, uncertain: false, earlier: [],
   });
   expect(readSubmission(SCOPE, day.id).kind).toBe("ok");
   await runSync(SCOPE, identity);

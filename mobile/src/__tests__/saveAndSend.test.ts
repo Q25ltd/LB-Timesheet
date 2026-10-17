@@ -22,7 +22,7 @@ import type { AccountScope } from "../shift/accountScope";
 import { SESSION_RENEWAL_UNAVAILABLE } from "../auth/sessionRenewal";
 import { runSync, type WithIdentity } from "../sync/syncRunner";
 import { queueTimesheet } from "../sync/submissionQueue";
-import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, type TimesheetSubmissionRecord } from "../sync/submissionStore";
+import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, writeSeal, type TimesheetSubmissionRecord } from "../sync/submissionStore";
 import { submissionStatusOf } from "../sync/submissionStatus";
 import { correctDeclared, finishDeclared } from "./declared";
 import { accountDirectoryOf, scopeFor } from "./testScope";
@@ -446,23 +446,25 @@ test("SI1. stopped while writing the SEAL: nothing queued — no record, no lock
   expect(sent).toEqual([]);
 });
 
-test("SI2. stopped AFTER the seal, before the record: the day is not locked and nothing was sent; corrected and sent again, the seal is replaced — the old bytes never travel", async () => {
+test("SI2. stopped AFTER the seal, before the record: nothing was sent and the day is not locked; corrected and sent again, it goes as the NEXT generation — the first seal is kept byte for byte, never overwritten, and its bytes never travel", async () => {
   const day = await finishedDay(SCOPE, NORTHGATE, "Before");
   failWriteMatching(/"state":"waiting"/);
 
   expect((await queueTimesheet(SCOPE, day.id)).kind).toBe("failed");
-  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toContain("Before");
+  const firstSeal = readSeal(SCOPE, day.id, 1)?.snapshotJson;
+  expect(firstSeal).toContain("Before");
   expect(isDayLocked(SCOPE, day.id)).toBe(false);
   jest.restoreAllMocks();
 
   const corrected = await correct(SCOPE, day, "After");
   if (corrected === null) throw new Error("the correction was refused");
   const sent = server(accepted());
-  await queued(SCOPE, corrected);
+  expect(await queued(SCOPE, corrected)).toMatchObject({ generation: 2 });
   await runSync(SCOPE, identity);
   expect(sent).toHaveLength(1);
   expect(snapshotBytes(sent[0])).toContain("After");
-  expect(snapshotBytes(sent[0])).toBe(readSeal(SCOPE, day.id, 1)?.snapshotJson);
+  expect(snapshotBytes(sent[0])).toBe(readSeal(SCOPE, day.id, 2)?.snapshotJson);
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(firstSeal);
 });
 
 test("SI3. stopped while VERIFYING the record's copy (read back short): nothing promoted, nothing locked", async () => {
@@ -647,4 +649,150 @@ test("SI12. even when the day ITSELF now reads differently (as a new app version
   expect(sent[1]?.raw).toBe(sent[0]?.raw);
   expect(sent[1]?.raw).toContain("Original notes");
   expect(sent[1]?.raw).not.toContain("Rewritten notes");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S6 remediation: a 400 after an uncertain transmission; a lost record
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("SR1. a 400 AFTER a transmission whose outcome is unknown proves nothing: the day stays LOCKED, the frozen bytes kept — and the next replay settles it", async () => {
+  const sent = server(OFFLINE, refusal(400, "TIMESHEET_INVALID"), replayed("TS-KEPT0002"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const frozen = (await queued(SCOPE, day)).snapshot;
+
+  await runSync(SCOPE, identity); // no answer: it may have reached the server
+  await runSync(SCOPE, identity); // a 400 for the same bytes — from a server that may hold them
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true, problem: { kind: "unconfirmed" } });
+  expect(submissionStatusOf(SCOPE, day)).toMatchObject({ label: "Waiting to confirm", locked: true, canSend: false });
+  await expect(correct(SCOPE, day, "x")).rejects.toBeInstanceOf(TimesheetLockedError);
+  expect(JSON.stringify(recordOf(SCOPE, day.id).snapshot)).toBe(JSON.stringify(frozen));
+
+  await runSync(SCOPE, identity); // the server replays what it kept
+  expect(sent).toHaveLength(3);
+  expect(new Set(sent.map(request => request.raw)).size).toBe(1);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-KEPT0002" } });
+});
+
+test.each([
+  ["400 VALIDATION", refusal(400, "VALIDATION")],
+  ["403 FORBIDDEN", refusal(403, "FORBIDDEN")],
+  ["404 NOT_FOUND", refusal(404, "NOT_FOUND")],
+  ["413 body too large", refusal(413, "FST_ERR_CTP_BODY_TOO_LARGE")],
+])("SR2. %s after an uncertain transmission does not unlock either", async (_name, answer) => {
+  server(refusal(503, "INTERNAL"), answer);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  await runSync(SCOPE, identity);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+test("SR3. TIMESHEET_REJECTED is the server's PROOF that nothing is kept under the id — even after an uncertain transmission it unlocks the day for correction", async () => {
+  server(OFFLINE, refusal(400, "TIMESHEET_REJECTED", [{ path: "", message: "The finish is before the start." }]));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  await runSync(SCOPE, identity);
+
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.needsCorrection);
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+  expect(await correct(SCOPE, day, "Corrected")).not.toBeNull();
+});
+
+test("SR4. a crash while SENDING is an unknown outcome too: a 400 that follows keeps the day locked", async () => {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  let die: (error: Error) => void = () => undefined;
+  jest.spyOn(global, "fetch").mockImplementation(() => new Promise<Response>((_resolve, reject) => { die = reject; }));
+  const dead = runSync(SCOPE, identity);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  jest.restoreAllMocks();
+
+  server(refusal(400, "VALIDATION"));
+  await runInFreshProcess("user_send_1");
+  die(new TypeError("gone"));
+  await dead;
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ uncertain: true });
+});
+
+test("SR5. a GENUINE rejection on the first, answered transmission still permits correction", async () => {
+  server(refusal(400, "VALIDATION"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.needsCorrection, uncertain: false });
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+});
+
+/** The record and its next copy are gone — the disk lost them; the seal (and any sent-marker) survived. */
+function loseRecord(scope: AccountScope, dayId: string): void {
+  liveFile(scope, dayId).delete();
+  const next = new File(accountDirectoryOf(scope), `${SUBMISSION_FILE_PREFIX}${dayId}.next.json`);
+  if (next.exists) next.delete();
+}
+
+test("SR6. the record LOST after a request may have left (its sent-marker survives): the day stays LOCKED, a new Save & Send makes NO new snapshot, the seal is untouched — and the runner restores it and replays the original bytes", async () => {
+  const sent = server(OFFLINE, replayed("TS-LOST0001"));
+  const day = await finishedDay(SCOPE, NORTHGATE, "Original");
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  const original = readSeal(SCOPE, day.id, 1)?.snapshotJson;
+
+  loseRecord(SCOPE, day.id);
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  await expect(correct(SCOPE, day, "Rewritten")).rejects.toBeInstanceOf(TimesheetLockedError);
+  const again = await queueTimesheet(SCOPE, day.id);
+  expect(again).toMatchObject({ kind: "queued", record: { generation: 1, uncertain: true } });
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(original);
+  expect(readSeal(SCOPE, day.id, 2)).toBeNull();
+
+  await runSync(SCOPE, identity);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-LOST0001" } });
+});
+
+test("SR7. the record lost with NO sent-marker (no request ever left): the day is not locked; sent again it is the NEXT generation — the first seal kept as it was", async () => {
+  server(accepted());
+  const day = await finishedDay(SCOPE, NORTHGATE, "Original");
+  await queued(SCOPE, day);
+  const original = readSeal(SCOPE, day.id, 1)?.snapshotJson;
+  loseRecord(SCOPE, day.id);
+
+  expect(isDayLocked(SCOPE, day.id)).toBe(false);
+  const corrected = await correct(SCOPE, day, "Rewritten");
+  if (corrected === null) throw new Error("the correction was refused");
+  expect(await queued(SCOPE, corrected)).toMatchObject({ generation: 2 });
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(original);
+});
+
+test("SR8. a SEAL is never overwritten — by anything", async () => {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const seal = readSeal(SCOPE, day.id, 1);
+  if (seal === null) throw new Error("no seal");
+  expect(() => { writeSeal(SCOPE, { ...seal, snapshotJson: "{\"other\":true}" }); }).toThrow();
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(seal.snapshotJson);
+});
+
+test("SR9. ISOLATION holds for markers and seals: another account's never lock, restore or send this one's days", async () => {
+  const sent = server(accepted());
+  const mine = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, mine);
+  server(OFFLINE);
+  await runSync(SCOPE, identity);
+  jest.restoreAllMocks();
+  // Driver 1's seal and marker copied into driver 2's directory.
+  for (const entry of accountDirectoryOf(SCOPE).list()) {
+    if (entry instanceof File && entry.name.includes("seal-")) entry.copy(new File(accountDirectoryOf(OTHER), entry.name));
+  }
+  const theirs = server(accepted());
+  await runSync(OTHER, identity);
+  expect(theirs).toEqual([]);
+  expect(isDayLocked(OTHER, mine.id)).toBe(false);
+  expect(sent).toEqual([]);
 });

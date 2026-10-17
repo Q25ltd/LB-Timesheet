@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-10-17 — S6 remediation: replay before validation; lost records stay locked
+
+**Root cause.** Two gaps the S6 author found while preparing the
+independent review (FINDINGS: S6-replay, S6-lost-record). (1) The S4 service
+validated before looking for the day already kept, so an identical replay
+after a rule change (R1 is one) got 400 — and the phone read every 400 as
+"nothing kept" and unlocked the day. (2) A seal without its record was read
+as "never sent" and could be replaced, which holds for an app stopped
+mid-write but not for a record lost to storage after a request left.
+
+**Server (behaviour change to S4).** Order is now authorise → kept day →
+hash comparison → replay 200 / conflict 409 → validate a NEW day only.
+Validation of new days is unchanged and unweakened; quotas, ownership and
+receipt evidence are unchanged. A refused new-day snapshot is now
+`TIMESHEET_REJECTED` (it was VALIDATION for its shape and TIMESHEET_INVALID
+for its meaning); the route's own envelope refusals stay VALIDATION. Not
+deployed: nothing outside this repository calls the endpoint yet.
+
+**Phone.** `uncertain` on a record once any transmission's outcome is
+unknown; then only `TIMESHEET_REJECTED` unlocks it, other refusals keep it
+locked and replay it ("Waiting to confirm"). Seals are never overwritten —
+a later snapshot is the next generation. A write-once, owner-checked
+sent-marker precedes each generation's first request; a lost record with a
+marker keeps the day locked and is restored from its seal and replayed.
+
+**Evidence.** RED first: TS23, TS24 (server); SR1–SR7 and the new SI2
+expectation (phone). TS25, SR8, SR9 pass both before and after — guards,
+not proof of the change. 17 new tests (3 DB, 14 mobile); `npm run check`
+exit 0 (API 293, mobile 1601, web 186, DB 398, backup 12, build, smoke).
+14 mutations on the new safeguards, all killed by the tests that exercise
+them. Committed separately from `ac22828`; not pushed. Next: the
+independent S6 review, in a separate session — not reviewed here.
+
+**Residual risks.** A rule change in the moments between two transmissions
+of the same new, invalid bytes could still differ — not a realistic window
+for one phone sending sequentially. A server older than this change answers
+VALIDATION / TIMESHEET_INVALID, which an uncertain phone now treats as
+unproven: such a day stays locked and is retried until a current server
+settles it. A seal AND its marker both lost is unrecoverable on the phone;
+the server's 409 still refuses a different snapshot.
+
+---
+
 ## 2026-10-17 — D66 stage S6: the phone's Save & Send (built, switched off until S8)
 
 **Built** (mobile only; no API or schema change). `src/sync/`:

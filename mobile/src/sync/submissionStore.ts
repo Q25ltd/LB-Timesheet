@@ -29,7 +29,14 @@
  * restored from its seal, byte for byte. Nothing is ever REBUILT from the day:
  * a later app version could build a different snapshot, and a different
  * snapshot must never travel under an identity already sent. When the seal
- * cannot be read either, the day stays locked and nothing is sent.
+ * cannot be read either, the day stays locked and nothing is sent. A seal is
+ * NEVER overwritten: a later snapshot is a later generation, beside it.
+ *
+ * THE SENT-MARKER. Before a generation's first request leaves, a write-once
+ * marker says so (`<prefix>seal-<day>-g<generation>.sent.json`). It is what
+ * tells "never transmitted" from "may have reached the server" when the
+ * record itself is gone: with a marker the day stays locked and is restored
+ * from its seal and replayed; with none, nothing was ever sent.
  */
 import { Directory, File } from "expo-file-system";
 import { accountDirectory, type AccountScope } from "../shift/accountScope";
@@ -121,6 +128,13 @@ export interface TimesheetSubmissionRecord {
   lastAttemptAt: string | null;
   result: SubmissionResult | null;
   problem: SubmissionProblem | null;
+  /**
+   * A transmission of THIS generation may have reached the server without
+   * the phone learning the outcome (no answer, a server fault, an answer it
+   * could not read, or the app stopped while sending). Never cleared: from
+   * then on only the server's proof that nothing is kept may unlock the day.
+   */
+  uncertain: boolean;
   earlier: EarlierSnapshot[];
 }
 
@@ -182,7 +196,7 @@ function asRecord(value: unknown, scope: AccountScope, dayId: string): Timesheet
     && typeof r["generation"] === "number" && r["generation"] >= 1 && typeof r["seq"] === "number"
     && typeof r["queuedAt"] === "string" && isState(r["state"]) && typeof r["attempts"] === "number"
     && (r["lastAttemptAt"] === null || typeof r["lastAttemptAt"] === "string")
-    && isResult(r["result"]) && isProblem(r["problem"]) && Array.isArray(r["earlier"]);
+    && isResult(r["result"]) && isProblem(r["problem"]) && typeof r["uncertain"] === "boolean" && Array.isArray(r["earlier"]);
   return ok ? (value as TimesheetSubmissionRecord) : null;
 }
 
@@ -236,7 +250,11 @@ export function readSubmission(scope: AccountScope, dayId: string): ReadSubmissi
 export function isDayLocked(scope: AccountScope, dayId: string): boolean {
   if (!DAY_ID.test(dayId)) return false;
   const read = readSubmission(scope, dayId);
-  return read.kind === "unreadable" || (read.kind === "ok" && isLocking(read.record.state));
+  if (read.kind === "none") {
+    // The record is gone, but a request may have left: locked until restored (`submissionQueue.ts`).
+    return highestSentGeneration(scope, dayId) !== null;
+  }
+  return read.kind === "unreadable" || isLocking(read.record.state);
 }
 
 /** Write a record: in full to its next copy, read back, then moved into place. */
@@ -280,7 +298,13 @@ export function submissionDayIds(scope: AccountScope): string[] {
   for (const entry of directory.list()) {
     if (!(entry instanceof File) || !entry.name.startsWith(SUBMISSION_FILE_PREFIX)) continue;
     const rest = entry.name.slice(SUBMISSION_FILE_PREFIX.length);
-    if (rest.startsWith(RECOVERY_INFIX) || rest.startsWith(SEAL_INFIX)) continue;
+    if (rest.startsWith(RECOVERY_INFIX)) continue;
+    if (rest.startsWith(SEAL_INFIX)) {
+      // A seal or a sent-marker: its day may have lost its record (`submissionQueue.ts` restores it).
+      const sealed = /^seal-(.+)-g\d+(?:\.sent)?\.json$/.exec(rest);
+      if (sealed?.[1] !== undefined && DAY_ID.test(sealed[1])) ids.add(sealed[1]);
+      continue;
+    }
     const id = rest.endsWith(NEXT_SUFFIX) ? rest.slice(0, -NEXT_SUFFIX.length) : rest.endsWith(".json") ? rest.slice(0, -".json".length) : null;
     if (id !== null && DAY_ID.test(id)) ids.add(id);
   }
@@ -333,12 +357,8 @@ export function sealExists(scope: AccountScope, dayId: string, generation: numbe
   return sealFile(scope, dayId, generation).exists;
 }
 
-/**
- * Write a generation's seal — verified, then moved into place WITHOUT
- * overwriting. `replaceUnsent` is set only when no record of that generation
- * exists: its snapshot was never queued, so never sent, and it may go.
- */
-export function writeSeal(scope: AccountScope, seal: SubmissionSeal, replaceUnsent: boolean): void {
+/** Write a generation's seal — verified, then moved into place. Never over an existing one. */
+export function writeSeal(scope: AccountScope, seal: SubmissionSeal): void {
   if (seal.ownerUserId !== scope.userId) throw new Error("Refusing to seal another account's submission");
   const serialised = JSON.stringify(seal);
   if (asSeal(JSON.parse(serialised), scope, seal.dayId, seal.generation) === null) throw new Error("Refusing a seal the reader would refuse");
@@ -348,13 +368,59 @@ export function writeSeal(scope: AccountScope, seal: SubmissionSeal, replaceUnse
     staged.create({ overwrite: true });
     staged.write(serialised);
     if (staged.textSync() !== serialised) throw new Error("The seal was not written in full");
-    if (target.exists) {
-      if (!replaceUnsent) throw new Error("Refusing to overwrite a seal");
-      target.delete();
-    }
+    if (target.exists) throw new Error("Refusing to overwrite a seal");
     staged.moveSync(target, { overwrite: false });
   } catch (error: unknown) {
     try { if (staged.exists) staged.delete(); } catch { /* an unverified copy is never read */ }
     throw new SubmissionSaveError(error);
   }
+}
+
+/** The highest generation with a seal FILE — readable or not: the next snapshot takes the one after it. */
+export function highestSealGeneration(scope: AccountScope, dayId: string): number {
+  let generation = 0;
+  while (sealFile(scope, dayId, generation + 1).exists) generation += 1;
+  return generation;
+}
+
+// ── The sent-marker: "a request of this generation may have left" ───────────
+
+function sentFile(scope: AccountScope, dayId: string, generation: number): File {
+  if (!DAY_ID.test(dayId) || !Number.isSafeInteger(generation) || generation < 1) throw new Error("Refusing a marker that cannot name a file");
+  return new File(accountDirectory(scope), `${SUBMISSION_FILE_PREFIX}${SEAL_INFIX}${dayId}-g${String(generation)}.sent.json`);
+}
+
+/**
+ * Whether a request of this generation may have left: a marker of THIS
+ * account — or one that cannot be read (fail safe). Another account's marker
+ * says nothing about this account's day.
+ */
+function mayHaveBeenSent(scope: AccountScope, dayId: string, generation: number): boolean {
+  const file = sentFile(scope, dayId, generation);
+  if (!file.exists) return false;
+  try {
+    const r = record(JSON.parse(file.textSync()));
+    if (r === null) return true;
+    return r["ownerUserId"] === scope.userId && r["dayId"] === dayId && r["generation"] === generation;
+  } catch {
+    return true;
+  }
+}
+
+/** Written ONCE, before a generation's first request leaves; never removed. Throws when it could not be — then nothing is sent. */
+export function markSent(scope: AccountScope, dayId: string, generation: number): void {
+  if (mayHaveBeenSent(scope, dayId, generation)) return;
+  const file = sentFile(scope, dayId, generation);
+  const serialised = JSON.stringify({ ownerUserId: scope.userId, dayId, generation });
+  file.create({ overwrite: true });
+  file.write(serialised);
+  if (file.textSync() !== serialised) throw new Error("The sent-marker was not written in full");
+}
+
+/** The highest generation that may have been sent — `null` when none of this account's was. */
+export function highestSentGeneration(scope: AccountScope, dayId: string): number | null {
+  for (let generation = highestSealGeneration(scope, dayId); generation >= 1; generation -= 1) {
+    if (mayHaveBeenSent(scope, dayId, generation)) return generation;
+  }
+  return null;
 }
