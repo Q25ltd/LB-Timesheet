@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-17 — R1–R4 remediation deployed (`4d0cc75`)
+
+Pushed `0a94e47`, `691e1b7`, `07e074e`, `4d0cc75`. CI `ci` and `e2e`
+success; Railway deployment `440ea2ee` (commit `4d0cc75`) SUCCESS. Pre-deploy
+`prisma migrate deploy`: 24 found, none pending (the remediation adds none).
+Read-only checks: `/health/live` and `/health` 200 (db up); unknown route 404
+envelope; both driver routes 401 without a token; no error-level runtime log.
+
+---
+
 ## 2026-10-17 — R1–R4 independently verified PASS; S6 gate open; one Low PDF fix
 
 The independent reviewer verified `0a94e47`…`07e074e`: R1–R4 PASS, "D66
