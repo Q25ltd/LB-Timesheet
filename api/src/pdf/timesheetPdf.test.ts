@@ -370,3 +370,20 @@ test("TP18. (R1) a defect a correction took back is NOT silently erased: the sum
   assert.ok(text.includes("Crack in screen"));
   assert.ok(/Corrected to Pass\s+at\s+06:00/.test(text), "no word of the correction that took it back");
 });
+
+test("TP19. the corrected-defect line pairs a result with the time of the SAME correction — Defect → Pass at 17:00 → N/A at 18:00 says Pass at 17:00, never N/A at 17:00", async () => {
+  const check = {
+    ...certifiedCheck(),
+    items: hgvRows({ "front-view": { result: "fail", note: "Crack in screen" } }),
+    revisions: [
+      { id: "r1", revisedAt: "2026-10-11T16:00:00.000Z", revisedBy: USER, items: hgvRows() },
+      { id: "r2", revisedAt: "2026-10-11T17:00:00.000Z", revisedBy: USER, items: hgvRows({ "front-view": { result: "na", note: null } }) },
+    ],
+  };
+  const { text } = await rendered(source(snapshot({ vehicles: [unitUse({ checks: [check] })], trailers: [] })));
+  assert.ok(/Corrected to Pass\s+at\s+17:00/.test(text), "the line did not name the correction that took the defect back");
+  assert.ok(!/Corrected to N\/A\s+at\s+17:00/.test(text), "a later result was paired with an earlier correction's time");
+  // The full history still tells the whole story.
+  assert.ok(text.includes("Front view: DEFECT (Crack in screen) → Pass"));
+  assert.ok(text.includes("Front view: Pass → N/A"));
+});

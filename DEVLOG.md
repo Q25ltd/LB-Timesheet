@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-10-17 — R1–R4 independently verified PASS; S6 gate open; one Low PDF fix
+
+The independent reviewer verified `0a94e47`…`07e074e`: R1–R4 PASS, "D66
+S6 may begin: YES", no blocking issue. Their evidence: 12 invalid certificate
+cases (vehicle and trailer) refused with zero headers, revisions, events and
+deliveries; both quota races 1 × 201 + 4 × 429 at exactly 50, replays at the
+cap answered; both withdrawal orders serialised (deactivate and remove);
+uppercase ids canonical; 24 mixed concurrent operations with no deadlock, one
+driver's lock never blocking another membership; an injected failure rolled
+back and released the lock.
+
+**Fixed (Low, raised by the verification):** the R1 defect summary paired a
+corrected defect's latest result with the earlier correction's time
+("Corrected to N/A at 17:00" for Defect → Pass 17:00 → N/A 18:00). It now
+takes both from the correction that took the defect back; TP19, RED first.
+`timesheet-pdf/1` still has produced no PDF anywhere, so it changes in place.
+
+**Noted from the reviewer's run:** one broad DB run cancelled the
+password-recovery file at its timeout; the targeted rerun passed. Not
+security evidence either way; local gates have not shown it.
+
+---
+
 ## 2026-10-17 — S3–S4 security review FAIL: R1–R4 remediated (`0a94e47`)
 
 **Review.** The independent read-only review returned FAIL with four

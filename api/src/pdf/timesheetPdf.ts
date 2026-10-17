@@ -497,14 +497,16 @@ function draw(canvas: Canvas, source: TimesheetPdfSource, snapshot: TimesheetSna
         }
       });
       for (const { item, takenBack } of reported.values()) {
+        // The correction that took it back: its OWN result and its own time —
+        // never a later result beside an earlier time. Later changes are in the history.
         const revision = check.revisions[takenBack];
-        const now = effective.find(entry => entry.key === item.key);
+        const then = revision?.items.find(entry => entry.key === item.key);
         corrected += 1;
         defects.push([
           { text: assetName(kind, index) },
           { text: item.label },
           { text: item.note ?? NONE },
-          { text: `Corrected to ${now === undefined ? "not answered" : resultText(now)} at ${revision === undefined ? NONE : when(context, revision.revisedAt)}`, color: MUTED },
+          { text: `Corrected to ${then === undefined ? "not answered" : resultText(then)} at ${revision === undefined ? NONE : when(context, revision.revisedAt)}`, color: MUTED },
         ]);
       }
     }
