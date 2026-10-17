@@ -55,7 +55,7 @@ import { confirmFinishAhead } from "./confirmFinishAhead";
 import { FinalDeclaration } from "./FinalDeclaration";
 import { TimesheetSummary } from "./TimesheetSummary";
 import { workingForLabel } from "./TimesheetRow";
-import { BackButton, Choice, FormSection, formStyles, keyboardSafeScrollProps } from "./vehicleForm";
+import { BackButton, Choice, FormSection, formStyles, keyboardSafeScrollProps, notesAudience } from "./vehicleForm";
 import { colors, spacing, typography } from "../theme/index";
 
 /** A day's facts as the form holds them. */
@@ -287,6 +287,9 @@ export function EditTimesheetScreen({ shift, memberships, now = () => new Date()
             style={[formStyles.input, styles.notes]}
             accessibilityLabel="Notes"
           />
+          {notesAudience(workingFor) === null ? null : (
+            <Text style={styles.audience} testID="edit-notes-audience">{notesAudience(workingFor)}</Text>
+          )}
         </FormSection>
 
         <Text style={styles.hint}>
@@ -315,5 +318,6 @@ const styles = StyleSheet.create({
   error: { ...typography.error, marginTop: -spacing.md, marginBottom: spacing.lg, marginLeft: spacing.xs },
   notes: { minHeight: 88, paddingTop: spacing.md, textAlignVertical: "top" },
   hint: { ...typography.helper, marginBottom: spacing.lg, marginHorizontal: spacing.xs },
+  audience: { ...typography.helper, marginTop: spacing.xs, marginHorizontal: spacing.xs },
   changed: { ...typography.helper, color: colors.danger, marginBottom: spacing.lg, marginHorizontal: spacing.xs },
 });

@@ -12,7 +12,9 @@ import { useRef, useState } from "react";
 import { View, Text, TextInput, ScrollView, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { BackButton, FormSection, formStyles, keyboardSafeScrollProps } from "./vehicleForm";
+import { REGISTRATION_MAX_LENGTH } from "../shift/localShift";
+import { TRAILER_NUMBER_MAX_LENGTH } from "../shift/trailer";
+import { BackButton, FormSection, formStyles, identifierTooLong, keyboardSafeScrollProps } from "./vehicleForm";
 import { colors, spacing, typography } from "../theme/index";
 
 interface CorrectNameScreenProps {
@@ -30,7 +32,8 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
   const [submitting, setSubmitting] = useState(false);
   const inFlight = useRef(false);
   const typed = value.trim().toUpperCase();
-  const canSave = typed !== "" && typed !== current;
+  const tooLong = identifierTooLong(value, asset === "vehicle" ? REGISTRATION_MAX_LENGTH : TRAILER_NUMBER_MAX_LENGTH);
+  const canSave = typed !== "" && typed !== current && tooLong === null;
   const title = asset === "vehicle" ? "Correct registration number" : "Correct trailer number";
 
   function save() {
@@ -63,6 +66,7 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
             style={formStyles.input}
             accessibilityLabel={asset === "vehicle" ? "Registration number" : "Trailer number"}
           />
+          {tooLong === null ? null : <Text style={styles.tooLong} testID="correct-name-too-long">{tooLong}</Text>}
         </FormSection>
         <Text style={styles.hint} testID="correct-name-hint">
           {`Recorded as ${current}. Only the ${asset === "vehicle" ? "registration number" : "number"} changes — checks, ${asset === "vehicle" ? "mileage and fuel" : "fridge diesel"} stay as they are.`}
@@ -77,4 +81,5 @@ export function CorrectNameScreen({ asset, current, onLeave, onSave }: CorrectNa
 
 const styles = StyleSheet.create({
   hint: { ...typography.helper, marginTop: -spacing.md, marginBottom: spacing.lg, marginHorizontal: spacing.xs },
+  tooLong: { ...typography.error, marginTop: spacing.xs, marginHorizontal: spacing.xs },
 });

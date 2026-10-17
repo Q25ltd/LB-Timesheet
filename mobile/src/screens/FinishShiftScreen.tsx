@@ -41,7 +41,7 @@ import { DayStepper, TimeOfDayFields, timeStyles, useTimeOfDay } from "./timeOfD
 import { confirmFinishAhead } from "./confirmFinishAhead";
 import { FinalDeclaration } from "./FinalDeclaration";
 import { TimesheetSummary } from "./TimesheetSummary";
-import { BackButton, Choice, FormSection, formStyles, keyboardSafeScrollProps, parseMileage } from "./vehicleForm";
+import { BackButton, Choice, FormSection, formStyles, keyboardSafeScrollProps, notesAudience, parseMileage } from "./vehicleForm";
 import { colors, spacing, typography } from "../theme/index";
 
 export interface FinishShiftScreenProps {
@@ -212,6 +212,9 @@ export function FinishShiftScreen({
             style={[formStyles.input, styles.notes]}
             accessibilityLabel="Notes"
           />
+          {notesAudience(shift.workingFor) === null ? null : (
+            <Text style={timeStyles.hint} testID="shift-notes-audience">{notesAudience(shift.workingFor)}</Text>
+          )}
         </FormSection>
         <View style={formStyles.action}>
           <PrimaryButton

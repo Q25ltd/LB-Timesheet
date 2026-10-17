@@ -48,6 +48,7 @@ import {
   type AccountMembership, type AccountUser, type AuthenticatedAccount,
 } from "../api/account";
 import type { ApiResult } from "../api/client";
+import { SESSION_RENEWAL_UNAVAILABLE } from "./sessionRenewal";
 
 export interface AuthenticatedState {
   user: AccountUser;
@@ -133,7 +134,7 @@ const NOT_SIGNED_IN: { kind: "api"; status: number; body: { error: string; code:
 
 /** What `withIdentity` answers when the identity could not be renewed for a reason other than refusal. */
 const RENEWAL_UNAVAILABLE: { kind: "network"; message: string; detail: null } = {
-  kind: "network", message: "The session could not be renewed", detail: null,
+  kind: "network", message: SESSION_RENEWAL_UNAVAILABLE, detail: null,
 };
 
 const NO_BIOMETRICS: BiometricCapability = { available: false, label: "biometrics" };

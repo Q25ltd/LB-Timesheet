@@ -10,14 +10,16 @@
  *
  * WHO THE TIMESHEET IS FOR DECIDES WHAT THE ACTION MEANS.
  *   Personal  "Save Timesheet" — saved on this phone; nothing is sent.
- *   Company   the action will be "Save & Send Timesheet" once sending exists.
- *             It does not yet (D41), so this says so plainly and saves on the
- *             phone only: nothing is sent, and nothing claims it was.
+ *   Company   "Save & Send Timesheet" while sending is switched on (D66 S6,
+ *             `sending.ts`): it is saved, queued to send and locked. Until
+ *             then (S8) this says so plainly and saves on the phone only:
+ *             nothing is sent, and nothing claims it was.
  */
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { PrimaryButton } from "../components/PrimaryButton";
 import type { WorkingContext } from "../shift/localShift";
 import { formStyles } from "./vehicleForm";
+import { SEND_TIMESHEETS } from "../sync/sending";
 import { colors, radius, spacing, typography } from "../theme/index";
 
 const DECLARATION = "I confirm all details are correct";
@@ -28,6 +30,12 @@ function finalMeaning(workingFor: WorkingContext): { text: string; action: strin
     return { text: "This saves your completed timesheet on this phone. Nothing is sent.", action: "Save Timesheet" };
   }
   const name = workingFor.companyName;
+  if (SEND_TIMESHEETS) {
+    return {
+      text: `This saves your timesheet and sends it to ${name}. Once it is sent it can't be changed on this phone.`,
+      action: "Save & Send Timesheet",
+    };
+  }
   return {
     text: `Sending timesheets to ${name} isn't available yet. This saves it on this phone only — nothing is sent to ${name}.`,
     action: "Save Timesheet — Not Sent",

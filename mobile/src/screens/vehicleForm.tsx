@@ -17,6 +17,7 @@
  */
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import {
+  REGISTRATION_MAX_LENGTH,
   VEHICLE_CLASSES,
   normalisePlate,
   type VehicleClass,
@@ -61,6 +62,27 @@ export function parseMileage(raw: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/**
+ * What a company's day's notes are (F-20, D66): company-facing — part of the
+ * timesheet the company receives. `null` on a Personal day, whose notes are
+ * the driver's own.
+ */
+export function notesAudience(workingFor: { kind: "personal" } | { kind: "company"; companyName: string }): string | null {
+  return workingFor.kind === "company"
+    ? `These notes are part of your timesheet for ${workingFor.companyName}, and ${workingFor.companyName} will see them.`
+    : null;
+}
+
+/**
+ * What to say when a typed identifier is over its limit — `null` when it is
+ * not. Counted as the store and the server count it, after trimming. Never
+ * cut: the driver shortens it, or it is not saved.
+ */
+export function identifierTooLong(typed: string, limit: number): string | null {
+  const length = typed.trim().length;
+  return length > limit ? `At most ${String(limit)} characters — this has ${String(length)}.` : null;
+}
+
 /** The three answers as a vehicle, or `null` while any of them is missing or invalid. */
 export function vehicleDetailsFrom(
   vehicleClass: VehicleClass | null,
@@ -71,7 +93,7 @@ export function vehicleDetailsFrom(
 ): VehicleDetails | null {
   const plate = normalisePlate(numberPlate);
   const reading = parseMileage(mileage);
-  if (vehicleClass === null || plate === "" || reading === null) return null;
+  if (vehicleClass === null || plate === "" || reading === null || plate.length > REGISTRATION_MAX_LENGTH) return null;
   const details = { vehicleClass, numberPlate: plate, startMileage: reading };
   return odometerUnit === null ? details : { ...details, odometerUnit };
 }
@@ -127,6 +149,9 @@ export function VehicleFields({
           style={formStyles.input}
           accessibilityLabel="Vehicle registration"
         />
+        {identifierTooLong(numberPlate, REGISTRATION_MAX_LENGTH) === null ? null : (
+          <Text style={styles.tooLong} testID="number-plate-too-long">{identifierTooLong(numberPlate, REGISTRATION_MAX_LENGTH)}</Text>
+        )}
       </FormSection>
 
       <FormSection label={odometerUnit === null ? "START MILEAGE" : `START MILEAGE (${distanceShort(odometerUnit).toUpperCase()})`}>
@@ -301,4 +326,5 @@ export const formStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   unitNote: { ...typography.helper, marginTop: spacing.xs, marginLeft: spacing.xs },
+  tooLong: { ...typography.error, marginTop: spacing.xs, marginHorizontal: spacing.xs },
 });

@@ -74,6 +74,7 @@ import { isDistanceUnit, type DistanceUnit, type VolumeUnit } from "./units";
 import { Directory, File, Paths } from "expo-file-system";
 import { AccountScope, AccountScopeError, assertLiveScope, accountDirectory } from "./accountScope";
 import { USE_ENDED_BY, asUseEndedBy, type UseEndedBy } from "./useEnd";
+import { isDayLocked } from "../sync/submissionStore";
 import { readUseId } from "./useIdentity";
 import { checklistFor, checklistItems, trailerChecklistFor, type Checklist } from "./checklists";
 import {
@@ -86,6 +87,7 @@ import {
   type VehicleFill,
 } from "./vehicleFill";
 import {
+  TRAILER_NUMBER_MAX_LENGTH,
   TRAILER_TYPE,
   TRAILER_TYPES,
   asEndedTrailer,
@@ -274,9 +276,27 @@ function checkedVehicle(details: VehicleDetails, refusal: string): VehicleDetail
   if (!known || numberPlate === "" || !Number.isSafeInteger(details.startMileage) || details.startMileage < 0) {
     throw new Error(refusal);
   }
+  if (numberPlate.length > REGISTRATION_MAX_LENGTH) throw new IdentifierTooLongError("registration", REGISTRATION_MAX_LENGTH);
   if (details.odometerUnit !== undefined && !isDistanceUnit(details.odometerUnit)) throw new Error(refusal);
   const checked = { vehicleClass: details.vehicleClass, numberPlate, startMileage: details.startMileage };
   return details.odometerUnit === undefined ? checked : { ...checked, odometerUnit: details.odometerUnit };
+}
+
+/**
+ * The longest vehicle registration a NEW entry may have (owner decision,
+ * 2026-10-17; D66 IDENTIFIER LENGTHS) — the same 16 the server holds a
+ * submitted day to, counted the same way (UTF-16 code units, `.length`). A
+ * plate already stored longer is NEVER truncated: it reads as it was, and the
+ * day says it needs correcting before it can be sent.
+ */
+export const REGISTRATION_MAX_LENGTH = 16;
+
+/** Thrown — writing nothing — for a new registration or trailer identifier over its limit. */
+export class IdentifierTooLongError extends Error {
+  constructor(readonly what: "registration" | "trailer", readonly limit: number) {
+    super(`Refusing a ${what} longer than ${String(limit)} characters`);
+    this.name = "IdentifierTooLongError";
+  }
 }
 
 /** Trimmed and upper-cased — how a plate is stored and shown, wherever it is typed. */
@@ -1392,6 +1412,7 @@ function checkedTrailer(details: TrailerDetails): TrailerDetails {
   if (trailerNumber === "" || !TRAILER_TYPES.some(entry => entry.id === details.trailerType)) {
     throw new Error("Refusing to store an invalid trailer");
   }
+  if (trailerNumber.length > TRAILER_NUMBER_MAX_LENGTH) throw new IdentifierTooLongError("trailer", TRAILER_NUMBER_MAX_LENGTH);
   return { trailerNumber, trailerType: details.trailerType };
 }
 
@@ -1776,6 +1797,7 @@ export function correctNumberPlate(scope: AccountScope, { shiftId, useId, usageS
   return queued(scope, async () => {
     const numberPlate = normalisePlate(value);
     if (numberPlate === "") throw new Error("Refusing an empty number plate");
+    if (numberPlate.length > REGISTRATION_MAX_LENGTH) throw new IdentifierTooLongError("registration", REGISTRATION_MAX_LENGTH);
     const open = await readDayOfUses(scope, shiftId);
     if (open === null) return null;
     const target = locateUsage(open, useId, usageState);
@@ -1794,6 +1816,7 @@ export function correctTrailerNumber(scope: AccountScope, { shiftId, useId, usag
   return queued(scope, async () => {
     const trailerNumber = normaliseTrailerNumber(value);
     if (trailerNumber === "") throw new Error("Refusing an empty trailer number");
+    if (trailerNumber.length > TRAILER_NUMBER_MAX_LENGTH) throw new IdentifierTooLongError("trailer", TRAILER_NUMBER_MAX_LENGTH);
     const open = await readDayOfUses(scope, shiftId);
     const target = locateTrailer(open, shiftId, useId, usageState);
     if (open === null || target === null) return null;
@@ -2609,8 +2632,22 @@ export function boundsProblem(day: Pick<CompletedShift, "previousVehicles" | "pr
 // Correcting and deleting a finished day (D39)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Thrown — writing nothing — for any change to a finished day that is locked
+ * because it was sent (D66): queued, on its way, held by the company, or with
+ * a record that cannot be read. Its record is the lock (`submissionStore.ts`).
+ */
+export class TimesheetLockedError extends Error {
+  constructor() {
+    super("Refusing to change a timesheet that has been sent");
+    this.name = "TimesheetLockedError";
+  }
+}
+
 /** Store a finished day's record through the verified write, after the reader has accepted it. */
 function saveCompleted(scope: AccountScope, shift: CompletedShift, options: { overwrite: boolean }): void {
+  // A sent day is never changed in place (D66): it is amended (S9).
+  if (isDayLocked(scope, shift.id)) throw new TimesheetLockedError();
   const serialised = JSON.stringify(shift);
   if (asCompletedShift(JSON.parse(serialised)) === null) throw new Error("Refusing to file a day the reader would refuse");
   const target = completedShiftFile(scope, shift.id);
@@ -2752,6 +2789,7 @@ export function deleteCompletedShift(scope: AccountScope, id: string): Promise<b
   return queued(scope, () => {
     const target = completedShiftFile(scope, id);
     if (target === null || readCompletedSync(scope, id) === null) return Promise.resolve(false);
+    if (isDayLocked(scope, id)) throw new TimesheetLockedError();
 
     const live = openShiftFile(scope);
     if (live.exists && isFinishedLeftover(scope, live)) {
@@ -2817,6 +2855,16 @@ function withStoredEnds<T extends { useId: string; endedAt: string; endedBy?: Us
 /** No value appears twice. */
 function distinct(values: readonly string[]): boolean {
   return new Set(values).size === values.length;
+}
+
+/**
+ * Run `work` on a finished day INSIDE the store's one write queue: no change
+ * to any day can run between its read and whatever `work` writes. How a day
+ * is queued to send (`submissionQueue.ts`) — so the version it freezes is the
+ * version on disk, and the lock its record makes cannot race an edit.
+ */
+export function withFinishedDay<T>(scope: AccountScope, id: string, work: (day: CompletedShift | null) => T): Promise<T> {
+  return queued(scope, () => Promise.resolve(work(readCompletedSync(scope, id))));
 }
 
 /** A finished day's uses, for the use screens: `null` when no readable day has the id. */

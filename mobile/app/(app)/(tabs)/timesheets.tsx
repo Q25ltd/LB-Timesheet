@@ -9,6 +9,7 @@ import { router, useFocusEffect } from "expo-router";
 import { TimesheetsScreen } from "../../../src/screens/TimesheetsScreen";
 import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShiftListing } from "../../../src/shift/localShift";
+import { submissionStatusOf } from "../../../src/sync/submissionStatus";
 
 export default function TimesheetsRoute() {
   const scope = useAccountScope();
@@ -30,6 +31,7 @@ export default function TimesheetsRoute() {
       listing={listing}
       // By the day's id — never its date, employer or place in the list.
       onOpen={id => { router.push({ pathname: "/timesheet", params: { id } }); }}
+      statusOf={shift => (scope === null ? null : submissionStatusOf(scope, shift))}
     />
   );
 }

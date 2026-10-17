@@ -21,13 +21,14 @@ owner acceptance remain outstanding for the rows marked below.
 verified report email, S3 start receipts/receipt sync and S4 the initial
 submission API are recorded as built below. S5, the PDF renderer, is
 implemented and tested (`f199a46`) but NOT integrated: nothing calls it yet —
-no download, no email. The app does not yet send finished timesheets: phone
-submission is S6, hidden until the company Timesheets surface (S8). Review
+no download, no email. S6, the phone's Save & Send, is implemented and tested
+but SWITCHED OFF (`SEND_TIMESHEETS = false`) until the company Timesheets
+surface exists (S8): the shipped app queues and sends nothing. Review
 decisions, amendments, driver server history and report delivery remain
 unfinished. The independent S3–S4 review returned **FAIL** (R1 High, R2
 Medium, R3 Low, R4 Low — FINDINGS.md); all four are remediated in `0a94e47`
 and `07e074e`, deployed privately with `4d0cc75`, and were **independently verified PASS
-on 2026-10-17 — the S6 gate is open** (S6 itself not started). See the D66
+on 2026-10-17 — the S6 gate was opened and S6 built** (not pushed). See the D66
 rows and DEVLOG.md.
 
 **Snapshot boundary:** the D67 reconciliation used committed `9b29cfa` and the
@@ -272,7 +273,7 @@ the one way to believe the gate passed when it did not.
 | Mileage start / end | 🔶 local odometer readings per exact vehicle use built with recorded/unknown units. D66 S4 validates readings in submitted snapshots; the phone does not yet send finished days. |
 | Fuel / AdBlue per unit | 🔶 local per-use events built, with historical measurement-unit preservation (D31, D66 S1); D66 S4 accepts fills in the immutable snapshot. Phone transmission and PDF/report delivery remain unfinished. O6 is settled by D66, not an open modelling choice. |
 | End shift, confirm, declaration/signature | 🔶 LOCAL only — Finish Shift with a review and the driver's declaration (D38–D40; Finish Shift row). No signature image; nothing reaches the company |
-| Submit | 🔶 server revision-one submission exists (D66 S4); 🔲 phone sending/queue/status/locking remains S6, hidden until company Timesheets S8. Start receipts are not finished-day submission. |
+| Submit | 🔶 server revision-one submission (D66 S4) and the phone's Save & Send (**D66 S6**, ✅ tests, not pushed, **switched off** until S8 — `mobile/src/sync/sending.ts`). S6: a declared company day is frozen into a **seal** (its exact snapshot bytes, written once) and a **record** in the account's own directory; the record is the lock (`submissionStore.ts`), queueing runs in the store's write queue, every write is verified then moved, a crash's verified next copy is promoted and an unverified one discarded; the runner marks `sending` before each request and sends only the seal's bytes (refusing when the record disagrees), so a lost answer is replayed, never re-snapshotted; a damaged record is restored FROM ITS SEAL, never rebuilt from the day — with no readable seal the day stays locked and nothing is sent. Failures classified by the server's code (`submissionErrors.ts`): session → kept and retried after sign-in; temporary or unrecognised → retried; 400 VALIDATION / TIMESHEET_INVALID / 413 → needs correction (unlocked); 403 / 404 → refused (unlocked); 409 SUBMISSION_MISMATCH → conflict (locked for S9). Status on the timesheet list, Home and detail; Save & Send on the detail; company notes labelled as seen by the company; registration ≤ 16 and trailer identifier ≤ 64 enforced at entry, existing longer values kept whole and blocked from sending until corrected. Personal days are never queued. 59 new tests; 24 mutations, 23 killed by the tests that exercise them, 1 equivalent. Not built: review states from the server (S8/S10), amendments (S9). Start receipts are not finished-day submission. |
 | Offline state + safe restart + duplicate protection | 🔶 local working day, account isolation and recovery exist; D66 S3 receipts survive restart/sign-out, and S4 proves API submission idempotency. The finished-day phone queue/reconciliation is still planned; no guaranteed background sending. |
 | Personal salary/hours diary (private) | 🔲 — genuinely new, no TMS source |
 | Personal history / statistics | 🔲 |
@@ -313,7 +314,7 @@ the one way to believe the gate passed when it did not.
 The stage-specific rows above retain their original evidence boundaries. S1's
 statement about sending measurement units describes that stage alone: S4 below
 now accepts units in validated server snapshots. The phone's finished-day send
-flow remains S6. Stage evidence is not a new ban on later D66 work.
+flow is S6 (built, switched off until S8). Stage evidence is not a new ban on later D66 work.
 
 ## Backend
 
@@ -354,7 +355,7 @@ flow remains S6. Stage evidence is not a new ban on later D66 work.
 | Session persistence foundation | ✅ user-owned Session without company authority; mobile/browser absolute lifetimes 90 days / 7 days, revocation and current/previous hashed refresh material with bounded grace. Refresh rotation and reuse detection are built, not merely stored columns; see the refresh row and AUTH.md. |
 | Refresh-token rotation + grace-window behaviour | ✅ — see the refresh row above. F-21 closed 2026-09-11 |
 | Multi-company driver memberships | ✅ registration/account-kind boundary and D63 verified-email invitation acceptance create real driver memberships, without seeding; multiple active companies are offered at Start Shift alongside Personal. Company A never learns of B. See D51, D63 and D65 rows. |
-| Shift submission pipeline | 🔶 initial API and atomic revision/standing/events/delivery enqueue built in D66 S4; the PDF renderer built in S5 (not integrated); phone submission, review/amendments/history and worker delivery remain unfinished. F-16 remains AUTHORIZED until its remaining worker guarantees are proven. |
+| Shift submission pipeline | 🔶 initial API and atomic revision/standing/events/delivery enqueue built in D66 S4; the PDF renderer built in S5 (not integrated); phone Save & Send built in S6 (switched off until S8); review/amendments/history and worker delivery remain unfinished. F-16 remains AUTHORIZED until its remaining worker guarantees are proven. |
 | PDF generation | ✅ tests / 🔶 deployed privately but not integrated (`240d157`, 2026-10-17; CI `ci` and `e2e` success; no route or worker calls it; R1 remediation `0a94e47`, deployed with `4d0cc75`: refuses a stored certificate that is not whole, and its defect summary keeps defects a correction took back — template `timesheet-pdf/1` changed before any PDF of it was ever produced) — **D66 stage S5** (`f199a46`, 2026-10-17): template `timesheet-pdf/1` in `api/src/pdf/` (`timesheetPdf.ts`, `textLayout.ts`, `fonts.ts`, `fontkitNullAnchor.ts`). Draws ONLY a stored `TimesheetSubmission`: the payload is re-validated (shape and meaning) and must still hash to the stored SHA-256, or it is refused. Reproducible to the byte (every date is the receipt time); the exact canonical snapshot is attached to the PDF. A4; shift, vehicles/trailers, readings in their recorded unit (never converted), fuel / AdBlue / DEF / fridge diesel, defects first, completed / draft / corrected checks with history, company-facing notes, totals per unit, declaration, reference, revision and standing. International text (owner Option B): Noto faces (OFL, `api/assets/fonts/`, ~20 MB) for Latin/Cyrillic/Greek, Arabic, Hebrew, Devanagari, Gurmukhi and CJK; bidi order via `bidi-js`, shaping via fontkit, per-cluster fallback; Han in the Japanese design, Korean when Hangul is present (owner, 2026-10-17); a character no face draws is a visible `[U+XXXX]` marker with a notice — never dropped. fontkit is pinned to 2.0.4 with a guarded fix for its NULL-anchor crash (foliojs/fontkit#367). **Not built:** any caller — company download (S8) and the delivery worker / email attachment (S7). Evidence: 33 unit tests (`textLayout`, `timesheetPdf`, `fontkitNullAnchor`), DB test TS18 (renders a really stored revision), 18 mutations all killed, `npm run check` exit 0 |
 | Email delivery + retry outbox | 🔶 S4 writes a delivery job transactionally for accepted revisions (queued or waiting for report-address confirmation). 🔲 report worker, PDF attachments, safe claims/retries and delivery feedback remain unfinished. Account email is already live through SES. |
 | Retention / deletion job | 🔲 — records are kept (D9); period + cancellation rule still open (O1) |

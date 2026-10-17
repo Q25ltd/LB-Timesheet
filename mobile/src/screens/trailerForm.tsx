@@ -7,20 +7,21 @@
  * through `trailerDetailsFrom`. Nothing else is asked: a trailer has no
  * mileage, and its checks are their own workflow.
  */
-import { View, TextInput } from "react-native";
+import { View, Text, TextInput, StyleSheet } from "react-native";
 import {
+  TRAILER_NUMBER_MAX_LENGTH,
   TRAILER_TYPES,
   normaliseTrailerNumber,
   type TrailerDetails,
   type TrailerType,
 } from "../shift/trailer";
-import { Choice, FormSection, formStyles } from "./vehicleForm";
-import { colors } from "../theme/index";
+import { Choice, FormSection, formStyles, identifierTooLong } from "./vehicleForm";
+import { colors, spacing, typography } from "../theme/index";
 
 /** The two answers as a trailer, or `null` while either is missing. */
 export function trailerDetailsFrom(trailerNumber: string, trailerType: TrailerType | null): TrailerDetails | null {
   const number = normaliseTrailerNumber(trailerNumber);
-  if (number === "" || trailerType === null) return null;
+  if (number === "" || trailerType === null || number.length > TRAILER_NUMBER_MAX_LENGTH) return null;
   return { trailerNumber: number, trailerType };
 }
 
@@ -46,6 +47,9 @@ export function TrailerFields({ trailerNumber, onTrailerNumber, trailerType, onT
           style={formStyles.input}
           accessibilityLabel="Trailer number"
         />
+        {identifierTooLong(trailerNumber, TRAILER_NUMBER_MAX_LENGTH) === null ? null : (
+          <Text style={styles.tooLong} testID="trailer-number-too-long">{identifierTooLong(trailerNumber, TRAILER_NUMBER_MAX_LENGTH)}</Text>
+        )}
       </FormSection>
 
       <FormSection label="TRAILER TYPE">
@@ -65,3 +69,7 @@ export function TrailerFields({ trailerNumber, onTrailerNumber, trailerType, onT
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  tooLong: { ...typography.error, marginTop: spacing.xs, marginHorizontal: spacing.xs },
+});

@@ -3,7 +3,7 @@
  * check's state are shown, wherever the app shows them — and what a failed
  * save tells the driver.
  */
-import { SafeSaveFailedError, VEHICLE_CLASSES, type VehicleClass } from "../shift/localShift";
+import { IdentifierTooLongError, SafeSaveFailedError, TimesheetLockedError, VEHICLE_CLASSES, type VehicleClass } from "../shift/localShift";
 import { checkStateOf, isCorrected, latestCheck, type VehicleCheck, type VehicleCheckState } from "../shift/vehicleCheck";
 import { fillAmount, type FillRecord, type FillSummary } from "../shift/vehicleFill";
 import { distanceShort, volumeShort, type DistanceUnit, type VolumeUnit } from "../shift/units";
@@ -208,5 +208,10 @@ export const SAFE_SAVE_FAILED = "The change could not be saved safely. Your shif
  * Decided by the error's type, never its text.
  */
 export function saveFailureMessage(error: unknown, usual: string = NOTHING_CHANGED): string {
+  if (error instanceof TimesheetLockedError) return LOCKED_BY_SENDING;
+  if (error instanceof IdentifierTooLongError) return `${error.what === "registration" ? "A registration" : "A trailer number"} can be at most ${String(error.limit)} characters. Nothing was changed.`;
   return error instanceof SafeSaveFailedError ? SAFE_SAVE_FAILED : usual;
 }
+
+/** A sent timesheet is changed by an amendment, never in place (D66). */
+const LOCKED_BY_SENDING = "This timesheet has been sent to the company, so it can't be changed here. Nothing was changed.";

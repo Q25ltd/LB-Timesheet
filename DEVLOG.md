@@ -4,6 +4,65 @@
 
 ---
 
+## 2026-10-17 — D66 stage S6: the phone's Save & Send (built, switched off until S8)
+
+**Built** (mobile only; no API or schema change). `src/sync/`:
+`submissionStore.ts` (records, seals, the lock), `timesheetSnapshot.ts`
+(the snapshot of a declared company day, deterministic), `submissionErrors.ts`
+(classification by structured code), `submissionQueue.ts` (queue, send,
+recover), `submissionStatus.ts` (the driver's words), `sendDeclaredDay.ts`,
+`sending.ts` (the switch, OFF). Wired into the existing sync runner after
+receipts; status on the timesheet list, Home and detail; Save & Send on the
+detail and after Finish / Edit; company notes labelled as seen by the
+company; identifier limits at entry (16 / 64) with visible messages.
+
+**Immutable payload — the owner's priority.** The first design rebuilt a
+damaged record from the finished day; it could not PROVE the rebuilt bytes
+equal what was sent (a later app version could build differently). Replaced
+by the seal: the frozen snapshot's exact bytes, written once before the
+record, never rewritten. Every send carries the seal's bytes and refuses
+when the record disagrees (SI11); a damaged record is restored from its seal
+as `sending` and replayed byte for byte (SI9), even when the day itself now
+reads differently (SI12); with no readable seal nothing is rebuilt — locked,
+nothing sent (SI10). A seal with no record was never sent (a record is
+always `sending` before a request) and may be replaced; the server's 409
+remains the backstop.
+
+**Interruptions tested at every boundary**: seal write (SI1), after the
+seal before the record (SI2), record verification (SI3), promotion (SI4),
+torn copies (SI5), the transition to sending (SI6), the request (SI7, in a
+fresh process), the server's acceptance before the answer is kept (SI8).
+Plus offline / reconnection, restart, lost answer, auth expiry and
+renewal-unavailable, withdrawal (pending review), account switching and a
+planted foreign record, several companies, Personal privacy, edit locking
+(correction, use edit, delete), 13 classification cases, safe correction
+after rejection (generation 2 under the same id, generation 1 kept),
+conflict, flag off (nothing queued or sent, even with a record on disk),
+limits 16/17 and 64/65, an existing over-long registration kept whole and
+blocked from sending.
+
+**Evidence.** 59 new mobile tests; `npm run check` exit 0 (API 293, mobile
+1589, web 186, DB 395, backup 12, build, smoke). 24 mutations: 23 killed,
+each by the test that exercises that safeguard (two first passed for the
+wrong reason — a test that planted an invalid record, and a mutant that
+crashed — and were corrected); 1 equivalent (sending the record's bytes
+instead of the seal's, after the two are proven identical).
+
+**Decisions inside the approved plan, for review:** a draft's defect
+description is sent trimmed (whitespace only; the server requires it);
+an unrecognised 4xx is retried with the frozen payload, never treated as
+final; a 404 NOT_FOUND unlocks the day (refused) — an older API without the
+route would answer the same, which the deployed API does not.
+
+**Residual risks.** Exclusivity of queueing against edits rests on the
+store's one write queue and synchronous file work; no test can force an
+interleaving inside it, so it is argued, not proven (SS16 checks the
+outcome either way). Sending is never exercised against a real device or
+the real API until S8 switches it on. The intermittent web test stays open.
+Not pushed; deployment documentation `c27d06b` preserved.
+
+---
+
 ## 2026-10-17 — R1–R4 remediation deployed (`4d0cc75`)
 
 Pushed `0a94e47`, `691e1b7`, `07e074e`, `4d0cc75`. CI `ci` and `e2e`

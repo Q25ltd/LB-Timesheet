@@ -294,3 +294,32 @@ function isStartReceipt(value: unknown): value is { receipt: StartReceipt } {
 export function sendStartReceipt(identityToken: string, body: { membershipId: string; clientEventId: string; startedAt: string }): Promise<ApiResult<{ receipt: StartReceipt }>> {
   return checked(postJson<unknown>("/driver/shift-receipts", body, identityToken), isStartReceipt);
 }
+
+/** What the server answers for a submitted timesheet (D66) — its reference, standing and its own time of receipt. */
+export interface SubmittedTimesheet {
+  reference: string;
+  revision: number;
+  standing: "accepted" | "pending_review";
+  verification: string;
+  receivedAt: string;
+}
+
+function isSubmittedTimesheet(value: unknown): value is { timesheet: SubmittedTimesheet } {
+  const r = record(value);
+  const t = r === null ? null : record(r["timesheet"]);
+  return t !== null && text(t["reference"]) && typeof t["revision"] === "number"
+    && (t["standing"] === "accepted" || t["standing"] === "pending_review") && text(t["verification"])
+    && text(t["receivedAt"]) && !Number.isNaN(Date.parse(String(t["receivedAt"])));
+}
+
+/**
+ * `POST /driver/timesheets` — the identity token; the membership named is
+ * checked against the account. The same day and snapshot again is a replay:
+ * the server answers with what it already kept.
+ */
+export function sendTimesheet(
+  identityToken: string,
+  body: { membershipId: string; clientEventId: string; revision: 1; snapshot: unknown },
+): Promise<ApiResult<{ timesheet: SubmittedTimesheet }>> {
+  return checked(postJson<unknown>("/driver/timesheets", body, identityToken), isSubmittedTimesheet);
+}

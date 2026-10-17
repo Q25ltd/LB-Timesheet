@@ -15,7 +15,8 @@ import { View, Text, StyleSheet } from "react-native";
 import { AppScreen } from "./AppScreen";
 import { ComingSoonCard } from "./ComingSoonCard";
 import { TimesheetRow } from "./TimesheetRow";
-import type { CompletedShiftListing } from "../shift/localShift";
+import type { CompletedShift, CompletedShiftListing } from "../shift/localShift";
+import type { SubmissionStatus } from "../sync/submissionStatus";
 import { colors, radius, spacing, typography } from "../theme/index";
 
 interface TimesheetsScreenProps {
@@ -23,9 +24,11 @@ interface TimesheetsScreenProps {
   listing: CompletedShiftListing | "loading" | "unreadable";
   /** Opens one finished day, by its id. */
   onOpen: (id: string) => void;
+  /** Each day's sending status (D66 S6) — none while sending is off. */
+  statusOf?: (shift: CompletedShift) => SubmissionStatus | null;
 }
 
-export function TimesheetsScreen({ listing, onOpen }: TimesheetsScreenProps) {
+export function TimesheetsScreen({ listing, onOpen, statusOf }: TimesheetsScreenProps) {
   return (
     <AppScreen title="Timesheets">
       {listing === "loading" ? null : listing === "unreadable" ? (
@@ -36,13 +39,13 @@ export function TimesheetsScreen({ listing, onOpen }: TimesheetsScreenProps) {
           body="Your finished timesheets are kept on this phone, and they couldn't be read just now. Try again in a moment."
         />
       ) : (
-        <History timesheets={listing.timesheets} unreadable={listing.unreadable} onOpen={onOpen} />
+        <History timesheets={listing.timesheets} unreadable={listing.unreadable} onOpen={onOpen} statusOf={statusOf} />
       )}
     </AppScreen>
   );
 }
 
-function History({ timesheets, unreadable, onOpen }: CompletedShiftListing & { onOpen: (id: string) => void }) {
+function History({ timesheets, unreadable, onOpen, statusOf }: CompletedShiftListing & { onOpen: (id: string) => void; statusOf: TimesheetsScreenProps["statusOf"] }) {
   return (
     <>
       {unreadable === 0 ? null : (
@@ -66,6 +69,7 @@ function History({ timesheets, unreadable, onOpen }: CompletedShiftListing & { o
               testID={`timesheet-${String(index)}`}
               last={index === timesheets.length - 1}
               onOpen={onOpen}
+              status={statusOf?.(shift) ?? null}
             />
           ))}
         </View>

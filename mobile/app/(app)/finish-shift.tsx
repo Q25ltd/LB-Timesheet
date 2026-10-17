@@ -11,8 +11,9 @@
  * nothing and the driver is sent back to the day (`finishOpenShift`). The
  * finish time starts at the moment the flow opened.
  *
- * Nothing is sent anywhere. For a company day the final action says so: it
- * becomes Save & Send only once sending exists (D41).
+ * For a company day the final action is Save & Send once sending is switched
+ * on (D66 S6, `sending.ts`): the finished day is then queued to send and
+ * locked. Until then nothing is sent, and the final action says so (D41).
  */
 import { useCallback, useState } from "react";
 import { Alert } from "react-native";
@@ -23,6 +24,7 @@ import { saveFailureMessage } from "../../src/screens/format";
 import { VIA_FINISH_REVIEW } from "../../src/navigation/useScreenDay";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useAccountScope } from "../../src/shift/useAccountScope";
+import { sendDeclaredDay } from "../../src/sync/sendDeclaredDay";
 import type { AccountScope } from "../../src/shift/accountScope";
 import {
   FinishTooEarlyError,
@@ -94,7 +96,8 @@ async function confirm(scope: AccountScope, shift: LocalShift, finish: ShiftFini
     // Finished — by this press, or by one just before it. Back to Home,
     // dismissing Active Shift and this flow so neither can be returned to;
     // Home re-reads the phone as it comes into view and lists the day.
-    Alert.alert("Shift finished", "Your timesheet is saved on this phone. Nothing has been sent.");
+    const notice = await sendDeclaredDay(scope, done);
+    Alert.alert("Shift finished", notice?.message ?? "Your timesheet is saved on this phone. Nothing has been sent.");
     router.dismissTo("/today");
   } catch (error: unknown) {
     Alert.alert("Couldn't finish the shift", failureMessage(error));

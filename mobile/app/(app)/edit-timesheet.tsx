@@ -28,6 +28,7 @@ import {
 } from "../../src/shift/localShift";
 import { REVIEW_TO_DECLARE } from "../../src/navigation/useScreenDay";
 import { requestSync } from "../../src/sync/SyncDriver";
+import { sendDeclaredDay } from "../../src/sync/sendDeclaredDay";
 import { queueStartReceipt } from "../../src/sync/receiptQueue";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
@@ -91,6 +92,11 @@ async function save(scope: AccountScope,
       Alert.alert("Nothing was saved", "This timesheet changed after you opened it, or is no longer on this phone. Open it again to make your correction.");
     } else {
       queueReceiptFor(scope, day);
+      // A re-declared company's day goes again — only when it was not sent, or the server stored nothing of it.
+      if (declared !== null) {
+        const notice = await sendDeclaredDay(scope, day);
+        if (notice !== null) Alert.alert("Correction saved", notice.message);
+      }
     }
     router.back();
   } catch (error: unknown) {

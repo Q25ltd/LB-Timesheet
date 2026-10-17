@@ -1,7 +1,7 @@
 /**
  * The phone's sync runner (D66) — sends what the account has queued, in the
- * foreground, when it can. Stage S3: start receipts. Later stages add
- * submissions to the same runner.
+ * foreground, when it can: start receipts (S3), then submitted timesheets
+ * (S6, `submissionQueue.ts`) — only while sending is switched on.
  *
  *   ONE run at a time per account: a second request while one is running
  *     waits for it, so nothing is sent twice by the phone itself.
@@ -18,12 +18,14 @@
  * app is open.
  */
 import { sendStartReceipt } from "../api/account";
-import type { ApiResult } from "../api/client";
 import { readOpenShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { RECEIPT_STATE, listReceipts, queueStartReceipt, saveReceipt, type QueuedReceipt } from "./receiptQueue";
+import { SEND_TIMESHEETS } from "./sending";
+import { recoverUnreadable, sendSubmission, type WithIdentity } from "./submissionQueue";
+import { SUBMISSION_STATE, isSendable, readSubmission, submissionDayIds } from "./submissionStore";
 
-export type WithIdentity = <T>(call: (identityToken: string) => Promise<ApiResult<T>>) => Promise<ApiResult<T>>;
+export type { WithIdentity } from "./submissionQueue";
 
 export interface SyncReport {
   /** Receipts the server answered with its receipt now. */
@@ -34,6 +36,12 @@ export interface SyncReport {
   waiting: number;
   /** Whether something could not be decided this time — a reason to try again later. */
   retryLater: boolean;
+  /** Timesheets the company now has (accepted, or waiting for its review). */
+  timesheetsSent: number;
+  /** Timesheets the server answered finally without taking: to correct, not ours, or a conflict. */
+  timesheetsHeld: number;
+  /** Timesheets still waiting after this run. */
+  timesheetsWaiting: number;
 }
 
 const running = new Map<string, Promise<SyncReport>>();
@@ -60,7 +68,7 @@ async function syncOnce(scope: AccountScope, withIdentity: WithIdentity, now: ()
     retryLater = true;
   }
 
-  const report: SyncReport = { received: 0, refused: 0, waiting: 0, retryLater };
+  const report: SyncReport = { received: 0, refused: 0, waiting: 0, retryLater, timesheetsSent: 0, timesheetsHeld: 0, timesheetsWaiting: 0 };
   for (const receipt of listReceipts(scope)) {
     if (receipt.state !== RECEIPT_STATE.waiting) continue;
     const outcome = await send(receipt, withIdentity, now());
@@ -72,7 +80,35 @@ async function syncOnce(scope: AccountScope, withIdentity: WithIdentity, now: ()
       report.retryLater = true;
     }
   }
+  if (SEND_TIMESHEETS) await sendTimesheets(scope, withIdentity, now, report);
   return report;
+}
+
+/** Every queued timesheet of this account, oldest day first — after the receipts that evidence them. */
+async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, now: () => Date, report: SyncReport): Promise<void> {
+  for (const dayId of submissionDayIds(scope)) {
+    try {
+      let read = readSubmission(scope, dayId);
+      if (read.kind === "unreadable" && await recoverUnreadable(scope, dayId, now())) read = readSubmission(scope, dayId);
+      if (read.kind !== "ok") {
+        // Still unreadable: kept, locked, never sent as a guess.
+        if (read.kind === "unreadable") report.retryLater = true;
+        continue;
+      }
+      if (!isSendable(read.record.state)) continue;
+      const after = await sendSubmission(scope, read.record, withIdentity, now());
+      const state = after?.state ?? SUBMISSION_STATE.sending;
+      if (state === SUBMISSION_STATE.submitted || state === SUBMISSION_STATE.pendingReview) report.timesheetsSent += 1;
+      else if (isSendable(state)) {
+        report.timesheetsWaiting += 1;
+        report.retryLater = true;
+      } else report.timesheetsHeld += 1;
+    } catch {
+      // This record could not be read or written now: it is kept as it is, and tried again.
+      report.timesheetsWaiting += 1;
+      report.retryLater = true;
+    }
+  }
 }
 
 /** What one attempt decides about one receipt. */

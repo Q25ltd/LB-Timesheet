@@ -22,11 +22,14 @@ import { REVIEW_TO_DECLARE } from "../../src/navigation/useScreenDay";
 import { DeleteUncertainError, USAGE_STATE, deleteCompletedShift, readCompletedShift, type CompletedShift } from "../../src/shift/localShift";
 import { useAccountScope } from "../../src/shift/useAccountScope";
 import type { AccountScope } from "../../src/shift/accountScope";
+import { submissionStatusOf } from "../../src/sync/submissionStatus";
+import { sendDeclaredDay } from "../../src/sync/sendDeclaredDay";
 
 export default function TimesheetRoute() {
   const scope = useAccountScope();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [shift, setShift] = useState<CompletedShift | null | "loading">("loading");
+  const [sending, setSending] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
@@ -43,6 +46,16 @@ export default function TimesheetRoute() {
   return (
     <TimesheetDetailScreen
       shift={shift}
+      status={shift === null ? null : submissionStatusOf(scope, shift)}
+      sending={sending}
+      onSend={() => {
+        if (shift === null || sending) return;
+        setSending(true);
+        void send(scope, shift).finally(() => {
+          setSending(false);
+          void readCompletedShift(scope, shift.id).then(setShift);
+        });
+      }}
       onBack={() => { router.back(); }}
       onEdit={() => { router.push({ pathname: "/edit-timesheet", params: { id: timesheet } }); }}
       onReview={() => { router.push({ pathname: "/edit-timesheet", params: { id: timesheet, review: REVIEW_TO_DECLARE } }); }}
@@ -53,6 +66,16 @@ export default function TimesheetRoute() {
       onTrailerCheck={trailer => { router.push({ pathname: "/trailer-check", params: { trailer, usageState: ended, timesheet } }); }}
     />
   );
+}
+
+/** Save & Send this declared day (D66 S6) — and say only what is true of the result. */
+async function send(scope: AccountScope, shift: CompletedShift): Promise<void> {
+  try {
+    const notice = await sendDeclaredDay(scope, shift);
+    if (notice !== null) Alert.alert(notice.queued ? "Timesheet queued" : "Not sent", notice.message);
+  } catch {
+    Alert.alert("Not sent", "This timesheet could not be queued to send. It is unchanged on this phone; try again.");
+  }
 }
 
 /** Delete exactly this day, and say only what is true of the result. */

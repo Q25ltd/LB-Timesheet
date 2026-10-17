@@ -13,14 +13,17 @@ import { effectiveFacts, type CompletedShift, type WorkingContext } from "../shi
 import { formatDate, formatDuration, formatShiftHours } from "./format";
 import { formStyles } from "./vehicleForm";
 import { colors, spacing } from "../theme/index";
+import type { SubmissionStatus } from "../sync/submissionStatus";
 
 /** Who a day was worked for, as the driver chose it — at Start Shift, or in a correction. */
 export function workingForLabel(workingFor: WorkingContext): string {
   return workingFor.kind === "personal" ? "Personal" : workingFor.companyName;
 }
 
-export function TimesheetRow({ shift, testID, last, onOpen }: {
+export function TimesheetRow({ shift, testID, last, onOpen, status = null }: {
   shift: CompletedShift; testID: string; last: boolean; onOpen: (id: string) => void;
+  /** Where its sending stands (D66 S6) — `null` while sending is off, and for a Personal day. */
+  status?: SubmissionStatus | null;
 }) {
   // What the day says NOW — its latest correction, or the day as finished.
   const facts = effectiveFacts(shift);
@@ -33,7 +36,7 @@ export function TimesheetRow({ shift, testID, last, onOpen }: {
       testID={testID}
       onPress={() => { onOpen(shift.id); }}
       accessibilityRole="button"
-      accessibilityLabel={`${date}, ${workingFor}, ${hours}, ${duration}${facts.nightOut ? ", night out" : ""}`}
+      accessibilityLabel={`${date}, ${workingFor}, ${hours}, ${duration}${facts.nightOut ? ", night out" : ""}${status === null ? "" : `, ${status.label}`}`}
       accessibilityHint="Opens this timesheet"
       style={({ pressed }) => [styles.row, last ? null : formStyles.optionDivided, pressed ? formStyles.optionPressed : null]}
     >
@@ -44,6 +47,9 @@ export function TimesheetRow({ shift, testID, last, onOpen }: {
         </View>
         <Text style={styles.workingFor} testID={`${testID}-working-for`}>{workingFor}</Text>
         <Text style={styles.hours} testID={`${testID}-hours`}>{`${hours} · ${duration}`}</Text>
+        {status === null ? null : (
+          <Text style={[styles.status, status.actionNeeded ? styles.statusAction : null]} testID={`${testID}-status`}>{status.label}</Text>
+        )}
       </View>
       <View style={styles.chevron} />
     </Pressable>
@@ -76,6 +82,8 @@ const styles = StyleSheet.create({
   // Wraps rather than truncates: a company is named in full (owner correction).
   workingFor: { fontSize: 15, color: colors.text },
   hours: { fontSize: 14, color: colors.textMuted },
+  status: { fontSize: 13, fontWeight: "700", color: colors.brandDark },
+  statusAction: { color: colors.danger },
   chevron: {
     width: 10,
     height: 10,

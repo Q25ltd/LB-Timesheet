@@ -66,6 +66,13 @@ export function towsTrailers(vehicleClass: VehicleClass): boolean {
  * Trimmed and upper-cased. Never format-validated: trailers carry fleet
  * numbers as often as road registrations.
  */
+/**
+ * The longest trailer identifier a NEW entry may have (owner decision,
+ * 2026-10-17): the server's 64, counted the same way. One already stored
+ * longer is never truncated — the day says it needs correcting before sending.
+ */
+export const TRAILER_NUMBER_MAX_LENGTH = 64;
+
 export function normaliseTrailerNumber(raw: string): string {
   return raw.trim().toUpperCase();
 }

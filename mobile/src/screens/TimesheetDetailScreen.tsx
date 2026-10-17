@@ -39,6 +39,8 @@ import { calendarDaysBetween, classLabel, finishedCheckLabel, formatClockTime, f
 import { workingForLabel } from "./TimesheetRow";
 import { BackButton, FormSection, formStyles } from "./vehicleForm";
 import { colors, spacing } from "../theme/index";
+import { PrimaryButton } from "../components/PrimaryButton";
+import type { SubmissionStatus } from "../sync/submissionStatus";
 
 interface TimesheetActions {
   /** Correct the day's own facts. */
@@ -55,15 +57,21 @@ interface TimesheetActions {
   onVehicleCheck: (useId: string) => void;
   /** Open, complete or correct one trailer use's check. */
   onTrailerCheck: (useId: string) => void;
+  /** Save & Send this declared day (D66 S6) — offered only when its status allows. */
+  onSend?: () => void;
 }
 
 interface TimesheetDetailScreenProps extends TimesheetActions {
   /** The finished day — or `null` when no readable day has the id asked for. */
   shift: CompletedShift | null;
   onBack: () => void;
+  /** Where its sending stands (D66 S6) — `null` while sending is off, and for a Personal day. */
+  status?: SubmissionStatus | null;
+  /** A Save & Send press is being handled. */
+  sending?: boolean;
 }
 
-export function TimesheetDetailScreen({ shift, onBack, ...actions }: TimesheetDetailScreenProps) {
+export function TimesheetDetailScreen({ shift, onBack, status = null, sending = false, ...actions }: TimesheetDetailScreenProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={formStyles.screen}>
@@ -82,7 +90,7 @@ export function TimesheetDetailScreen({ shift, onBack, ...actions }: TimesheetDe
           <Text style={styles.missing} testID="timesheet-missing">
             This timesheet can't be found on this phone.
           </Text>
-        ) : <Day shift={shift} actions={actions} />}
+        ) : <Day shift={shift} actions={actions} status={status} sending={sending} />}
       </ScrollView>
     </View>
   );
@@ -96,7 +104,9 @@ const UNCONFIRMED: Record<ReturnType<typeof declarationState>, string | null> = 
   changed: "This timesheet has changed since you confirmed it.",
 };
 
-function Day({ shift, actions }: { shift: CompletedShift; actions: TimesheetActions }) {
+function Day({ shift, actions, status, sending }: { shift: CompletedShift; actions: TimesheetActions; status: SubmissionStatus | null; sending: boolean }) {
+  // A sent day is not changed here (D66): it is locked until an amendment (S9).
+  const locked = status?.locked ?? false;
   // What the day says NOW; the day as finished stays in the record beneath it.
   const facts = effectiveFacts(shift);
   // Uses as the day says them now: one the finish ended ends at the finish (D40).
@@ -123,8 +133,17 @@ function Day({ shift, actions }: { shift: CompletedShift; actions: TimesheetActi
         <Row label="Night out" value={facts.nightOut ? "Yes" : "No"} testID="timesheet-night-out" last={facts.notes === null} />
         {facts.notes === null ? null : <Row label="Notes" value={facts.notes} testID="timesheet-notes" last stacked />}
       </FormSection>
+      {status === null ? null : (
+        <View style={[styles.status, status.actionNeeded ? styles.statusAction : null]} testID="timesheet-status">
+          <Text style={[styles.statusLabel, status.actionNeeded ? styles.statusActionText : null]} testID="timesheet-status-label">{status.label}</Text>
+          {status.detail === null ? null : <Text style={styles.statusDetail} testID="timesheet-status-detail">{status.detail}</Text>}
+          {status.canSend && actions.onSend !== undefined ? (
+            <PrimaryButton label="Save & Send Timesheet" onPress={actions.onSend} submitting={sending} testID="timesheet-send" />
+          ) : null}
+        </View>
+      )}
       {latest === undefined ? null : <History shift={shift} lastCorrectedAt={latest.correctedAt} />}
-      {unconfirmedText === null ? null : (
+      {unconfirmedText === null || locked ? null : (
         <View style={styles.unconfirmed}>
           <Text style={styles.unconfirmedText} testID="timesheet-unconfirmed">{unconfirmedText}</Text>
           <Pressable
@@ -161,7 +180,7 @@ function Day({ shift, actions }: { shift: CompletedShift; actions: TimesheetActi
         </FormSection>
       )}
 
-      <View style={styles.actions}>
+      {locked ? null : <View style={styles.actions}>
         <Pressable
           testID="timesheet-edit"
           onPress={actions.onEdit}
@@ -181,7 +200,7 @@ function Day({ shift, actions }: { shift: CompletedShift; actions: TimesheetActi
         >
           <Text style={styles.deleteLabel}>Delete Timesheet</Text>
         </Pressable>
-      </View>
+      </View>}
     </>
   );
 }
@@ -450,5 +469,10 @@ const styles = StyleSheet.create({
   draftHeading: { fontSize: 13, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.5, marginTop: spacing.xs },
   draftDefect: { fontSize: 15, color: colors.danger },
   unconfirmed: { gap: spacing.md, backgroundColor: colors.dangerBg, borderRadius: 12, padding: spacing.md, marginBottom: spacing.xl },
+  status: { gap: spacing.sm, backgroundColor: colors.surfaceAccent, borderRadius: 12, padding: spacing.md, marginBottom: spacing.xl },
+  statusAction: { backgroundColor: colors.dangerBg },
+  statusLabel: { fontSize: 15, fontWeight: "700", color: colors.brandDark },
+  statusActionText: { color: colors.danger },
+  statusDetail: { fontSize: 14, color: colors.text },
   unconfirmedText: { fontSize: 15, fontWeight: "600", color: colors.danger },
 });

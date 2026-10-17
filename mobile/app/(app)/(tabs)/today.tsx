@@ -16,6 +16,7 @@ import { Invitations } from "../../../src/components/Invitations";
 import { useAuth } from "../../../src/auth/AuthContext";
 import { useAccountScope } from "../../../src/shift/useAccountScope";
 import { listCompletedShifts, type CompletedShift } from "../../../src/shift/localShift";
+import { submissionStatusOf } from "../../../src/sync/submissionStatus";
 
 /** How many finished days Home previews; the Timesheets tab has them all. */
 const RECENT_TIMESHEETS = 3;
@@ -68,6 +69,7 @@ export default function TodayRoute() {
       recent={recent}
       // By the day's id — never its date, employer or place in the list.
       onOpenTimesheet={id => { router.push({ pathname: "/timesheet", params: { id } }); }}
+      statusOf={shift => (scope === null ? null : submissionStatusOf(scope, shift))}
       // D63: companies add drivers by email; invitations need it confirmed.
       // Once it is, the invitations are read again — a new key, a fresh read.
       notice={

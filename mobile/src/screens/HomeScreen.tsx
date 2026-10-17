@@ -48,6 +48,7 @@ import { BiometricOptIn } from "../components/BiometricOptIn";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { TimesheetRow } from "./TimesheetRow";
 import type { CompletedShift } from "../shift/localShift";
+import type { SubmissionStatus } from "../sync/submissionStatus";
 import { HOME_CARD_IMAGE } from "./homeCardImage";
 import { formatHomeDate, salutationFor } from "./homeGreeting";
 import type { AccountUser } from "../api/account";
@@ -71,6 +72,8 @@ interface HomeScreenProps {
   recent: readonly CompletedShift[] | "loading" | "unreadable";
   /** Opens one finished day, by its id. */
   onOpenTimesheet: (id: string) => void;
+  /** Each day's sending status (D66 S6) — none while sending is off. */
+  statusOf?: (shift: CompletedShift) => SubmissionStatus | null;
   /** Something the driver should act on — the email confirmation card (D63) — shown between the date and the shift card. */
   notice?: ReactNode;
 }
@@ -91,7 +94,7 @@ function initialsOf(user: AccountUser): string {
 }
 
 export function HomeScreen({
-  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift, recent, onOpenTimesheet, notice,
+  user, biometrics, biometricUnlockEnabled, onEnableBiometrics, onOpenAccount, onStartShift, recent, onOpenTimesheet, notice, statusOf,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
 
@@ -212,6 +215,7 @@ export function HomeScreen({
                 testID={`recent-timesheet-${String(index)}`}
                 last={index === recent.length - 1}
                 onOpen={onOpenTimesheet}
+                status={statusOf?.(shift) ?? null}
               />
             ))}
           </View>
