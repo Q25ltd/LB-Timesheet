@@ -22,8 +22,8 @@ import { readOpenShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { RECEIPT_STATE, listReceipts, queueStartReceipt, saveReceipt, type QueuedReceipt } from "./receiptQueue";
 import { SEND_TIMESHEETS } from "./sending";
-import { recoverRecord, sendSubmission, type WithIdentity } from "./submissionQueue";
-import { SUBMISSION_STATE, isSendable, readSubmission, submissionDayIds } from "./submissionStore";
+import { resolveSubmission, sendSubmission, type WithIdentity } from "./submissionQueue";
+import { SUBMISSION_STATE, isSendable, submissionDayIds } from "./submissionStore";
 
 export type { WithIdentity } from "./submissionQueue";
 
@@ -88,16 +88,16 @@ async function syncOnce(scope: AccountScope, withIdentity: WithIdentity, now: ()
 async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, now: () => Date, report: SyncReport): Promise<void> {
   for (const dayId of submissionDayIds(scope)) {
     try {
-      let read = readSubmission(scope, dayId);
-      // Damaged, gone, or older than a generation that may have left: restored from its seal, never rebuilt.
-      if (await recoverRecord(scope, dayId, now())) read = readSubmission(scope, dayId);
-      if (read.kind !== "ok") {
-        // Still unreadable: kept, locked, never sent as a guess.
-        if (read.kind === "unreadable") report.retryLater = true;
+      // Only a record the recovery layer verified may be sent — never one it could not vouch for.
+      const resolution = await resolveSubmission(scope, dayId, now());
+      if (resolution.kind === "nothing") continue;
+      if (resolution.kind === "blocked") {
+        // Newer evidence without its seal: locked, and nothing of this day is sent — not an older generation.
+        report.timesheetsHeld += 1;
         continue;
       }
-      if (!isSendable(read.record.state)) continue;
-      const after = await sendSubmission(scope, read.record, withIdentity, now());
+      if (!isSendable(resolution.submission.record.state)) continue;
+      const after = await sendSubmission(scope, resolution.submission, withIdentity, now());
       const state = after?.state ?? SUBMISSION_STATE.sending;
       if (state === SUBMISSION_STATE.submitted || state === SUBMISSION_STATE.pendingReview) report.timesheetsSent += 1;
       else if (isSendable(state)) {

@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-10-17 — S6 retest: stale record over blocked recovery; explicit recovery outcomes
+
+**Retest of `3031ce2`:** the earlier recovery defects PASS; S6-status-lock
+CLOSED. One Medium remained (S6-lost-record stays OPEN): with a stale
+generation-1 waiting record over a generation-2 sent-marker whose seal was
+missing or damaged, recovery failed and the runner sent generation 1 —
+`recoverRecord` returned the same `false` for "nothing to recover" and
+"recovery blocked", and the runner then used the record it had read. And
+`queueTimesheet` returned an older locking record before looking at newer
+evidence.
+
+**Design.** `resolveDay` (inside the store's write queue) returns one of
+nothing / current / recovered / blocked. The newest generation that may have
+been sent is authoritative; a stale record is never a candidate; recovery
+uses only that generation's own seal — missing or unreadable is BLOCKED,
+never an older generation and never the day. `sendSubmission` takes only a
+`VerifiedSubmission` — a class with a private field, so only the resolver
+can make one; the runner (the one dispatch entry point, also after a
+restart) sends only `current` or `recovered`, and counts `blocked` as held.
+`queueTimesheet` resolves first; blocked is "locked" and no generation is
+made. The status follows newer evidence over a stale record.
+
+**Evidence.** RT-A, RT-B, RT-C/F, RT-D, RT-E RED first; RT-C2 (runner
+recovers without queueing) passed before and after — a guard. 6 new tests;
+`npm run check` exit 0 (API 293, mobile 1615, web 186, DB 398, backup 12,
+build, smoke). 6 mutations — blocked answered with the record on disk, the
+runner falling back to the stale record, the queue's early return, newer
+evidence ignored, an older generation's seal substituted, the status
+ignoring newer evidence — all killed by the tests that exercise them.
+Not pushed. Next: independent retest of this defect only.
+
+---
+
 ## 2026-10-17 — independent S6 review: A PASS, B FAIL; recovery evidence re-remediated
 
 **Review result** (separate session, `ac22828` + `b26e5cd`): deploy with

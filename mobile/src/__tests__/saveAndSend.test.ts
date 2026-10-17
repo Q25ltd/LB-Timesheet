@@ -960,3 +960,109 @@ test("RV8. the same stale record, generation 2's seal ALSO lost: locked, nothing
   expect(sent).toEqual([]);
   expect(sealPath(day.id, 2).exists).toBe(false);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Independent retest of S6 (2026-10-17): a STALE locking record must never
+// stand in for newer evidence — not in the runner, not in the queue
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generation 1 queued (its WAITING record kept aside), rejected; the day
+ * corrected; generation 2 sent with no answer; then the old generation-1
+ * WAITING record put back in place of the current one.
+ */
+async function staleFirstOverUncertainSecond(): Promise<{ day: CompletedShift; second: string }> {
+  server(refusal(400, "TIMESHEET_REJECTED"), OFFLINE);
+  const day = await finishedDay(SCOPE, NORTHGATE, "First");
+  await queued(SCOPE, day);
+  const staleWaiting = liveFile(SCOPE, day.id).textSync();
+  await runSync(SCOPE, identity);
+  const corrected = await correct(SCOPE, day, "Second");
+  if (corrected === null) throw new Error("the correction was refused");
+  await queued(SCOPE, corrected);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ generation: 2, uncertain: true });
+  jest.restoreAllMocks();
+  const second = readSeal(SCOPE, day.id, 2)?.snapshotJson ?? "";
+  liveFile(SCOPE, day.id).write(staleWaiting);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ generation: 1, state: SUBMISSION_STATE.waiting });
+  return { day, second };
+}
+
+test("RT-A. stale generation-1 WAITING record, generation 2's seal MISSING, its marker kept: recovery is blocked — ZERO requests, the day locked, the status says so", async () => {
+  const { day } = await staleFirstOverUncertainSecond();
+  sealPath(day.id, 2).delete();
+  const sent = server(accepted());
+
+  await runSync(SCOPE, identity);
+
+  expect(sent).toEqual([]);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(submissionStatusOf(SCOPE, day)).toMatchObject({ label: "Action needed — being checked", locked: true, canSend: false });
+});
+
+test("RT-B. the same with generation 2's seal DAMAGED: blocked — zero requests, never generation 1 instead", async () => {
+  const { day } = await staleFirstOverUncertainSecond();
+  sealPath(day.id, 2).write("{ damaged");
+  const sent = server(accepted());
+
+  await runSync(SCOPE, identity);
+
+  expect(sent).toEqual([]);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+test("RT-C/F. stale generation-1 LOCKING record, generation 2's seal and marker intact: queueing recovers GENERATION 2 — never answers with the stale record — and only generation 2's exact sealed bytes are sent", async () => {
+  const { day, second } = await staleFirstOverUncertainSecond();
+
+  expect(await queueTimesheet(SCOPE, day.id)).toMatchObject({ kind: "queued", record: { generation: 2, uncertain: true } });
+
+  const sent = server(replayed("TS-GEN20003"));
+  await runSync(SCOPE, identity);
+  expect(sent).toHaveLength(1);
+  expect(snapshotBytes(sent[0])).toBe(second);
+  expect(snapshotBytes(sent[0])).toContain("Second");
+});
+
+test("RT-C2. the RUNNER, with no queueing first, recovers generation 2 from the stale record and sends only its sealed bytes", async () => {
+  const { day, second } = await staleFirstOverUncertainSecond();
+  const sent = server(replayed("TS-GEN20004"));
+
+  await runSync(SCOPE, identity);
+
+  expect(sent).toHaveLength(1);
+  expect(snapshotBytes(sent[0])).toBe(second);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ generation: 2, state: SUBMISSION_STATE.submitted });
+});
+
+test("RT-D. queueTimesheet() called directly over a stale record with generation 2's seal missing: LOCKED — no generation 3, no reuse of 1 or 2, nothing written", async () => {
+  const { day } = await staleFirstOverUncertainSecond();
+  sealPath(day.id, 2).delete();
+  const before = accountDirectoryOf(SCOPE).list().map(entry => entry.name).sort();
+
+  expect((await queueTimesheet(SCOPE, day.id)).kind).toBe("locked");
+
+  expect(readSeal(SCOPE, day.id, 3)).toBeNull();
+  expect(sealPath(day.id, 2).exists).toBe(false);
+  expect(accountDirectoryOf(SCOPE).list().map(entry => entry.name).sort()).toEqual(before);
+  await expect(correct(SCOPE, (await readCompletedShift(SCOPE, day.id)) ?? day, "Third", "corr-2")).rejects.toBeInstanceOf(TimesheetLockedError);
+});
+
+test("RT-E. after a RESTART, with the stale record and newer evidence on disk: blocked sends nothing; recoverable sends only generation 2", async () => {
+  const { day, second } = await staleFirstOverUncertainSecond();
+  const sealTwo = sealPath(day.id, 2).textSync();
+  sealPath(day.id, 2).delete();
+
+  const blocked = server(accepted());
+  await runInFreshProcess("user_send_1");
+  expect(blocked).toEqual([]);
+  jest.restoreAllMocks();
+
+  // The seal comes back intact (restored from a backup, say): only generation 2 goes.
+  sealPath(day.id, 2).create({ overwrite: true });
+  sealPath(day.id, 2).write(sealTwo);
+  const sent = server(replayed("TS-GEN20005"));
+  await runInFreshProcess("user_send_1");
+  expect(sent).toHaveLength(1);
+  expect(snapshotBytes(sent[0])).toBe(second);
+});

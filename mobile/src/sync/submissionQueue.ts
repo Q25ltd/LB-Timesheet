@@ -106,22 +106,18 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
   return withFinishedDay(scope, dayId, (day): QueueOutcome => {
     if (!SEND_TIMESHEETS) return { kind: "disabled" };
     if (day === null) return { kind: "missing" };
-    const existing = readSubmission(scope, dayId);
-    if (existing.kind === "unreadable") return { kind: "locked" };
-    if (existing.kind === "ok" && isLocking(existing.record.state)) return { kind: "queued", record: existing.record };
-    const sent = highestSentGeneration(scope, dayId);
-    if (sent !== null && (existing.kind === "none" || sent > existing.record.generation)) {
-      // Its record is gone — or older than a generation that may have left: restored from that
-      // generation's seal, never a new snapshot; with no readable seal, locked.
-      const restored = restoreFromSeal(scope, dayId, now, existing.kind === "ok" ? existing.record.seq : 0);
-      return restored === null ? { kind: "locked" } : { kind: "queued", record: restored };
-    }
+    // ALL evidence first: an older record never answers for a newer generation.
+    const resolution = resolveDay(scope, dayId, now);
+    if (resolution.kind === "blocked") return { kind: "locked" };
+    if (resolution.kind === "recovered") return { kind: "queued", record: resolution.submission.record };
+    const current = resolution.kind === "current" ? resolution.submission.record : null;
+    if (current !== null && isLocking(current.state)) return { kind: "queued", record: current };
 
     const built = buildSnapshot(day);
     if (built.kind !== "ok") return built;
     // Only a snapshot the server proved it keeps nothing of is followed — as the NEXT generation,
     // beside every earlier seal, which is never replaced.
-    const previous = existing.kind === "ok" ? existing.record : null;
+    const previous = current;
     const generation = Math.max(previous?.generation ?? 0, highestEvidenceGeneration(scope, dayId)) + 1;
     const next = firstRecord(scope, dayId, built, now, previous, generation);
     try {
@@ -144,46 +140,67 @@ export function queueTimesheet(scope: AccountScope, dayId: string, now: Date = n
 }
 
 /**
- * Restore a day's record from its seal — the generation that may have been
- * sent (a sent-marker), else the latest. The exact snapshot frozen, the same
- * identity and revision; nothing is rebuilt from the day. A generation that
- * may have been sent comes back `sending` and `uncertain`: its outcome is
- * unknown, so the next run replays the same bytes and the server answers
- * with what it keeps. `null` when no readable seal is there to restore from.
+ * A record the recovery layer has VERIFIED may be sent — its generation is
+ * the authoritative one. Made only here (`resolveDay`): the private field
+ * makes the type nominal, so no other code can pass a raw record — a stale
+ * one least of all — to `sendSubmission`.
  */
-function restoreFromSeal(scope: AccountScope, dayId: string, now: Date, afterSeq: number): TimesheetSubmissionRecord | null {
+class Verified {
+  readonly #verified = true;
+  constructor(readonly record: TimesheetSubmissionRecord) {}
+  isVerified(): boolean { return this.#verified; }
+}
+export type VerifiedSubmission = Verified;
+
+/** What the recovery layer says about a day — explicit, never a bare boolean. */
+export type Resolution =
+  /** No record, and no evidence one ever existed. */
+  | { kind: "nothing" }
+  /** The record on disk is the authoritative generation, safe as it stands. */
+  | { kind: "current"; submission: VerifiedSubmission }
+  /** The authoritative generation was restored from its own seal, safe now. */
+  | { kind: "recovered"; submission: VerifiedSubmission }
+  /** Recovery is needed and impossible: NOTHING of this day may be sent, and the day stays locked. */
+  | { kind: "blocked"; reason: "seal-unavailable" };
+
+/**
+ * Decide the authoritative generation from ALL surviving evidence, inside the
+ * store's write queue:
+ *   - the newest generation that may have been sent (a sent-marker) takes
+ *     precedence over any record of an older one — a stale record is never a
+ *     candidate;
+ *   - it is restored ONLY from that generation's own seal: missing or
+ *     unreadable → blocked, never an older generation, never the day;
+ *   - an unreadable record with no sent evidence is restored from the latest
+ *     seal (never sent, so nothing to contradict);
+ *   - a record at or above every sent generation is current.
+ */
+function resolveDay(scope: AccountScope, dayId: string, now: Date): Resolution {
+  const read = readSubmission(scope, dayId);
   const sent = highestSentGeneration(scope, dayId);
+  if (read.kind === "ok" && (sent === null || sent <= read.record.generation)) return { kind: "current", submission: new Verified(read.record) };
+  if (read.kind === "none" && sent === null) return { kind: "nothing" };
+
   const generation = sent ?? highestSealGeneration(scope, dayId);
   const seal = generation === 0 ? null : readSeal(scope, dayId, generation);
-  if (seal === null) return null;
+  if (seal === null) return { kind: "blocked", reason: "seal-unavailable" };
+  if (read.kind === "unreadable") setAsideUnreadable(scope, dayId, now);
   const snapshot: unknown = JSON.parse(seal.snapshotJson);
   const restored: TimesheetSubmissionRecord = {
     ownerUserId: scope.userId, dayId, membershipId: seal.membershipId, companyName: seal.companyName, revision: 1,
     snapshot, declaredVersion: seal.declaredVersion, generation: seal.generation,
-    seq: afterSeq + 1, queuedAt: now.toISOString(), state: sent === null ? SUBMISSION_STATE.waiting : SUBMISSION_STATE.sending, attempts: 0,
+    seq: (read.kind === "ok" ? read.record.seq : 0) + 1, queuedAt: now.toISOString(),
+    // A generation that may have been sent comes back `sending` and uncertain: replayed, the server settles it.
+    state: sent === null ? SUBMISSION_STATE.waiting : SUBMISSION_STATE.sending, attempts: 0,
     lastAttemptAt: null, result: null, problem: null, uncertain: sent !== null, earlier: [],
   };
   writeSubmission(scope, restored);
-  return restored;
+  return { kind: "recovered", submission: new Verified(restored) };
 }
 
-/**
- * A record that cannot be read — the disk damaged it — or that is GONE while
- * a request of it may have left. A damaged record's bytes are moved aside,
- * never lost; the record is restored from its seal (`restoreFromSeal`). With
- * no readable seal the day stays locked and nothing is sent.
- */
-export function recoverRecord(scope: AccountScope, dayId: string, now: Date = new Date()): Promise<boolean> {
-  return withFinishedDay(scope, dayId, (): boolean => {
-    const read = readSubmission(scope, dayId);
-    const sent = highestSentGeneration(scope, dayId);
-    if (read.kind === "ok" && (sent === null || sent <= read.record.generation)) return false;
-    if (read.kind === "none" && sent === null) return false;
-    const generation = sent ?? highestSealGeneration(scope, dayId);
-    if (generation === 0 || readSeal(scope, dayId, generation) === null) return false;
-    if (read.kind === "unreadable") setAsideUnreadable(scope, dayId, now);
-    return restoreFromSeal(scope, dayId, now, read.kind === "ok" ? read.record.seq : 0) !== null;
-  });
+/** `resolveDay`, in the store's one write queue — what every dispatch must go through. */
+export function resolveSubmission(scope: AccountScope, dayId: string, now: Date = new Date()): Promise<Resolution> {
+  return withFinishedDay(scope, dayId, (): Resolution => resolveDay(scope, dayId, now));
 }
 
 /**
@@ -229,7 +246,9 @@ function advance(scope: AccountScope, from: TimesheetSubmissionRecord, next: Tim
 }
 
 /** Send one queued record; the record as it now stands, or `null` when it could not be advanced. */
-export async function sendSubmission(scope: AccountScope, record: TimesheetSubmissionRecord, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
+export async function sendSubmission(scope: AccountScope, verified: VerifiedSubmission, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
+  if (!verified.isVerified()) return null;
+  const { record } = verified;
   const bytes = sealedBytes(scope, record);
   if (bytes === null) return null;
   const sealed: unknown = JSON.parse(bytes);
