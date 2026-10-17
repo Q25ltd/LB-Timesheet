@@ -474,9 +474,11 @@ function draw(canvas: Canvas, source: TimesheetPdfSource, snapshot: TimesheetSna
     const use = snapshot.trailers[index];
     return use === undefined ? "" : `${TRAILER_TYPE[use.trailerType]} ${use.trailerNumber}`;
   };
+  let corrected = 0;
   const collect = (kind: "vehicle" | "trailer", index: number, checks: readonly Check[]): void => {
     for (const check of checks) {
-      for (const item of effectiveItems(check).filter(entry => entry.result === "fail")) {
+      const effective = effectiveItems(check);
+      for (const item of effective.filter(entry => entry.result === "fail")) {
         defects.push([
           { text: assetName(kind, index) },
           { text: item.label },
@@ -484,11 +486,33 @@ function draw(canvas: Canvas, source: TimesheetPdfSource, snapshot: TimesheetSna
           { text: check.status === "completed" ? "Certified" : "DRAFT — not certified", color: check.status === "completed" ? INK : ALERT },
         ]);
       }
+      // A defect a later correction took back stays on the record (R1): its
+      // last description, and the correction that changed it.
+      const versions = [check.items, ...check.revisions.map(revision => revision.items)];
+      const stillDefects = new Set(effective.filter(entry => entry.result === "fail").map(entry => entry.key));
+      const reported = new Map<string, { item: Item; takenBack: number }>();
+      versions.forEach((items, version) => {
+        for (const item of items) {
+          if (item.result === "fail" && !stillDefects.has(item.key)) reported.set(item.key, { item, takenBack: version });
+        }
+      });
+      for (const { item, takenBack } of reported.values()) {
+        const revision = check.revisions[takenBack];
+        const now = effective.find(entry => entry.key === item.key);
+        corrected += 1;
+        defects.push([
+          { text: assetName(kind, index) },
+          { text: item.label },
+          { text: item.note ?? NONE },
+          { text: `Corrected to ${now === undefined ? "not answered" : resultText(now)} at ${revision === undefined ? NONE : when(context, revision.revisedAt)}`, color: MUTED },
+        ]);
+      }
     }
   };
   snapshot.vehicles.forEach((use, index) => collect("vehicle", index, use.checks));
   snapshot.trailers.forEach((use, index) => collect("trailer", index, use.checks));
-  canvas.heading(`Defects reported: ${String(defects.length)}`);
+  const open = defects.length - corrected;
+  canvas.heading(corrected === 0 ? `Defects reported: ${String(open)}` : `Defects reported: ${String(open)} open, ${String(corrected)} corrected`);
   if (defects.length === 0) canvas.paragraph("No defect was reported on any check of this day.");
   else canvas.table([{ title: "Asset", width: 130 }, { title: "Item", width: 130 }, { title: "Description", width: CONTENT_WIDTH - 350 }, { title: "Check", width: 90 }], defects);
 

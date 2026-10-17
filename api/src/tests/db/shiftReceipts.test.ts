@@ -18,6 +18,9 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient } from "../../generated/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { MailMessage, Mailer } from "../../lib/mailer.js";
+import { AppError } from "../../lib/errors.js";
+import { recordStartReceipt } from "../../services/startReceipts.js";
+import { startReceiptRepository, submissionMembershipLookup } from "../../repositories/startReceiptRepository.js";
 
 const connectionString = process.env.DATABASE_URL;
 if (connectionString === undefined || connectionString === "") {
@@ -37,6 +40,7 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
 const TAG = `shift-receipts-${Date.now()}`;
 const PASSWORD = "correct-horse-battery-staple";
 const RECEIPTS = "/driver/shift-receipts";
+const START = "2026-10-11T04:00:00.000Z";
 
 let seq = 0;
 function freshEmail(): string {
@@ -261,4 +265,165 @@ test("SR8. the DATABASE binds a receipt to its membership's own company and user
   await assert.rejects(prisma.shiftStartReceipt.create({ data: { ...row, companyId: b.companyId } }), "another company");
   await prisma.shiftStartReceipt.create({ data: { ...row, companyId: a.companyId } });
   await assert.rejects(prisma.shiftStartReceipt.create({ data: { ...row, companyId: a.companyId } }), "one per membership and id");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Security review remediation (2026-10-17): R2, R3, R4
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function seedReceipts(admin: Admin, me: { userId: string; membershipId: string }, count: number): Promise<void> {
+  await prisma.shiftStartReceipt.createMany({
+    data: Array.from({ length: count }, () => ({
+      companyId: admin.companyId, membershipId: me.membershipId, userId: me.userId, clientEventId: randomUUID(),
+      declaredStartedAt: new Date(), shiftDate: new Date("2026-10-11"), companyTimezone: "Europe/Vilnius",
+    })),
+  });
+}
+
+test("SR9. (R2) the daily cap holds under CONCURRENCY: 49 kept, five new at once → exactly one more (50), four refused 429 — and a replay at the cap still answers", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const kept = { membershipId: me.membershipId, clientEventId: randomUUID(), startedAt: new Date().toISOString() };
+  assert.equal((await receipt(me.identityToken, kept)).statusCode, 201);
+  await seedReceipts(admin, me, 48);
+
+  const answers = await Promise.all(Array.from({ length: 5 }, () =>
+    receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: randomUUID(), startedAt: new Date().toISOString() })));
+
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 50, "the cap was exceeded");
+  assert.deepEqual(answers.map(answer => answer.statusCode).sort(), [201, 429, 429, 429, 429]);
+  const replays = await Promise.all([receipt(me.identityToken, kept), receipt(me.identityToken, kept)]);
+  assert.deepEqual(replays.map(answer => answer.statusCode), [200, 200], "a replay is never counted or refused");
+});
+
+/**
+ * Holds every caller of `method` until `parties` have arrived (or a short
+ * wait passes): the deterministic form of "all of them counted before any of
+ * them wrote". A repository without the method is returned unchanged.
+ */
+function barrierOn<T extends object>(repository: T, method: string, parties: number): T {
+  let arrived = 0;
+  let release: () => void = () => undefined;
+  const all = new Promise<void>(resolve => { release = resolve; });
+  return new Proxy(repository, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver);
+      if (key !== method || typeof value !== "function") return value;
+      return async (...args: unknown[]) => {
+        const result: unknown = await Reflect.apply(value, target, args);
+        arrived += 1;
+        if (arrived >= parties) release();
+        await Promise.race([all, new Promise(resolve => setTimeout(resolve, 500))]);
+        return result;
+      };
+    },
+  });
+}
+
+test("SR9b. (R2) the reviewer's scenario, forced: 49 kept, five new that ALL pass the pre-check before any writes → still 50, never 54", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  await seedReceipts(admin, me, 49);
+  const receipts = barrierOn(startReceiptRepository(prisma), "find", 5);
+
+  const outcomes = await Promise.all(Array.from({ length: 5 }, () => recordStartReceipt(
+    { userId: me.userId, sessionId: "test" },
+    { membershipId: me.membershipId, clientEventId: randomUUID(), startedAt: new Date().toISOString() },
+    submissionMembershipLookup(prisma), receipts,
+  ).then(() => 201, (error: unknown) => (error instanceof AppError ? error.statusCode : 500))));
+
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 50, "count-then-insert let the cap through");
+  assert.deepEqual(outcomes.sort(), [201, 429, 429, 429, 429]);
+});
+
+test("SR9c. (R2) two copies of the SAME new day at the cap's edge: one is kept (the 50th), the other is its replay — never counted, never refused", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  await seedReceipts(admin, me, 49);
+  const receipts = barrierOn(startReceiptRepository(prisma), "find", 2);
+  const body = { membershipId: me.membershipId, clientEventId: randomUUID(), startedAt: new Date().toISOString() };
+
+  const outcomes = await Promise.all([0, 1].map(() => recordStartReceipt({ userId: me.userId, sessionId: "test" }, body, submissionMembershipLookup(prisma), receipts)
+    .then(result => (result.created ? 201 : 200), (error: unknown) => (error instanceof AppError ? error.statusCode : 500))));
+
+  assert.deepEqual(outcomes.sort(), [200, 201]);
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 50);
+});
+
+test("SR10. (R3) a withdrawal that COMMITS between the driver's authorisation and the receipt's write: no receipt is issued — deterministic interleaving", async () => {
+  for (const action of ["deactivate", "remove"] as const) {
+    const admin = await companyAdmin();
+    const me = await driverOf(admin);
+    const lookup = submissionMembershipLookup(prisma);
+    let withdrawn = false;
+    // The read sees the membership ACTIVE; the withdrawal then commits before the write.
+    const racing = {
+      async findOwnDriverMembership(userId: string, membershipId: string) {
+        const row = await lookup.findOwnDriverMembership(userId, membershipId);
+        if (!withdrawn) {
+          withdrawn = true;
+          assert.equal((await act(admin, me.membershipId, action)).statusCode, 200);
+        }
+        return row;
+      },
+    };
+
+    const outcome = await recordStartReceipt(
+      { userId: me.userId, sessionId: "test" },
+      { membershipId: me.membershipId, clientEventId: randomUUID(), startedAt: new Date().toISOString() },
+      racing, startReceiptRepository(prisma),
+    ).then(() => "issued", (error: unknown) => (error instanceof AppError ? error.statusCode : "threw"));
+
+    assert.equal(outcome, 403, `${action}: a receipt was issued after the withdrawal committed`);
+    assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 0);
+  }
+});
+
+test("SR11. (R4) an UPPERCASE UUID is the same id: kept in canonical lowercase (never a 500 from the database's check), and the lowercase replay is the same receipt", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const id = randomUUID();
+  const startedAt = new Date().toISOString();
+
+  const upper = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: id.toUpperCase(), startedAt });
+  assert.equal(upper.statusCode, 201, `got ${upper.raw}`);
+  const stored = await prisma.shiftStartReceipt.findMany({ where: { membershipId: me.membershipId } });
+  assert.deepEqual(stored.map(row => row.clientEventId), [id]);
+
+  const lower = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: id, startedAt });
+  assert.equal(lower.statusCode, 200, "the same day in another case is a replay");
+  assert.deepEqual(lower.body, upper.body);
+  const mixed = await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: `${id.slice(0, 18).toUpperCase()}${id.slice(18)}`, startedAt });
+  assert.equal(mixed.statusCode, 200);
+  assert.equal(await prisma.shiftStartReceipt.count({ where: { membershipId: me.membershipId } }), 1);
+});
+
+test("SR12. (R3) a receipt that holds the membership's lock FIRST is issued before the withdrawal — and the withdrawal, waiting for it, is recorded no earlier than the receipt", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const clientEventId = randomUUID();
+  const pending: { withdrawal: Promise<Injected> | null } = { withdrawal: null };
+  let issuedAt = new Date(0);
+
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "CompanyMembership" WHERE id = ${me.membershipId} FOR UPDATE`;
+    // The withdrawal starts now and must wait for the lock this "receipt" holds.
+    pending.withdrawal = act(admin, me.membershipId, "deactivate");
+    for (let waited = 0; waited < 50; waited += 1) {
+      const blocked = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`;
+      if ((blocked[0]?.n ?? 0n) > 0n) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+    issuedAt = new Date();
+    await tx.shiftStartReceipt.create({ data: {
+      companyId: admin.companyId, membershipId: me.membershipId, userId: me.userId, clientEventId,
+      declaredStartedAt: new Date(START), shiftDate: new Date("2026-10-11"), companyTimezone: "Europe/London", receivedAt: issuedAt,
+    } });
+  });
+  assert.ok(pending.withdrawal !== null);
+  assert.equal((await pending.withdrawal).statusCode, 200);
+
+  const event = await prisma.membershipEvent.findFirstOrThrow({ where: { membershipId: me.membershipId, kind: "deactivated" } });
+  assert.ok(event.occurredAt.getTime() >= issuedAt.getTime(), `the withdrawal was dated ${event.occurredAt.toISOString()}, before the receipt it waited for (${issuedAt.toISOString()})`);
 });

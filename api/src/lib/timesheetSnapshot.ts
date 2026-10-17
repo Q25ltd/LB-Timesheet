@@ -149,6 +149,25 @@ function uniqueProblem(ids: readonly string[], what: string): string | null {
   return new Set(ids).size === ids.length ? null : `a repeated ${what} id`;
 }
 
+/** A description someone can read: at least one letter, digit, punctuation mark or symbol — not just spaces or invisible marks. */
+const READABLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
+
+/**
+ * A CERTIFICATE — a completed check, or a correction of one — answers every
+ * item of its checklist version, exactly once, and describes every defect
+ * (security review R1). The phone allows certifying nothing less; a draft is
+ * not held to this.
+ */
+function certificateProblems(items: readonly { key: string; result: string; note: string | null }[], keys: readonly string[], where: string, what: string): string[] {
+  const problems: string[] = [];
+  const answered = new Set(items.map(item => item.key));
+  if (!keys.every(key => answered.has(key))) problems.push(`${where}: ${what} does not answer every item of its checklist`);
+  if (items.some(item => item.result === "fail" && (item.note === null || !READABLE.test(item.note)))) {
+    problems.push(`${where}: ${what} has a defect without a description`);
+  }
+  return problems;
+}
+
 function checkProblems(check: TimesheetSnapshot["vehicles"][number]["checks"][number], expected: string, userId: string, where: string): string[] {
   const problems: string[] = [];
   if (check.checklist !== expected) problems.push(`${where}: checked against the wrong checklist`);
@@ -171,6 +190,7 @@ function checkProblems(check: TimesheetSnapshot["vehicles"][number]["checks"][nu
     if (check.completedAt === null || check.completedBy === null) problems.push(`${where}: a completed check without who and when`);
     if (check.completedBy !== null && check.completedBy !== userId) problems.push(`${where}: certified by someone else`);
     if (check.items.length === 0) problems.push(`${where}: a completed check with no items`);
+    problems.push(...certificateProblems(check.items, keys, where, "a completed check"));
   } else {
     if (check.completedAt !== null || check.completedBy !== null) problems.push(`${where}: a draft said to be certified`);
     if (check.revisions.length > 0) problems.push(`${where}: a draft with corrections`);
@@ -178,6 +198,7 @@ function checkProblems(check: TimesheetSnapshot["vehicles"][number]["checks"][nu
   for (const revision of check.revisions) {
     if (revision.revisedBy !== userId) problems.push(`${where}: corrected by someone else`);
     if (revision.items.length === 0) problems.push(`${where}: an empty correction`);
+    problems.push(...certificateProblems(revision.items, keys, where, "a correction"));
   }
   return problems;
 }

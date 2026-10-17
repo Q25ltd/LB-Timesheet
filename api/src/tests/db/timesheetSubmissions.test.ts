@@ -17,10 +17,15 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient } from "../../generated/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { canonicalJson } from "../../lib/timesheetSnapshot.js";
+import { checklistKeys } from "../../lib/checklistKeys.js";
 import { createHash } from "node:crypto";
 import type { MailMessage, Mailer } from "../../lib/mailer.js";
 import { renderTimesheetPdf } from "../../pdf/timesheetPdf.js";
 import { readPdf } from "../pdfReader.js";
+import { AppError } from "../../lib/errors.js";
+import { submitTimesheet } from "../../services/timesheetSubmissions.js";
+import { submissionMembershipLookup } from "../../repositories/startReceiptRepository.js";
+import { timesheetSubmissionRepository } from "../../repositories/timesheetSubmissionRepository.js";
 
 const connectionString = process.env.DATABASE_URL;
 if (connectionString === undefined || connectionString === "") {
@@ -169,10 +174,11 @@ function snapshot(userId: string, over: Record<string, unknown> = {}): Record<st
       checks: [{
         id: "c1111111-2222-4333-8444-555555555555", checklist: "hgv-unit", checklistVersion: 1, status: "completed",
         startedAt: START, completedAt: "2026-10-11T04:10:00.000Z", completedBy: userId,
-        items: [
-          { key: "front-view", label: "Front view", section: { id: "cab", title: "CAB / DRIVER VIEW" }, result: "pass", note: null },
-          { key: "wipers", label: "Windscreen wipers", section: { id: "cab", title: "CAB / DRIVER VIEW" }, result: "fail", note: "Nearside blade split" },
-        ],
+        // A whole certificate (R1): every row of hgv-unit v1, one defect described.
+        items: (checklistKeys("hgv-unit", 1) ?? []).map(key => ({
+          key, label: key === "wipers" ? "Windscreen wipers" : key, section: { id: "cab", title: "CAB / DRIVER VIEW" },
+          result: key === "wipers" ? "fail" : "pass", note: key === "wipers" ? "Nearside blade split" : null,
+        })),
         revisions: [],
       }],
     }],
@@ -535,4 +541,86 @@ test("TS18. (S5) the PDF is drawn from the STORED revision: the JSON column's pa
   assert.ok(attached !== undefined);
   assert.equal(createHash("sha256").update(attached).digest("hex"), submission.payloadSha256);
   assert.deepEqual(JSON.parse(attached.toString("utf8")), snap);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Security review remediation (2026-10-17): R2, R4
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function seedSubmissions(admin: Admin, me: { userId: string; membershipId: string }, count: number): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO "Shift" (id, "membershipId", "companyId", "userId", "driverName", "clientEventId", "shiftDate", "startedAt", "endedAt", status, "submittedAt", reference, "currentRevision", verification, standing, "companyName", "updatedAt")
+    SELECT 'seed-' || g || '-' || ${me.membershipId}, ${me.membershipId}, ${admin.companyId}, ${me.userId}, 'Dee River', gen_random_uuid()::text, '2026-10-11', now(), now(), 'submitted', now(), 'TS-SEED' || lpad(g::text, 4, '0') || substr(md5(${me.membershipId}), 1, 4), 1, 'membership_active', 'pending_review', 'x', now()
+    FROM generate_series(1, ${count}::int) AS g`;
+}
+
+/** Holds every caller of `method` until `parties` have arrived (or a short wait): "all counted before any wrote". */
+function barrierOn<T extends object>(repository: T, method: string, parties: number): T {
+  let arrived = 0;
+  let release: () => void = () => undefined;
+  const all = new Promise<void>(resolve => { release = resolve; });
+  return new Proxy(repository, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver);
+      if (key !== method || typeof value !== "function") return value;
+      return async (...args: unknown[]) => {
+        const result: unknown = await Reflect.apply(value, target, args);
+        arrived += 1;
+        if (arrived >= parties) release();
+        await Promise.race([all, new Promise(resolve => setTimeout(resolve, 500))]);
+        return result;
+      };
+    },
+  });
+}
+
+test("TS19. (R2) the reviewer's scenario, forced: 49 submitted, five NEW days that all pass the pre-check before any writes → 50, never 54; replays at the cap still answer", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  await seedSubmissions(admin, me, 48);
+  const kept = bodyFor(me);
+  assert.equal((await submit(me, kept)).statusCode, 201);
+  const submissions = barrierOn(timesheetSubmissionRepository(prisma), "existing", 5);
+
+  const outcomes = await Promise.all(Array.from({ length: 5 }, () => submitTimesheet(
+    { userId: me.userId, sessionId: "test" },
+    { membershipId: me.membershipId, clientEventId: randomUUID(), revision: 1, snapshot: snapshot(me.userId) },
+    submissionMembershipLookup(prisma), submissions,
+  ).then(() => 201, (error: unknown) => (error instanceof AppError ? error.statusCode : 500))));
+
+  assert.equal(await prisma.shift.count({ where: { membershipId: me.membershipId } }), 50, "count-then-insert let the cap through");
+  assert.deepEqual(outcomes.sort(), [201, 429, 429, 429, 429]);
+  const replays = await Promise.all([submit(me, kept), submit(me, kept)]);
+  assert.deepEqual(replays.map(res => res.statusCode), [200, 200], "a replay is never counted or refused");
+});
+
+test("TS19b. (R2) two copies of the SAME new day at the cap's edge: one is kept (the 50th), the other is its replay — never counted, never refused", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  await seedSubmissions(admin, me, 49);
+  const submissions = barrierOn(timesheetSubmissionRepository(prisma), "existing", 2);
+  const input = { membershipId: me.membershipId, clientEventId: randomUUID(), revision: 1 as const, snapshot: snapshot(me.userId) };
+
+  const outcomes = await Promise.all([0, 1].map(() => submitTimesheet({ userId: me.userId, sessionId: "test" }, input, submissionMembershipLookup(prisma), submissions)
+    .then(result => (result.created ? 201 : 200), (error: unknown) => (error instanceof AppError ? error.statusCode : 500))));
+
+  assert.deepEqual(outcomes.sort(), [200, 201]);
+  assert.equal(await prisma.shift.count({ where: { membershipId: me.membershipId } }), 50);
+});
+
+test("TS20. (R4) an UPPERCASE day id is the same day: it finds the lowercase receipt, is stored canonical, and either case replays the same timesheet", async () => {
+  const admin = await companyAdmin();
+  const me = await driverOf(admin);
+  const id = randomUUID();
+  assert.equal((await receipt(me.identityToken, { membershipId: me.membershipId, clientEventId: id, startedAt: START })).statusCode, 201);
+  await act(admin, me.membershipId, "deactivate");
+
+  const upper = await submit(me, bodyFor(me, { clientEventId: id.toUpperCase() }));
+  assert.equal(upper.statusCode, 201, `got ${upper.raw}`);
+  assert.equal(field(view(upper), "verification"), "start_receipt", "the uppercase id did not find the day's receipt");
+  const lower = await submit(me, bodyFor(me, { clientEventId: id }));
+  assert.equal(lower.statusCode, 200, `got ${lower.raw}`);
+  assert.equal(field(view(lower), "reference"), field(view(upper), "reference"));
+  const shifts = await prisma.shift.findMany({ where: { membershipId: me.membershipId } });
+  assert.deepEqual(shifts.map(shift => shift.clientEventId), [id]);
 });

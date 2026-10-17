@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
+import { checklistKeys } from "../lib/checklistKeys.js";
 import { canonicalJson, snapshotSha256, TimesheetSnapshotV1 } from "../lib/timesheetSnapshot.js";
 import { documentText, readPdf, type ReadPdf } from "../tests/pdfReader.js";
 import { PDF_REFUSAL, PDF_TEMPLATE, renderTimesheetPdf, TimesheetPdfRefused, type TimesheetPdfSource } from "./timesheetPdf.js";
@@ -20,6 +21,27 @@ const SECTION = { id: "cab", title: "CAB / DRIVER VIEW" };
 
 type Json = Record<string, unknown>;
 
+const HGV_KEYS = checklistKeys("hgv-unit", 1) ?? [];
+const LABELS: Record<string, string> = { "front-view": "Front view", wipers: "Windscreen wipers" };
+
+/** Every row of hgv-unit v1 — a whole certificate — passed unless `over` says otherwise. */
+function hgvRows(over: Record<string, Json> = {}): Json[] {
+  return HGV_KEYS.map(key => ({ key, label: LABELS[key] ?? key, section: SECTION, result: "pass", note: null, ...over[key] }));
+}
+
+/** Certified with one defect, then corrected once: the front view was a defect too. */
+function certifiedCheck(): { items: Json[] } & Json {
+  return {
+    id: "c1", checklist: "hgv-unit", checklistVersion: 1, status: "completed",
+    startedAt: START, completedAt: "2026-10-11T04:10:00.000Z", completedBy: USER,
+    items: hgvRows({ wipers: { result: "fail", note: "Nearside blade split" } }),
+    revisions: [{
+      id: "r1", revisedAt: "2026-10-11T05:00:00.000Z", revisedBy: USER,
+      items: hgvRows({ "front-view": { result: "fail", note: "Crack in screen" }, wipers: { result: "fail", note: "Nearside blade split" } }),
+    }],
+  };
+}
+
 /** The day's unit: fuel, AdBlue on the old LITRES label, a certified check corrected once. */
 function unitUse(over: Json = {}): Json {
   return {
@@ -29,21 +51,7 @@ function unitUse(over: Json = {}): Json {
       { id: "f1", type: "fuel", recordedAt: "2026-10-11T09:00:00.000Z", quantity: 310.5, unit: "litre", unitSource: "recorded", note: null },
       { id: "f2", type: "adblue", recordedAt: "2026-10-11T09:05:00.000Z", quantity: 20.25, unit: "litre", unitSource: "legacy-litres-label", note: null },
     ],
-    checks: [{
-      id: "c1", checklist: "hgv-unit", checklistVersion: 1, status: "completed",
-      startedAt: START, completedAt: "2026-10-11T04:10:00.000Z", completedBy: USER,
-      items: [
-        { key: "front-view", label: "Front view", section: SECTION, result: "pass", note: null },
-        { key: "wipers", label: "Windscreen wipers", section: SECTION, result: "fail", note: "Nearside blade split" },
-      ],
-      revisions: [{
-        id: "r1", revisedAt: "2026-10-11T05:00:00.000Z", revisedBy: USER,
-        items: [
-          { key: "front-view", label: "Front view", section: SECTION, result: "fail", note: "Crack in screen" },
-          { key: "wipers", label: "Windscreen wipers", section: SECTION, result: "fail", note: "Nearside blade split" },
-        ],
-      }],
-    }],
+    checks: [certifiedCheck()],
     ...over,
   };
 }
@@ -295,7 +303,7 @@ test("TP15. LONG content runs over pages and stays inside them: fifty uses, the 
     fills: [], checks: [{
       id: `check-${String(index)}`, checklist: "hgv-unit", checklistVersion: 1, status: "completed",
       startedAt: minutes(index * 12), completedAt: minutes(index * 12 + 1), completedBy: USER,
-      items: [{ key: "wipers", label: "L".repeat(200), section: SECTION, result: "fail", note: "N".repeat(500) }],
+      items: hgvRows({ wipers: { label: "L".repeat(200), result: "fail", note: "N".repeat(500) } }),
       revisions: [],
     }],
   }));
@@ -335,4 +343,30 @@ test("TP16. a stored revision that does not validate, or no longer hashes to wha
   assert.equal(await refusal({ ...good, submission: { ...good.submission, declaredBy: "someone_else" } }), PDF_REFUSAL.inconsistent);
   assert.equal(await refusal({ ...good, submission: { ...good.submission, schemaVersion: 2 } }), PDF_REFUSAL.schemaVersion);
   assert.equal(await refusal({ ...good, submission: { ...good.submission, filedInTimezone: "Mars/Olympus" } }), PDF_REFUSAL.timezone);
+});
+
+test("TP17. (R1) a stored CERTIFIED check missing rows of its checklist, or with an undescribed defect, is refused — never drawn as a valid certificate", async () => {
+  const partial = unitUse({ checks: [{ ...certifiedCheck(), items: certifiedCheck().items.slice(1) }] });
+  const undescribed = unitUse({ checks: [{ ...certifiedCheck(), items: hgvRows({ wipers: { result: "fail", note: null } }) }] });
+  for (const vehicle of [partial, undescribed]) {
+    const snap = snapshot({ vehicles: [vehicle] });
+    // Stored as if an earlier, looser validator had accepted it: hashed as it is.
+    const looselyStored: TimesheetPdfSource = {
+      ...source(),
+      submission: { ...source().submission, payload: snap, payloadSha256: createHash("sha256").update(canonicalJson(snap)).digest("hex") },
+    };
+    assert.equal(await refusal(looselyStored), PDF_REFUSAL.inconsistent);
+  }
+});
+
+test("TP18. (R1) a defect a correction took back is NOT silently erased: the summary still lists it, saying it was corrected and when", async () => {
+  const check = {
+    ...certifiedCheck(),
+    items: hgvRows({ "front-view": { result: "fail", note: "Crack in screen" } }),
+    revisions: [{ id: "r1", revisedAt: "2026-10-11T05:00:00.000Z", revisedBy: USER, items: hgvRows() }],
+  };
+  const { text } = await rendered(source(snapshot({ vehicles: [unitUse({ checks: [check] })], trailers: [] })));
+  assert.ok(text.includes("Defects reported: 0 open, 1 corrected"), "the summary forgot the corrected defect");
+  assert.ok(text.includes("Crack in screen"));
+  assert.ok(/Corrected to Pass\s+at\s+06:00/.test(text), "no word of the correction that took it back");
 });

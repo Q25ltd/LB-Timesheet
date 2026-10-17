@@ -20,6 +20,7 @@
  */
 import { z } from "zod";
 import type { IdentityContext } from "../lib/auth.js";
+import { ClientEventId } from "../lib/clientEventId.js";
 import { AppError } from "../lib/errors.js";
 import { authorizeTimesheetSubmission, type SubmissionMembershipLookup } from "../lib/submissionAuthorization.js";
 import type { SubmissionContext } from "../lib/submissionContext.js";
@@ -28,8 +29,6 @@ import { SNAPSHOT_SCHEMA_VERSION, TimesheetSnapshotV1, snapshotProblems, snapsho
 import type { TimesheetVerification } from "../generated/enums.js";
 import type { SubmittedTimesheet, TimesheetSubmissionRepository } from "../repositories/timesheetSubmissionRepository.js";
 
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
-
 /**
  * The envelope. Strict: the company, user, standing and dates are the
  * server's. The snapshot is validated on its own (`TimesheetSnapshotV1`).
@@ -37,7 +36,7 @@ const NIL_UUID = "00000000-0000-0000-0000-000000000000";
  */
 export const SubmitTimesheetBody = z.object({
   membershipId:  z.string().min(1).max(64),
-  clientEventId: z.uuid().refine(value => value !== NIL_UUID, "clientEventId must be a generated id"),
+  clientEventId: ClientEventId,
   revision:      z.literal(1),
   snapshot:      z.unknown(),
 }).strict();
@@ -110,10 +109,6 @@ export async function submitTimesheet(
     return { created: false, timesheet: viewOf(earlier.timesheet) };
   }
 
-  if (await submissions.submittedSince(ctx, new Date(now.getTime() - DAY_MS)) >= SUBMISSIONS_PER_MEMBERSHIP_PER_DAY) {
-    throw new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
-  }
-
   const { verification, receiptId } = await evidence(ctx, input.clientEventId, submissions);
   const facts = await submissions.facts(ctx);
   const startedAt = new Date(snapshot.day.startedAt);
@@ -134,8 +129,10 @@ export async function submitTimesheet(
     standing:        verification === "unverified" ? "pending_review" : "accepted",
     facts,
     now,
-  });
-  if (created !== null) return { created: true, timesheet: viewOf(created) };
+  }, { max: SUBMISSIONS_PER_MEMBERSHIP_PER_DAY, since: new Date(now.getTime() - DAY_MS) });
+  // The replay and the cap are decided under the membership's lock (R2).
+  if (created.kind === "over_limit") throw new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
+  if (created.kind === "created") return { created: true, timesheet: viewOf(created.timesheet) };
 
   // A concurrent copy of the same day won: answer it — or refuse, if it differs.
   const winner = await submissions.existing(ctx, input.clientEventId);

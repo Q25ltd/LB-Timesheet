@@ -7,18 +7,17 @@
  */
 import { z } from "zod";
 import type { IdentityContext } from "../lib/auth.js";
+import { ClientEventId } from "../lib/clientEventId.js";
 import { AppError } from "../lib/errors.js";
 import { authorizeStartReceipt, type SubmissionMembershipLookup } from "../lib/submissionAuthorization.js";
 import { localCalendarDate } from "../lib/timezone.js";
 import type { StartReceiptRepository } from "../repositories/startReceiptRepository.js";
 
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
-
 /** Strict: the company, the user and the date are the server's — refused, never ignored. */
 export const StartReceiptBody = z.object({
   membershipId:  z.string().min(1).max(64),
   /** The phone's id for the day — the same one its submission will carry. */
-  clientEventId: z.uuid().refine(value => value !== NIL_UUID, "clientEventId must be a generated id"),
+  clientEventId: ClientEventId,
   /** The driver's declared start, with its offset (D18: no zone is guessed). */
   startedAt:     z.iso.datetime({ offset: true }),
 }).strict();
@@ -47,17 +46,16 @@ export async function recordStartReceipt(
   const existing = await receipts.find(ctx, input.clientEventId);
   if (existing !== null) return replay(existing, declaredStartedAt);
 
-  if (await receipts.receivedSince(ctx, new Date(now.getTime() - DAY_MS)) >= RECEIPTS_PER_MEMBERSHIP_PER_DAY) {
-    throw new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
-  }
-
   const timezone = await receipts.companyTimezone(ctx);
+  // Active, replay and cap are decided again under the membership's lock (R2, R3).
   const outcome = await receipts.create(ctx, {
     clientEventId:     input.clientEventId,
     declaredStartedAt,
     shiftDate:         localCalendarDate(declaredStartedAt, timezone),
     companyTimezone:   timezone,
-  });
+  }, { max: RECEIPTS_PER_MEMBERSHIP_PER_DAY, since: new Date(now.getTime() - DAY_MS) });
+  if (outcome.kind === "inactive") throw new AppError(403, "Not allowed", "FORBIDDEN");
+  if (outcome.kind === "over_limit") throw new AppError(429, "Too many requests, try again shortly", "RATE_LIMITED");
   if (outcome.kind === "existing") return replay(outcome.receipt, declaredStartedAt);
   return { created: true, receipt: { receivedAt: outcome.receipt.receivedAt.toISOString() } };
 }

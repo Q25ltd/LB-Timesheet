@@ -9,8 +9,10 @@
  *
  * Revision 1 is written in ONE transaction (F-16): the header, the immutable
  * snapshot, the audit events and — when it is accepted — its delivery job.
- * Either all of it exists or none of it does; a concurrent copy of the same
- * submission loses on the unique key and is answered with the winner.
+ * Either all of it exists or none of it does. It is written under the
+ * membership's row lock (`membershipLock.ts`, security review R2): the replay
+ * and the daily cap are decided there, so a burst of new days cannot all
+ * count before any of them is written, and a replay is never counted.
  */
 import { randomBytes } from "node:crypto";
 import type {
@@ -21,6 +23,7 @@ import type {
   TimesheetVerification,
 } from "../generated/enums.js";
 import type { SubmissionContext } from "../lib/submissionContext.js";
+import { lockOwnMembership, type RawQueryClient } from "./membershipLock.js";
 import { prismaErrorCode, UNIQUE_VIOLATION_CODE } from "./startShiftRepository.js";
 
 /** What the driver is told about a submitted timesheet. */
@@ -46,6 +49,11 @@ export interface SubmissionFacts {
   /** Whether the company has a CONFIRMED report address (D66). */
   reportAddressConfirmed: boolean;
 }
+
+export type RevisionOneOutcome =
+  | { kind: "created"; timesheet: SubmittedTimesheet }
+  | { kind: "existing" }
+  | { kind: "over_limit" };
 
 export interface NewRevisionOne {
   clientEventId: string;
@@ -135,8 +143,10 @@ interface DeliveryData {
   nextAttemptAt: Date;
 }
 
-interface SubmissionTransaction {
+interface SubmissionTransaction extends RawQueryClient {
   shift: {
+    findFirst(args: { where: { membershipId: string; clientEventId: string }; select: { id: true } }): Promise<{ id: string } | null>;
+    count(args: { where: { membershipId: string; reference: { not: null }; submittedAt: { gt: Date } } }): Promise<number>;
     create(args: { data: ShiftHeaderData; select: { id: true } }): Promise<{ id: string }>;
   };
   timesheetSubmission: {
@@ -153,7 +163,6 @@ interface SubmissionTransaction {
 export interface TimesheetSubmissionDatabase {
   shift: {
     findFirst(args: { where: { membershipId: string; clientEventId: string }; select: typeof SUBMITTED }): Promise<ExistingRow | null>;
-    count(args: { where: { membershipId: string; reference: { not: null }; submittedAt: { gt: Date } } }): Promise<number>;
   };
   shiftStartReceipt: {
     findUnique(args: { where: { membershipId_clientEventId: { membershipId: string; clientEventId: string } }; select: { id: true; receivedAt: true } }): Promise<{ id: string; receivedAt: Date } | null>;
@@ -219,11 +228,6 @@ export function timesheetSubmissionRepository(db: TimesheetSubmissionDatabase) {
       };
     },
 
-    /** New submissions by this membership since `since` — the daily cap. */
-    submittedSince(ctx: SubmissionContext, since: Date): Promise<number> {
-      return db.shift.count({ where: { membershipId: ctx.membershipId, reference: { not: null }, submittedAt: { gt: since } } });
-    },
-
     /** The start receipt this membership has for the day, if any. */
     receipt(ctx: SubmissionContext, clientEventId: string): Promise<{ id: string; receivedAt: Date } | null> {
       return db.shiftStartReceipt.findUnique({ where: { membershipId_clientEventId: { membershipId: ctx.membershipId, clientEventId } }, select: { id: true, receivedAt: true } });
@@ -260,17 +264,27 @@ export function timesheetSubmissionRepository(db: TimesheetSubmissionDatabase) {
     },
 
     /**
-     * Write revision 1 — all of it, or none of it. `null`: a concurrent copy
-     * of the same day won; the caller reads it back.
+     * Write revision 1 — all of it, or none of it — under the membership's
+     * lock: `existing` when this day is already there (the caller reads it
+     * back as a replay, never counted); `over_limit` when the membership
+     * already has `limit.max` submissions since `limit.since`.
      */
-    async createRevisionOne(ctx: SubmissionContext, input: NewRevisionOne): Promise<SubmittedTimesheet | null> {
+    async createRevisionOne(ctx: SubmissionContext, input: NewRevisionOne, limit: { max: number; since: Date }): Promise<RevisionOneOutcome> {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const reference = newReference();
         try {
-          return await db.$transaction(async tx => writeRevisionOne(tx, ctx, input, reference));
+          return await db.$transaction(async tx => {
+            if (await lockOwnMembership(tx, ctx) === null) throw new Error("an authorised membership is missing");
+            const day = await tx.shift.findFirst({ where: { membershipId: ctx.membershipId, clientEventId: input.clientEventId }, select: { id: true } });
+            if (day !== null) return { kind: "existing" } as const;
+            const submitted = await tx.shift.count({ where: { membershipId: ctx.membershipId, reference: { not: null }, submittedAt: { gt: limit.since } } });
+            if (submitted >= limit.max) return { kind: "over_limit" } as const;
+            return { kind: "created", timesheet: await writeRevisionOne(tx, ctx, input, reference) } as const;
+          });
         } catch (error) {
           if (uniqueViolationOn(error, "reference")) continue;
-          if (prismaErrorCode(error) === UNIQUE_VIOLATION_CODE) return null;
+          // Not expected under the lock; a concurrent copy that slipped past it is still a replay.
+          if (prismaErrorCode(error) === UNIQUE_VIOLATION_CODE) return { kind: "existing" };
           throw error;
         }
       }

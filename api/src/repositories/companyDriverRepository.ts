@@ -12,6 +12,11 @@
  * concurrent requests only one write matches; the others change nothing and
  * record nothing. `active` stays the one access switch every request checks
  * (AUTH.md), so a transition takes effect on the driver's very next request.
+ *
+ * The transition first LOCKS the membership's row — the lock a start receipt
+ * is issued under (`membershipLock.ts`, security review R3) — and only then
+ * takes its time: a receipt that got the lock first is committed before the
+ * withdrawal, and the withdrawal is never dated before it.
  */
 import type { MembershipEventKind } from "../generated/enums.js";
 import { MembershipEventKind as EVENT, MembershipRole as ROLE } from "../generated/enums.js";
@@ -66,6 +71,7 @@ interface DriverWhere {
 }
 
 interface TransitionTransaction {
+  $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   companyMembership: {
     updateMany(args: { where: DriverWhere; data: { active: false; removedAt?: Date } | { active: true } }): Promise<{ count: number }>;
     findFirst(args: { where: DriverWhere; select: typeof DRIVER }): Promise<DriverRecord | null>;
@@ -119,9 +125,12 @@ export function companyDriverRepository(db: CompanyDriverDatabase) {
     },
 
     async apply(ctx: TenantContext, membershipId: string, action: DriverAction, now: Date): Promise<TransitionOutcome> {
-      const { from, data, kind } = transition(action, now);
       const target: DriverWhere = { ...current(ctx), id: membershipId };
       return db.$transaction(async tx => {
+        // Wait for any receipt being issued under this row's lock, then take the time (R3).
+        await tx.$queryRaw`SELECT "id" FROM "CompanyMembership" WHERE "id" = ${membershipId} AND "companyId" = ${ctx.companyId} FOR UPDATE`;
+        const at = new Date(Math.max(now.getTime(), Date.now()));
+        const { from, data, kind } = transition(action, at);
         const { count } = await tx.companyMembership.updateMany({ where: from === undefined ? target : { ...target, active: from }, data });
         if (count !== 1) {
           // Nothing changed. Say why: not this company's current driver, or not in the state this action moves from.
@@ -129,7 +138,7 @@ export function companyDriverRepository(db: CompanyDriverDatabase) {
             ? { kind: "not_found" } as const
             : { kind: "wrong_state" } as const;
         }
-        await tx.membershipEvent.create({ data: { companyId: ctx.companyId, membershipId, kind, actorUserId: ctx.userId, occurredAt: now } });
+        await tx.membershipEvent.create({ data: { companyId: ctx.companyId, membershipId, kind, actorUserId: ctx.userId, occurredAt: at } });
         const after = await tx.companyMembership.findFirst({ where: { companyId: ctx.companyId, role: ROLE.driver, id: membershipId }, select: DRIVER });
         if (after === null) throw new Error("a membership this transaction just changed is missing");
         return { kind: "done", driver: rowOf(after) } as const;
