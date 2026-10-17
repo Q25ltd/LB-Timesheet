@@ -672,10 +672,14 @@ SubmissionContext { userId, membershipId, companyId, membershipActive }
   asks the capability once per sync run before the first timesheet would go,
   and sends nothing to an API that does not advertise `replay-first-1` (a 404
   from an older API, another protocol) or that it could not ask — the records
-  stay exactly as they are. A refusal whose answer does not name the contract
-  (an API rolled back since the check) proves nothing: kept, locked,
-  uncertain, replayed. A conflict stays a conflict; a success without the
-  header is kept as submitted (it locks, and unlocks nothing).
+  stay exactly as they are. A rejection, refusal OR CONFLICT (400, 403, 404,
+  409) is definitive only when its answer names `replay-first-1` exactly; one
+  that names no contract or another (an API rolled back since the check, or
+  mixed versions) proves nothing: kept, locked, uncertain, replayed. 401,
+  429 and 5xx keep their own handling. A success without the header is kept
+  as submitted (it locks, and unlocks nothing). The phone's compatibility
+  token is a guard on its own sending, never authority: honoured only for the
+  account and API address that discovered it, and only during that run.
 
 ## Contract tests — write these before the implementation
 

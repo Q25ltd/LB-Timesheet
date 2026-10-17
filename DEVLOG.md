@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-10-17 — S6 review of `2066ab3`: an incompatible 409 is not a conflict
+
+**Review:** capability, headers, pre-send protection, recovery, isolation and
+dispatch freshness PASS; post-response and rollback safety FAIL — one Medium.
+**Root cause:** the contract check guarded only the UNLOCKING failures
+(invalid, refused); `409 SUBMISSION_MISMATCH` took the ordinary path to
+terminal `conflict` whatever header it carried — and the author's own CA-J/K
+asserted exactly that, so the test encoded the defect (corrected here).
+
+**Change.** In `sendSubmission`, `definitive = invalid || refused || conflict`;
+any definitive answer not naming `replay-first-1` exactly → `waiting`,
+`uncertain`, problem `incompatible` ("Waiting to confirm"), replayed. Session
+(401), the cap (429), faults (5xx) and no answer are unchanged — never
+definitive. **Token (reviewer's observation):** the private field already
+made the type nominal; now `discoverCompatibility(scope, …)` records each
+token it issues in a module-private `WeakMap` with the account and API
+address, `sendSubmission` honours it only while recorded for that account and
+address (checked before any write and again in the dispatch callback), and the
+runner retires it when its run ends. No architectural change; still a guard
+on the phone's own sending — the server authorises by identity token alone.
+Renewal does not invalidate it: it concerns the API, not the session.
+
+**Evidence.** RED first: CX-A/B (no / wrong header after an unknown outcome:
+locked, uncertain, retried, the UI never says "already sent differently",
+then the compatible API settles it), CX-B/D/F (wrong header on 409, 400,
+404, 403), CX-G/H (rollback then the compatible 409), CX-L (renewal), CT-1–6
+(legitimate, forged, cross-account, retired, API moved, failed discovery);
+CX-INFRA, CT-7 (the runner retires its token) and CT-8 (retired during the
+identity step) added after. 12 mutations — contract-less 409 as conflict,
+wrong contract accepted, verification skipped, incompatible refusal unlocks,
+incompatible answer terminal, any token live, account unbound, retire a
+no-op, runner never retires, API address unbound, no re-check at dispatch
+(survived until CT-8) — 11 killed; 1 equivalent (the brand check beside the
+WeakMap). `npm run check` exit 0 (API 293, mobile 1667, web 186, DB 401, backup 12,
+build, smoke). Not pushed.
+
+---
+
 ## 2026-10-17 — S6: versioned API submission compatibility (`replay-first-1`)
 
 **Retest of `5f5efea`: PASS** — S6-lost-record CLOSED (FINDINGS). Enabling

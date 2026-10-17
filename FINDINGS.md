@@ -136,6 +136,22 @@ to speak it, and treats a refusal that does not name it as proving nothing
 (kept, locked, uncertain). Not independently verified, not pushed; enabling
 sending stays blocked on that verification and on S7–S8.
 
+**Independent review of `2066ab3` (2026-10-17):** capability contract,
+response headers, pre-send protection and recovery PASS; post-response and
+rollback/mixed-version safety **FAIL — one Medium (incompatible 409)**: the
+contract was checked only for unlocking failures, so `409 SUBMISSION_MISMATCH`
+with no or an incorrect contract header became a terminal `conflict` ("already
+sent differently", no further retries). Snapshot and lock survived. Also
+observed: the compatibility token was a typing guard only — a look-alike
+object, another account's token or one kept past its run was honoured.
+**Remediated (local, after `2066ab3`):** every definitive outcome — 400, 403,
+404 AND 409 — requires the exact contract on its answer, otherwise kept,
+locked, uncertain, replayed; the token is honoured at run time only if
+discovery issued it, for that account and API address, until the runner
+retires it at the end of the run (also re-checked at dispatch). CX-A–CX-L,
+CX-INFRA, CT-1–CT-8; 12 mutations, 11 killed, 1 equivalent. S6-replay stays
+OPEN until independently retested.
+
 ## Known sub-issues tracked without their own ID
 
 - **A crafted F-21 cross-column collision denies the rightful credential holder** (independent authentication audit of `049cc37`, 2026-09-12; audit severity Informational). When one Session's current digest equals another's previous digest, `rotateCurrent`'s write into the unique `previousRefreshTokenHash` column raises `P2002`, which `appliedOrNot` collapses to the canonical `401` — so the legitimate holder is refused rotation rather than the wrong Session being rotated. **Fail-closed, and neither Session is mutated**, which the audit confirmed directly. Reaching the state requires a 256-bit CSPRNG collision, so it is not a production path. **Accepted as informational; no ID and no architecture to build for it** — F-21's closure already records that the cross-column state remains permitted by the schema and that the claim is about deterministic resolution, not impossibility.

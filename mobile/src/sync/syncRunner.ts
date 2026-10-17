@@ -22,7 +22,7 @@ import { readOpenShift } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { RECEIPT_STATE, listReceipts, queueStartReceipt, saveReceipt, type QueuedReceipt } from "./receiptQueue";
 import { SEND_TIMESHEETS } from "./sending";
-import { discoverCompatibility, noteSignInNeeded, resolveSubmission, sendSubmission, type Compatibility, type WithIdentity } from "./submissionQueue";
+import { discoverCompatibility, noteSignInNeeded, resolveSubmission, retireCompatibility, sendSubmission, type Compatibility, type WithIdentity } from "./submissionQueue";
 import { SUBMISSION_STATE, isSendable, submissionDayIds } from "./submissionStore";
 
 export type { WithIdentity } from "./submissionQueue";
@@ -92,7 +92,19 @@ async function syncOnce(scope: AccountScope, withIdentity: WithIdentity, now: ()
  * exactly as it is, for the next run.
  */
 async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, now: () => Date, report: SyncReport): Promise<void> {
-  let compatibility: Compatibility | null = null;
+  const run: { compatibility: Compatibility | null } = { compatibility: null };
+  try {
+    await sendEach(scope, withIdentity, now, report, run);
+  } finally {
+    // The token is this run's alone.
+    if (run.compatibility?.kind === "compatible") retireCompatibility(run.compatibility.api);
+  }
+}
+
+async function sendEach(
+  scope: AccountScope, withIdentity: WithIdentity, now: () => Date, report: SyncReport,
+  run: { compatibility: Compatibility | null },
+): Promise<void> {
   for (const dayId of submissionDayIds(scope)) {
     try {
       // Only a record the recovery layer verified may be sent — never one it could not vouch for.
@@ -104,7 +116,8 @@ async function sendTimesheets(scope: AccountScope, withIdentity: WithIdentity, n
         continue;
       }
       if (!isSendable(resolution.submission.record.state)) continue;
-      compatibility ??= await discoverCompatibility(withIdentity);
+      run.compatibility ??= await discoverCompatibility(scope, withIdentity);
+      const { compatibility } = run;
       if (compatibility.kind !== "compatible") {
         if (compatibility.kind === "unknown") noteSignInNeeded(scope, resolution.submission, compatibility.failure);
         report.timesheetsWaiting += 1;

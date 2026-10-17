@@ -32,6 +32,7 @@
  */
 import { fetchCapabilities, sendTimesheet } from "../api/account";
 import type { ApiResult } from "../api/client";
+import { apiBaseUrl } from "../api/config";
 import { withFinishedDay } from "../shift/localShift";
 import type { AccountScope } from "../shift/accountScope";
 import { FAILURE, classifyFailure, outcomeUnknown, provesNothingKept, type Failure } from "./submissionErrors";
@@ -238,14 +239,34 @@ const SUBMISSION_CONTRACT = "replay-first-1";
 
 /**
  * The API, asked this run, said it speaks `SUBMISSION_CONTRACT`. Made only by
- * `discoverCompatibility`: nominal, like `Verified`, so nothing can send
- * without asking first.
+ * `discoverCompatibility` — the private field makes the TYPE nominal — and
+ * honoured at RUN TIME only while `issued` holds it: for the account that
+ * asked, at the API address it asked, until `retireCompatibility` (the runner
+ * retires it when its run ends). An object made anywhere else, another
+ * account's token, or one kept past its run sends nothing. A guard on this
+ * app's own sending, never authority: the server authorises every request
+ * by its identity token alone.
  */
 class Compatible {
   readonly #compatible = true;
-  isCompatible(): boolean { return this.#compatible; }
+  /** Whether `value` was made by this class — a structural look-alike never is. */
+  static made(value: object): boolean { return #compatible in value; }
 }
 export type CompatibleApi = Compatible;
+
+/** Every token still live, with the account and API address its discovery was for. */
+const issued = new WeakMap<object, { userId: string; api: string }>();
+
+function isLive(scope: AccountScope, compatible: CompatibleApi): boolean {
+  if (!Compatible.made(compatible)) return false;
+  const bound = issued.get(compatible);
+  return bound !== undefined && bound.userId === scope.userId && bound.api === apiBaseUrl();
+}
+
+/** End a token's run: it sends nothing more. */
+export function retireCompatibility(compatible: CompatibleApi): void {
+  issued.delete(compatible);
+}
 
 /**
  * What the API says it is — asked before anything is sent:
@@ -259,10 +280,14 @@ export type Compatibility =
   | { kind: "incompatible" }
   | { kind: "unknown"; failure: Exclude<ApiResult<unknown>, { kind: "ok" }> };
 
-export async function discoverCompatibility(withIdentity: WithIdentity): Promise<Compatibility> {
+export async function discoverCompatibility(scope: AccountScope, withIdentity: WithIdentity): Promise<Compatibility> {
+  const api = apiBaseUrl();
   const result = await withIdentity(token => fetchCapabilities(token));
   if (result.kind === "ok") {
-    return result.value.timesheetSubmissionProtocol === SUBMISSION_CONTRACT ? { kind: "compatible", api: new Compatible() } : { kind: "incompatible" };
+    if (result.value.timesheetSubmissionProtocol !== SUBMISSION_CONTRACT) return { kind: "incompatible" };
+    const compatible = new Compatible();
+    issued.set(compatible, { userId: scope.userId, api });
+    return { kind: "compatible", api: compatible };
   }
   return result.kind === "api" && result.status === 404 ? { kind: "incompatible" } : { kind: "unknown", failure: result };
 }
@@ -341,7 +366,7 @@ const NOT_DISPATCHED: { kind: "network"; message: string; detail: null } = { kin
 
 /** Send one queued record; the record as it now stands, or `null` when it could not be advanced. */
 export async function sendSubmission(scope: AccountScope, verified: VerifiedSubmission, compatible: CompatibleApi, withIdentity: WithIdentity, at: Date): Promise<TimesheetSubmissionRecord | null> {
-  if (!verified.isVerified() || !compatible.isCompatible()) return null;
+  if (!verified.isVerified() || !isLive(scope, compatible)) return null;
   const { record } = verified;
   const bytes = sealedBytes(scope, record);
   if (bytes === null) return null;
@@ -359,7 +384,7 @@ export async function sendSubmission(scope: AccountScope, verified: VerifiedSubm
   const result = await withIdentity(token => {
     // The final check and the request leaving: one synchronous turn (`confirmAtDispatch`).
     const final = confirmAtDispatch(scope, sending);
-    if (final === null || final !== bytes) {
+    if (final === null || final !== bytes || !isLive(scope, compatible)) {
       refusedAtDispatch = true;
       return Promise.resolve(NOT_DISPATCHED);
     }
@@ -386,10 +411,12 @@ export async function sendSubmission(scope: AccountScope, verified: VerifiedSubm
     const failure = classifyFailure(result);
     const uncertain = sending.uncertain || outcomeUnknown(result);
     const unlocking = failure === FAILURE.invalid || failure === FAILURE.refused;
-    // Only an answer naming the contract speaks for a compatible API — the one checked may have been rolled back since.
+    // A rejection, refusal or conflict is DEFINITIVE only from an answer naming the contract exactly —
+    // the API checked may have been rolled back since, or another version answered.
+    const definitive = unlocking || failure === FAILURE.conflict;
     const compatibleAnswer = result.kind === "api" && result.contract === SUBMISSION_CONTRACT;
-    if (unlocking && !compatibleAnswer) {
-      // Not this contract's answer: what it refused proves nothing about what is kept. Kept, locked, uncertain, replayed.
+    if (definitive && !compatibleAnswer) {
+      // Not this contract's answer: it proves nothing about what is kept. Kept, locked, uncertain, replayed.
       next = { ...sending, seq: sending.seq + 1, uncertain: true, state: SUBMISSION_STATE.waiting, problem: { ...problemOf(result, failure), kind: INCOMPATIBLE } };
     } else if (unlocking && uncertain && !provesNothingKept(result)) {
       // The server may keep an earlier transmission of these bytes: nothing is proven. Kept, locked, replayed.

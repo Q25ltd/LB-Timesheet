@@ -24,7 +24,7 @@ import {
 import type { AccountScope } from "../shift/accountScope";
 import { SESSION_RENEWAL_UNAVAILABLE } from "../auth/sessionRenewal";
 import { runSync, type WithIdentity } from "../sync/syncRunner";
-import { discoverCompatibility, queueTimesheet, resolveSubmission, sendSubmission } from "../sync/submissionQueue";
+import { discoverCompatibility, retireCompatibility, type CompatibleApi, queueTimesheet, resolveSubmission, sendSubmission } from "../sync/submissionQueue";
 import { SUBMISSION_FILE_PREFIX, SUBMISSION_STATE, isDayLocked, readSeal, readSubmission, writeSeal, writeSubmission, type TimesheetSubmissionRecord } from "../sync/submissionStore";
 import { submissionStatusOf } from "../sync/submissionStatus";
 import { correctDeclared, finishDeclared } from "./declared";
@@ -1161,7 +1161,7 @@ test("DB-D. a MARKER-ONLY change after verification invalidates it: a verified s
   restoreMarker();
   const sent = server(accepted());
 
-  const compatibility = await discoverCompatibility(identity);
+  const compatibility = await discoverCompatibility(SCOPE, identity);
   if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
   await sendSubmission(SCOPE, resolution.submission, compatibility.api, identity, at(17));
 
@@ -1361,7 +1361,7 @@ test("CA-H. the session RENEWED during discovery: the renewed identity finds the
   expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.submitted);
 });
 
-test("CA-J/K. a historical identical REPLAY lands as submitted; a CONFLICT stays locked whether or not it names the contract", async () => {
+test("CA-J/K. a historical identical REPLAY lands as submitted; the COMPATIBLE API's conflict is a confirmed conflict", async () => {
   server(replayed("TS-HIST0001"));
   const day = await finishedDay(SCOPE, NORTHGATE);
   await queued(SCOPE, day);
@@ -1369,16 +1369,14 @@ test("CA-J/K. a historical identical REPLAY lands as submitted; a CONFLICT stays
   expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, result: { reference: "TS-HIST0001" } });
   jest.restoreAllMocks();
 
-  for (const answer of [refusal(409, "SUBMISSION_MISMATCH"), legacy(409, { error: "x", code: "SUBMISSION_MISMATCH" })]) {
-    wipe(SCOPE);
-    server(answer);
-    const other = await finishedDay(SCOPE, NORTHGATE);
-    await queued(SCOPE, other);
-    await runSync(SCOPE, identity);
-    expect(recordOf(SCOPE, other.id).state).toBe(SUBMISSION_STATE.conflict);
-    expect(isDayLocked(SCOPE, other.id)).toBe(true);
-    jest.restoreAllMocks();
-  }
+  wipe(SCOPE);
+  server(refusal(409, "SUBMISSION_MISMATCH"));
+  const other = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, other);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, other.id).state).toBe(SUBMISSION_STATE.conflict);
+  expect(isDayLocked(SCOPE, other.id)).toBe(true);
+  expect(submissionStatusOf(SCOPE, other)?.label).toBe("Action needed — already sent differently");
 });
 
 test("CA-L. the compatible API's DEFINITIVE rejection still permits correction", async () => {
@@ -1457,4 +1455,205 @@ test("CA-P. signed out at DISCOVERY: the waiting record only says 'sign in' — 
   expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(seal);
   expect(markerPath(day.id, 1).exists).toBe(false);
   expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Independent review of 2066ab3: an incompatible 409 is not a conflict;
+// the compatibility token is runtime-bound to its discovery, account and run
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WRONG = "replay-first-0";
+const mismatch = (contract: string | null): Answer => respond(409, { error: "Refused", code: "SUBMISSION_MISMATCH" }, contract);
+
+test.each([
+  ["WITHOUT the contract header", null],
+  ["with an INCORRECT contract header", WRONG],
+])("CX-A/B/I/J/K. an incompatible 409 %s after an unknown outcome: uncertain, LOCKED, retried — never a conflict — and the compatible API settles it", async (_name, contract) => {
+  const sent = server(OFFLINE, mismatch(contract), replayed("TS-SETTLED1"));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  const before = await queued(SCOPE, day);
+  const seal = readSeal(SCOPE, day.id, 1)?.snapshotJson;
+  await runSync(SCOPE, identity);
+
+  const report = await runSync(SCOPE, identity);
+
+  const held = recordOf(SCOPE, day.id);
+  expect(held).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true, generation: before.generation, problem: { kind: "incompatible" } });
+  expect(report.retryLater).toBe(true);
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(JSON.stringify(held.snapshot)).toBe(JSON.stringify(before.snapshot));
+  expect(readSeal(SCOPE, day.id, 1)?.snapshotJson).toBe(seal);
+  const status = submissionStatusOf(SCOPE, day);
+  expect(status).toMatchObject({ label: "Waiting to confirm", locked: true, canSend: false });
+  expect(status?.label).not.toContain("already sent differently");
+
+  await runSync(SCOPE, identity);
+  expect(sent).toHaveLength(3);
+  expect(sent.every(request => request.raw === sent[0]?.raw)).toBe(true);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.submitted, generation: before.generation, result: { reference: "TS-SETTLED1" } });
+});
+
+test.each([
+  ["409 SUBMISSION_MISMATCH", mismatch(WRONG)],
+  ["400 TIMESHEET_REJECTED", respond(400, { error: "x", code: "TIMESHEET_REJECTED" }, WRONG)],
+  ["400 VALIDATION", respond(400, { error: "x", code: "VALIDATION" }, WRONG)],
+  ["404 NOT_FOUND", respond(404, { error: "x", code: "NOT_FOUND" }, WRONG)],
+  ["403 FORBIDDEN", respond(403, { error: "x", code: "FORBIDDEN" }, WRONG)],
+])("CX-B/D/F. an INCORRECT contract on a first answer — %s — is not final: kept, locked, uncertain", async (_name, answer) => {
+  server(answer);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const report = await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true, problem: { kind: "incompatible" } });
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+  expect(report.retryLater).toBe(true);
+});
+
+test("CX-G/H. ROLLBACK after discovery, then mixed versions: a contract-less 409 proves nothing; the compatible 409 that follows is the confirmed conflict", async () => {
+  const sent = server(mismatch(null), mismatch(CONTRACT));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.waiting);
+  await runSync(SCOPE, identity);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.raw).toBe(sent[0]?.raw);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.conflict);
+});
+
+test("CX-L. RENEWAL during the submission does not bypass compatibility: the renewed request's contract-less 409 stays uncertain", async () => {
+  const sent = server(refusal(401, "UNAUTHENTICATED"), mismatch(null));
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const renewing: WithIdentity = async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    const first = await call("old.token");
+    if (!(first.kind === "api" && first.status === 401)) return first;
+    return call("new.token");
+  };
+  await runSync(SCOPE, renewing);
+  expect(sent).toHaveLength(2);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain: true, problem: { kind: "incompatible" } });
+});
+
+test.each([
+  ["401 (session)", respond(401, { error: "x", code: "UNAUTHENTICATED" }, null), "session", false],
+  ["429 (the cap)", respond(429, { error: "x", code: "RATE_LIMITED" }, null), "temporary", false],
+  ["503 (a fault)", respond(503, { error: "x" }, null), "temporary", true],
+])("CX-INFRA. a contract-less %s keeps its own handling — waiting, never a definitive rejection", async (_name, answer, kind, uncertain) => {
+  server(answer);
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  await runSync(SCOPE, identity);
+  expect(recordOf(SCOPE, day.id)).toMatchObject({ state: SUBMISSION_STATE.waiting, uncertain, problem: { kind } });
+  expect(isDayLocked(SCOPE, day.id)).toBe(true);
+});
+
+async function verifiedDay(): Promise<{ day: CompletedShift; submission: Parameters<typeof sendSubmission>[1] }> {
+  const day = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, day);
+  const resolution = await resolveSubmission(SCOPE, day.id);
+  if (resolution.kind !== "current") throw new Error(`expected a current record: ${resolution.kind}`);
+  return { day, submission: resolution.submission };
+}
+
+test("CT-1. LEGITIMATE use: a token from this account's discovery, this run, sends", async () => {
+  const sent = server(accepted());
+  const { day, submission } = await verifiedDay();
+  const compatibility = await discoverCompatibility(SCOPE, identity);
+  if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
+  await sendSubmission(SCOPE, submission, compatibility.api, identity, at(17));
+  expect(sent).toHaveLength(1);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.submitted);
+});
+
+test("CT-2. a FORGED token — anything not made by discovery — sends nothing and writes nothing", async () => {
+  const sent = server(accepted());
+  const { day, submission } = await verifiedDay();
+  const before = recordOf(SCOPE, day.id);
+  const forged = { isCompatible: () => true } as unknown as CompatibleApi;
+  await sendSubmission(SCOPE, submission, forged, identity, at(17));
+  expect(sent).toEqual([]);
+  expect(recordOf(SCOPE, day.id)).toEqual(before);
+  expect(markerPath(day.id, 1).exists).toBe(false);
+});
+
+test("CT-3. CROSS-ACCOUNT reuse: another account's genuine token sends nothing for this one", async () => {
+  const sent = server(accepted());
+  const { day, submission } = await verifiedDay();
+  const theirs = await discoverCompatibility(OTHER, identity);
+  if (theirs.kind !== "compatible") throw new Error("expected a compatible API");
+  await sendSubmission(SCOPE, submission, theirs.api, identity, at(17));
+  expect(sent).toEqual([]);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.waiting);
+});
+
+test("CT-4. CROSS-RUN reuse: a token RETIRED at the end of its run sends nothing", async () => {
+  const sent = server(accepted());
+  const { day, submission } = await verifiedDay();
+  const compatibility = await discoverCompatibility(SCOPE, identity);
+  if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
+  retireCompatibility(compatibility.api);
+  await sendSubmission(SCOPE, submission, compatibility.api, identity, at(17));
+  expect(sent).toEqual([]);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.waiting);
+});
+
+test("CT-5. a token is bound to the API it was discovered at: pointed elsewhere since, it sends nothing", async () => {
+  const sent = server(accepted());
+  const { submission } = await verifiedDay();
+  const compatibility = await discoverCompatibility(SCOPE, identity);
+  if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
+  const configured: unknown = Reflect.get(process.env, "EXPO_PUBLIC_API_URL");
+  process.env["EXPO_PUBLIC_API_URL"] = "https://elsewhere.invalid";
+  try {
+    await sendSubmission(SCOPE, submission, compatibility.api, identity, at(17));
+  } finally {
+    if (typeof configured === "string") process.env["EXPO_PUBLIC_API_URL"] = configured;
+    else Reflect.deleteProperty(process.env, "EXPO_PUBLIC_API_URL");
+  }
+  expect(sent).toEqual([]);
+});
+
+test("CT-6. discovery FAILURE gives no token at all", async () => {
+  server(accepted());
+  capability = legacy(404, { error: "Not found", code: "NOT_FOUND" });
+  const compatibility = await discoverCompatibility(SCOPE, identity);
+  expect(compatibility.kind).toBe("incompatible");
+  expect("api" in compatibility).toBe(false);
+});
+
+test("CT-7. the RUNNER retires its token when its run ends: kept past the run, it sends nothing", async () => {
+  const queue = jest.requireActual<typeof import("../sync/submissionQueue")>("../sync/submissionQueue");
+  const real = queue.discoverCompatibility;
+  let kept: CompatibleApi | null = null;
+  jest.spyOn(queue, "discoverCompatibility").mockImplementation(async (scope, withIdentity) => {
+    const found = await real(scope, withIdentity);
+    if (found.kind === "compatible") kept = found.api;
+    return found;
+  });
+  const sent = server(accepted());
+  const first = await finishedDay(SCOPE, NORTHGATE);
+  await queued(SCOPE, first);
+  await runSync(SCOPE, identity);
+  expect(sent).toHaveLength(1);
+  if (kept === null) throw new Error("the run did not discover");
+
+  const { day, submission } = await verifiedDay();
+  await sendSubmission(SCOPE, submission, kept, identity, at(17));
+  expect(sent).toHaveLength(1);
+  expect(recordOf(SCOPE, day.id).state).toBe(SUBMISSION_STATE.waiting);
+});
+
+test("CT-8. a token RETIRED during the identity step is caught by the final check at dispatch: nothing sent", async () => {
+  const sent = server(accepted());
+  const { submission } = await verifiedDay();
+  const compatibility = await discoverCompatibility(SCOPE, identity);
+  if (compatibility.kind !== "compatible") throw new Error("expected a compatible API");
+  const retiring: WithIdentity = async <T>(call: (identityToken: string) => Promise<ApiResult<T>>): Promise<ApiResult<T>> => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    retireCompatibility(compatibility.api);
+    return call("id.token");
+  };
+  await sendSubmission(SCOPE, submission, compatibility.api, retiring, at(17));
+  expect(sent).toEqual([]);
 });
