@@ -293,9 +293,9 @@ request exactly as on any other; a refusal is shown, never worked around.
 
 **CORS.** Credentialed requests will need credentialed CORS, still on the
 **explicit origin allowlist** — no wildcard, no reflected origin, no trust for
-sibling subdomains. The allowed methods are stated: GET, HEAD, POST and PATCH
-(PATCH since 2026-10-11, D63 — the plugin's default left it out, and the
-browser refused the company website's correction at the preflight).
+sibling subdomains. The allowed methods are stated: GET, HEAD, POST, PATCH
+and PUT (PATCH for D63 invitation correction; PUT for D66 company measurement
+units and report email). These additions change no origin/credential policy.
 
 **CSRF.** Because the cookie is attached automatically, the endpoints that act
 on it — refresh and logout — require explicit CSRF protection: **strict
@@ -307,7 +307,11 @@ to cookie authentication. If Origin validation proves insufficient for a
 concrete endpoint or browser behaviour, implementation STOPS and the added
 protection is put to the owner — the model is not silently weakened.
 
-**Company authorization is not granted by any of this** — see DECISIONS O11.
+**Browser transport grants no company authorization.** D54 defines the active
+company-admin gate; O11 retains unresolved additional-user/role decisions.
+D67 adds product scope, not new authority: operational endpoints and VOR
+clearance must retain the existing gates and receive their own explicit policy
+and security proof. SubmissionContext never grants operational access.
 
 ---
 
@@ -333,24 +337,25 @@ never invented to make the shape uniform.
 The request body is exact: any field beyond the four is **refused**, not
 ignored — including `companyId`, `membershipId`, `userId`, `role` and `id`.
 
-## Company registration (D51, D53) — the website
+## Company registration (D51, D53, D66 S1) — the website
 
 The phone's registration above creates a DRIVER account. A company registers
 on the website, company-first:
 
 ```
-REGISTER YOUR COMPANY (companyName, timeZone, firstName, lastName, email, password)
-  ↓                                         ← exactly these six; repeat box is the browser's
+REGISTER YOUR COMPANY (companyName, timeZone, distanceUnit, volumeUnit,
+                       firstName, lastName, email, password)
+  ↓                                         ← exactly these eight; repeat box is the browser's
 company email already registered → 409 EMAIL_IN_USE (D24) — a DRIVER with the same email is irrelevant
   ↓
-ONE transaction: COMPANY account + PendingCompanyRegistration (name + timezone) + browser Session
+ONE transaction: COMPANY account + PendingCompanyRegistration (name + timezone + units) + browser Session
   ↓
 single-use verification token (digest only, 24 h) → link sent through the Mailer
   ↓
 browser signed in, RESTRICTED: "Check your email" (resend) — no Company, no membership
   ↓
 link opened → ONE transaction: consume token · verify email · create Company (pending
-name + timezone) · create the INITIAL admin membership · delete the pending row
+name + timezone + units) · create the INITIAL admin membership · delete the pending row
   ↓
 sign in (never automatic) → one membership → tenant token (D13)
 ```

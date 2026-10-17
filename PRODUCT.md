@@ -1,212 +1,248 @@
 # LogisticBay Timesheets — Product
 
-> What this product is and where its edges are.
-> For what is actually built, see **STATUS.md**. For settled/open decisions, see **DECISIONS.md**.
-> Last updated: 2026-10-11 (the company PDF — D66; earlier: onboarding no longer names an activation code — F-18)
-
----
+> Authoritative product definition and scope. [STATUS.md](STATUS.md) owns what
+> is actually built; [DECISIONS.md](DECISIONS.md) owns settled and open decisions.
+> Updated 2026-10-17: owner-approved expanded direction, recorded in D67.
 
 ## Goal
 
-Replace the paper daily timesheet and the paper daily vehicle/trailer check sheet
-used by truck (HGV) drivers with a simple mobile app — for haulage and
-transport companies in any country (D52).
+Help haulage and transport companies in any country replace paper daily
+records and coordinate simple planned work through a driver phone app and a
+company website. Keep the product simple, inexpensive to operate and useful
+without adopting the separate LogisticBay TMS.
 
-**Paper form → phone → PDF → company email.**
+The core remains **paper form → phone → PDF → company email**. The approved
+scope also includes simple company-created Jobs, Unit and Trailer registers,
+assignments, advance Planning, driver availability, damage/VOR visibility,
+notifications, safety reminders and How to Use instructions (D67).
 
-Deliberately simple, cheap to operate, easy for a small haulage company to adopt.
+Approval of product scope is not evidence of implementation. See STATUS.md.
+**D66 remains the immediate development priority.** Whether the first public
+release includes only Core Timesheets or also expanded features remains an
+owner decision (O12). This document does not silently defer or accelerate them.
 
-## Boundary
+## Product boundary
 
-**In scope**
+Included in the approved direction:
 
-1. Driver daily timesheets
-2. Start and finish times
-3. Daily truck checks
-4. Daily trailer checks
-5. Defect reporting
-6. Truck/trailer changes during a shift
-7. Checks required after an asset change
-8. Driver declaration / signature
-9. PDF generation
-10. Automatic email delivery to the company
-11. Optional **private** personal statistics for the driver
+- Daily timesheets, declared start/finish times and night out.
+- Vehicle and trailer uses, changes, walkaround checks, written defects,
+  corrections, fuel, AdBlue / DEF and fridge diesel.
+- Driver review and declaration, immutable submissions and amendments,
+  company review, reproducible PDF reports and reliable email delivery (D66).
+- Separate driver/company accounts, multi-company memberships and a private
+  personal driver diary, with the diary's release scope still open.
+- Simple Jobs and advance Planning, driver/unit/trailer assignments, weekly
+  shift patterns, availability and manual holiday/sickness marking.
+- Unit and Trailer registers, reservations, loaded/empty trailer reports,
+  damage and VOR indicators, and prominent company-dashboard VOR warnings.
+- Reliable operational synchronization, notifications, a once-per-new-shift
+  safety reminder and How to Use instructions.
 
-**Out of scope — never build here**
+Still outside the approved scope: GPS or live driver tracking, route
+optimization, invoicing, payroll processing, CRM, full customer/load-management
+systems, workshop/parts management, PMI scheduling, maintenance planning and
+fleet-utilization analytics. Simple collection/delivery Jobs, asset assignments,
+Planning and VOR visibility are included; their former blanket exclusion is
+superseded by D67. Do not infer permission for a full TMS from that change.
 
-jobs · loads · customers · planning · dispatch · routing · GPS tracking · live
-driver tracking · POD · delivery management · invoicing · fleet utilisation ·
-maintenance planning · vehicle scheduling · transport management · tachograph
-replacement · payroll processing · operational analytics · CRM
+Timesheets and the TMS remain separate products: separate repository, API,
+database, accounts, secrets, sessions, migrations, billing and deployment.
+Shared branding does not mean shared code or data (D1–D6).
 
-Anything on that list belongs in the separate LogisticBay TMS product.
+## Accounts and company setup
 
----
+A driver registers on the phone with first name, last name, email and password.
+A driver can have zero, one or multiple company memberships. Personal records
+require no invented company or membership. A company registers separately on
+the website; a matching driver/company email never links the two accounts (D51).
 
-## The proposition
+The company chooses its operational IANA timezone and its distance and volume
+units. It confirms its account email, sets and verifies the report inbox, and
+invites drivers by email. Drivers verify their own email and explicitly accept,
+decline or leave invitations unanswered (D63). Permanent joining codes are not
+the onboarding mechanism. Driver removal is soft and preserves records (D65).
 
-> Replace your drivers' paper timesheets and daily vehicle checks with their
-> phone. Completed forms are automatically emailed to your office as PDFs.
+Configurable checks and subscriptions are part of unresolved product/release
+planning, not prerequisites to invent in the onboarding flow (O7, O16).
 
-The customer should not need to adopt a fleet-management system. Setup is:
-create account → company name → destination email → configure checks →
-subscribe → give drivers access. (The original plan's activation code was
-removed — F-18; how a driver joins a company is not yet decided.)
+## Driver experience and planned suggestions
 
-**A driver account is not the same thing, and does not require a company.** A
-driver registers with first name, last name, email and password — nothing
-else, and no company field. They may hold **zero, one or several** company
-memberships over time, and a driver with none has a real, fully working
-account: the private diary (below) is theirs regardless of who employs them,
-and an agency driver's account outlives any one employer. No personal
-"company" is ever invented to represent them. See DECISIONS D21.
+Keep mandatory interaction to a minimum. No mandatory driving, working, break
+or POA activity switching; no GPS or background driver monitoring.
 
-The convenience is concrete: on paper, a driver who uses three trailers in a day
-fills in and carries three separate check sheets. Here it is a few taps and one
-PDF.
+- Morning: open, choose Personal or a company destination, confirm the start
+  and optionally record a vehicle. Personal remains the default (D28–D29).
+- During work: interact when recording a check, fill, asset change or an
+  assigned job's relevant update/completion; no continuous activity tracking.
+- Finish: enter finish details, review/correct, declare, then save a Personal
+  day or explicitly queue the company's timesheet for sending (D38–D42, D66).
 
----
+An existing company plan offers relevant **optional suggestions**: unit,
+trailer, date, start time and assignment details. The driver can accept, change
+or ignore them and can start without any plan. A plan never automatically
+starts a shift, overwrites actual asset details, changes declared working times
+or rewrites a completed timesheet. Actual driver records take precedence.
 
-## Driver philosophy
+**Job/reference numbers require fresh entry or explicit confirmation for the
+current job.** Never silently carry one forward from an earlier job or plan.
+Planned hours and actual timesheet hours remain separate facts.
 
-The driver interacts with the app **as little as possible**.
+## Simple Jobs
 
-- **Morning:** open → start → *(pick company — only if he drives for more than one)* → truck → trailer → checks → done
-- **During the day:** nothing
-- **If an asset changes:** open → change truck/trailer → check → done
-- **Evening:** open → finish → confirm → sign → submit
+The initial Jobs workflow is **company creates → driver receives → driver
+completes**. A job supports collection/delivery, a reference, optional address
+and instructions, driver assignment, intended unit/trailer, a future date and
+optional planned start time. Support updates, cancellations, notifications,
+multiple jobs per driver per shift and completion reporting.
 
-No driving/working/break/POA status updates. No job interaction. No GPS tracking.
-No background monitoring. **Every additional mandatory tap needs justification.**
+Duplicate references and assignment conflicts produce warnings, not automatic
+rejection. Job instructions and completion records do not silently mutate the
+D66 timesheet or its PDF snapshot. Including job data in a report would require
+an explicit later decision; D66's approved report contents remain unchanged.
 
----
+**Driver-created jobs are deferred pending real-world pilot feedback.** They
+are not an initial Jobs implementation requirement and are not rejected
+permanently. Reconsider only when testing demonstrates the need, then decide
+the scope and authority before implementing. Draft → Send to Driver remains
+an open workflow decision (O13).
 
-## Start and finish times
+## Units, Trailers and company dashboard
 
-The times on the sheet are what the driver **declares**, not a measurement of
-when he opened the app. A driver who forgot to book on enters 06:00 at 08:00; a
-company that rounds to the quarter hour enters 15:45 at 15:40. Both are correct
-timesheet data.
+A Unit or Trailer register requires only a registration/identification number;
+do not invent mandatory master-data fields. Distinguish the **Unit register**
+(vehicle assets) from **measurement units** (D52/D66).
 
-So the app must let the time be edited, and must keep exactly what the driver
-confirms. It does one check, and it is a **warning, not a rule**: when a
-manually entered Start or Finish time is more than **15 minutes** from the
-current time in either direction, ask the driver to confirm — showing the time
-he actually entered:
+Provide simple asset lists, latest reported driver/use, damage and VOR
+indicators, trailer reservations for specific unit registrations, loaded/empty
+trailer reporting and warnings about conflicting reservations. Latest reported
+use is a report, not a claim of live location or device state. Planned
+assignments never replace actual asset-use history.
 
-> The time you entered is more than 15 minutes from the current time.
-> **Use 06:00?** · *Yes, use this time* · *No, change it*
+When a company administrator signs in, active VOR warnings are prominently
+visible on the **main dashboard**, with the affected registration/identifier
+and access to its defect report. They must not be hidden only in asset pages.
+Warnings remain active until explicitly cleared by an authorized actor;
+clearance permissions and evidence are still open (O14). No automatic clearance
+from a later good check, job completion or synchronization.
 
-Confirming keeps the entered time unchanged and carries on. Within 15 minutes
-there is no prompt at all — the common case costs no extra tap, per the driver
-philosophy above. The rule is identical at both ends of the shift. See
-DECISIONS.md D20; the server never rejects a declared time on these grounds.
+An offline defect/VOR report must not appear as already received by the office.
+This simple visibility feature does not introduce workshop, repair, parts or
+maintenance-management workflows.
 
----
+## Planning and driver availability
 
-## Key concept — "segment"
+Support advance jobs/assignments, weekly shift patterns, planned start times,
+days off, manual holiday marking and manual sickness marking. Assigning an
+unavailable driver produces a warning; plans remain distinguishable from actual
+work. Driver holiday requests and company approval/decline are later features,
+not requirements of the initial manual-marking workflow.
 
-In this product a **segment** is an **asset-use segment**: which truck and which
-trailer the driver was using, between which times. It is **not** a working-time
-or activity segment.
+## Safety and How to Use
 
-Example:
+Show the agreed safety reminder once per **new shift**, available offline and
+requiring only one dismissal for that shift. It must tell the driver to phone
+the office directly about serious defects, VOR, accidents, major delays and
+urgent operational issues. Synchronization and notifications do not replace
+that direct call or prove the office has seen an urgent report.
 
-```
-05:43 – 11:30   Truck AB24 XYZ  +  Trailer C123
-11:30 – 14:20   Truck AB24 XYZ  +  Trailer C827
-14:20 – finish  Truck CD25 XYZ  +  Trailer C827
-```
+Provide How to Use instructions for the relevant driver and company workflows.
+Guidance must accurately distinguish local saves, server receipt, delivery and
+acknowledgement; it must not promise unbuilt or guaranteed background behaviour.
 
-Its purpose is to document which vehicles the driver used and checked. When an
-asset changes, the app determines whether a check is required and prompts for it.
+## Actual times, assets and checks
 
----
+Start/finish times are the driver's declared business data. Preserve the
+confirmed instant; never clamp or round it to the device or server clock.
+D20 defines start-time confirmation; D40 refines finish-time confirmation
+(strictly more than 15 minutes ahead asks once, never rejects solely for being
+in the future). Chronology constraints still apply. One shift crossing midnight
+remains one timesheet, dated by its declared start in the company timezone (D18).
 
-## Defects
+Each period of vehicle or trailer use has a stable identity independent of
+its registration and correctable times. Returning to the same asset is a new
+use. A shift can start or continue without a vehicle; no activity or placeholder
+asset is invented for the gap. Trailers have their own uses beside vehicle uses.
+Existing use details and trailer types remain as decided in D30–D35; a minimal
+asset register does not remove information needed by actual checks or fills.
 
-A defect record carries: asset, date/time, check item, a **written description**,
-driver identity, and the declaration info the form requires. It appears on the
-day's PDF.
+Checks are attached to the exact asset use. Draft defaults are not certified
+checks. Completed checks are immutable certificates corrected by appended
+revisions. Written defects retain their asset, item, driver and completion/
+correction context. No photographs in V1 (D10). General checklists are not a
+claim of approval by a national regulator.
 
-**No photographs in V1** (DECISIONS.md D10). A defect is a written explanation,
-nothing more.
+Fuel/AdBlue belongs to the exact vehicle use; fridge diesel belongs to the
+refrigerated trailer use. Unknown quantity is not zero. Values retain their
+recorded measurement units, with no conversion/relabeling of history. Historical
+odometer units stay unknown; historical litres retain their provenance (D66).
 
-This is **not** a maintenance-management system. No workshop management, repair
-scheduling, parts, PMI scheduling or VOR fleet management.
+## Offline storage, submission and operational synchronization
 
----
+The working day is local first. Account-isolated storage, restart recovery,
+explicit interrupted-save recovery and preservation of unsent records remain
+required (D28, D37, D60–D62). A plan or notification must never become a new
+way to bypass authentication or obtain another account's local records.
 
-## The company PDF
+**D66 submission is its own boundary:** persistent receipts/submissions,
+idempotent retry, immutable revision snapshots, company review and authoritative
+revisions, delivery jobs and PDF/email. A company timesheet locks once queued;
+post-submission correction is an amendment. Personal days are never submitted.
+Active membership or qualifying server start evidence verifies a submission;
+otherwise it waits for company review. Device clocks and plans are not evidence
+of eligibility. Foreground/reconnect retries do not promise background sending.
 
-A professional PDF replicating the paper form: company name; driver name and
-payroll identifier if configured; date, start, finish, elapsed duration; all
-trucks and trailers used with change times, and their odometer readings and
-distance in the unit they were recorded in; every check of each — completed,
-draft (never shown as certified) and corrected, with the corrections' history;
-defects; fuel, AdBlue / DEF and fridge diesel; night out; the day's
-company-facing notes; the driver's declaration; the submission reference and
-revision, and any review status (DECISIONS.md D66). Never the driver's email
-address, and never anything from the private diary.
+**Operational synchronization is separate from the D66 submission queue.**
+Jobs, plans, assignments and operational reports must survive lost connectivity
+and app restart, preserve account/company isolation and retain conflicts rather
+than silently overwrite actual records. Show the last synchronization time,
+not an invented live/online status. Distinguish server receipt, device delivery
+and explicit acknowledgement. Notifications may prompt synchronization, but
+push delivery is not guaranteed. New endpoints, storage, permission and conflict
+rules need their own approved implementation boundaries and security evidence;
+D67 does not grant blanket tenant access or redesign AUTH.md.
 
-**Do not invent additional operational information.**
+## Company PDF and delivery — D66 remains intact
 
----
+The A4 PDF contains company and driver names, payroll reference when configured,
+date, declared start/finish and elapsed duration; every actual vehicle/trailer
+use and change time; recorded odometer readings/distance and units; checks,
+drafts clearly marked uncertified, corrections/history and defects; fuel,
+AdBlue / DEF and fridge diesel; night out, company-facing finish notes,
+declaration, submission reference/revision and applicable review status.
 
-## Driver personal features (private)
+Never include the driver's email, private diary, other employers or unapproved
+job/planning data. Label company-facing notes before entry. Submitted snapshots
+are immutable; a pending amendment never displaces the authoritative accepted
+revision until accepted. Review reasons and decisions are retained (D66).
 
-Separate from the employer's submitted timesheet. The driver may **optionally**
-record driving time, other work, POA, rest/break, distance, hourly pay, overtime
-rates and allowances, and see estimated daily/weekly/monthly earnings and
-personal history.
+Regenerate PDFs from stored snapshots and versioned templates; do not store PDF
+files. Preserve international text and investigate shaping, RTL and CJK before
+finalizing rendering. Accepted revisions enqueue delivery transactionally;
+workers claim safely, retry with backoff and expose failure/admin retry. No
+report is sent to an unverified address or for a pending-review revision. Rare
+duplicate emails after an ambiguous SES response are accepted and identifiable
+by reference/revision. Email success never determines whether a timesheet exists.
 
-This is a **personal driver diary**, not employer fleet management.
+## Private personal features
 
-Because a driver may work for several companies (DECISIONS.md D12), the diary
-spans all of them — one view of the week's hours and earnings that no single
-employer can produce. No company sees it, and no company learns that he drives for
-another.
+The optional personal diary may contain driving, other work, POA, rest/break,
+distance, rates, allowances and estimated earnings/history across employers.
+It is private to the driver and never enters company screens, operational sync,
+exports or PDFs without explicit separate authorization. Personal records do
+not become company data merely because a job or plan exists. Diary enhancements
+are later work; first-release diary scope and portability remain open (O3–O4,
+O18). No mandatory activity switching or payroll processing is implied.
 
-**Privacy boundary:** this data is private to the driver and never appears in the
-company PDF or any company-facing view, unless explicitly authorised later.
+## Billing, retention and release decisions
 
----
+Companies pay; drivers do not buy access to submit their employer's records.
+Pricing/subscription enforcement is undecided (O7). Submitted records are kept
+(D9), but retention duration, cancellation and export/deletion policies need an
+owner decision (O1); do not introduce automatic purges.
 
-## Company billing
-
-The **company pays, not the driver**. Drivers never purchase the app personally
-in order to submit their employer's timesheets. Pricing model is not frozen — do
-not hard-code commercial assumptions.
-
----
-
-## Offline behaviour
-
-Drivers frequently work with poor connectivity. The core daily workflow must
-survive losing internet: local in-progress timesheet and check state, safe
-recovery after app restart, queued submission, and protection against duplicate
-submissions. **Not** a general offline fleet-sync platform.
-
----
-
-## Relationship to LogisticBay TMS
-
-Same brand, different products, separate everything (see DECISIONS.md).
-
-The driver app is kept **visually and structurally familiar** to the TMS driver
-app, so a company upgrading to the full TMS costs its drivers no retraining. But
-Timesheets must remain fully valuable standalone — a customer should be able to
-use it indefinitely without ever adopting the TMS, and it must never be degraded
-into a TMS sales funnel.
-
----
-
-## Competitive position
-
-Not competing with FleetCheck, CheckedSafe, HauliK or Zohti by adding more
-fleet-management features — the opposite:
-
-> We don't make you adopt a fleet-management system just to stop using paper.
-
-Differentiation: simplicity, fast onboarding, low driver friction, low operating
-cost, sensible pricing, straightforward PDF delivery, driver personal utility.
+Q25 Ltd's existing data-role and privacy decisions remain in force (D11).
+Keep Core Timesheets and the expanded operational scope distinguishable when
+planning a release. The open-decision register in DECISIONS.md owns release
+scope, job sending, VOR clearance, configurable checks, additional administrators
+and private diary choices. STATUS.md alone records implementation progress.

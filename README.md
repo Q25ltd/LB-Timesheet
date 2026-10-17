@@ -1,10 +1,16 @@
 # LogisticBay Timesheets
 
-Replaces the paper daily timesheet and daily vehicle/trailer check sheet used by
-truck (HGV) drivers — in any country — with a phone app. On submit it generates a PDF and emails it to
-the company's office.
+LogisticBay Timesheets is for haulage and transport companies in any country.
+Its core workflow is **paper form → phone → PDF → company email**. The
+owner-approved direction also includes simple company-created Jobs, Unit and
+Trailer registers, advance Planning and assignments, availability, damage/VOR
+visibility, operational synchronization, notifications and safety guidance.
 
-**Paper form → phone → PDF → company email.**
+[PRODUCT.md](PRODUCT.md) defines scope and [DECISIONS.md](DECISIONS.md) D67
+records the expansion. These are requirements, not a claim that every feature
+ships: [STATUS.md](STATUS.md) is the implementation record. **D66 remains the
+immediate development priority**; first-public-release scope remains open.
+Driver-created jobs are deferred pending real-world pilot feedback.
 
 > This is **not** the LogisticBay TMS. That is a separate product in a separate
 > repo (`Q25ltd/LB-TMS`) with its own database. See `CLAUDE.md`.

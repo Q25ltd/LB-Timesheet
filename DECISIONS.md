@@ -2,7 +2,7 @@
 
 > Settled decisions and open questions.
 > Settled = do not re-litigate. Open = do not guess; ask the user.
-> Last updated: 2026-10-11 (D66 — submission, company review, PDF and email delivery, and the decisions it amends. D65 — a company deactivates, reactivates and removes its drivers. D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
+> Last updated: 2026-10-17 (D67 — expanded scope, optional plans, company-created Jobs, VOR and operational sync; O12–O18. D66 — submission, company review, PDF and email delivery, and the decisions it amends. D65 — a company deactivates, reactivates and removes its drivers. D64 — driver email confirmation in the app, token renewal, Home's narrowed server rule. D63 — companies add their drivers; drivers accept with a verified email. D61/D62 — failed-logout cleanup and interrupted-save recovery. D60 — local driver records belong to one account each, F-31. Since 2026-10-01: D51–D54 accounts, company registration, timezones, company-web authorization; D55–D58 Amazon SES and its delivery events; D57 the first deployment; D59 backups, postponed)
 
 ---
 
@@ -144,6 +144,8 @@ the privacy boundary in CLAUDE.md is not negotiable — merging the two datasets
 changes Q25's legal position.
 
 ### D12 — A driver can work for multiple companies (2026-08-25)
+
+> Current amendments: D28–D29 make Personal the default destination; D63 replaces activation codes with explicit verified-email invitations. The original reasoning below is historical.
 Agency and casual driving is normal in UK haulage, so a driver identity is global
 and holds a **membership per company** — the same shape the TMS already uses
 (`CompanyMembership`). This reverses the earlier lean in O9, now closed.
@@ -1631,6 +1633,8 @@ separate decision.
 
 ### D43 — The Timesheets web application lives at `timesheets.logisticbay.com`; `/` is the public product homepage (2026-09-30)
 
+> D67 extends the company surface to its own authorized operational Jobs, asset and planning records. The rule below continues to govern driver timesheets: only explicitly submitted snapshots, never unfinished/private driver records.
+
 Owner decision; closes **O5**. **Nothing of it is implemented** — `web/` does
 not exist; STATUS.md owns build state.
 
@@ -1960,6 +1964,8 @@ D9 settles *that* records are kept. Two things are still undecided:
 No longer blocking the build — but blocking the privacy policy and the deletion job.
 
 ### O2 — Does the PDF keep a "loads carried" section?
+
+> Still open for PDF content. D67 approves simple Jobs but does not add Jobs, loads or delivery tables to the D66 snapshot/PDF. A later explicit report-content decision is required.
 The TMS shift PDF has a per-segment deliveries table (materials, collect from,
 deliver to, ticket number, times, tonnes). Real paper haulage timesheets often
 *do* carry load and ticket columns — so dropping it makes the PDF slightly less
@@ -1974,6 +1980,8 @@ loses months of his own diary at the worst moment. Options: portable driver
 identity, an export, or explicit acceptance of the loss.
 
 ### O4 — Does the salary tracker eventually need to exist in the TMS app too?
+
+> The comparison below records the original product boundary. D67 now includes simple company-created Jobs in Timesheets too; portability/private-diary parity remains open, and no shared implementation is authorized.
 If not, upgrading to the TMS is a **personal downgrade** for the driver — he
 gains a jobs list he didn't ask for and loses the one feature that was for him.
 That would make the salary tracker a third shared surface.
@@ -1989,6 +1997,8 @@ Undecided: does it live at `timesheets.logisticbay.com` alongside the driver-
 facing surface, or its own subdomain?
 
 ### O6 — Fuel / AdBlue modelling — ✅ CLOSED 2026-10-11 (D66)
+
+> The unresolved-server wording retained below is historical and superseded by D66: fills travel as per-use events with recorded units/unknown quantities. STATUS.md records implementation.
 User asked for fuel and AdBlue **per unit**. In the TMS these are shift-level
 `String @default("")`, which cannot express which truck was fuelled after a
 mid-day swap.
@@ -2032,6 +2042,8 @@ browser client exists. **Must be decided before browser authentication is
 implemented.**
 
 ### O11 — Company authorization model
+
+> D54 settles the active-admin company gate. Unresolved portions concern additional company users/admins, other roles, granular permissions and ownership transfer; D67 adds operational scope but no invented permission policy. Original pre-D54 text below is historical.
 
 *Refined 2026-10-04 by **D54**: the V1 company-web rule is decided (active
 `admin` membership, one gate). Still open — and to be decided with the
@@ -2726,3 +2738,140 @@ already-accepted request are never counted or refused by it.
 **RETENTION.** Storage supports holds and future policy; nothing is deleted
 automatically. The retention policy and its legal / privacy implications
 are presented for approval before public release (O1 stays open).
+
+
+### D67 — Expanded Timesheets scope, planning suggestions and operational safety (2026-10-17)
+
+Owner-approved product direction, supplied in the documentation-update
+instructions and confirmed by the owner on 2026-10-17. This is a product-scope
+amendment, not authority to implement code, change production, or interrupt the
+D66 development agent. PRODUCT.md remains the single master product definition;
+STATUS.md owns implementation state. **D66 is the immediate priority.** The
+first public release's scope is open (O12); expansion approval does not require
+these features to ship with D66 or silently defer them past it.
+
+**Scope amendment.** Simple company-created Jobs, Unit/Trailer registers,
+driver/unit/trailer assignments, advance Planning, driver availability and weekly
+patterns, manual holiday/sickness marking, damage and VOR visibility, a company
+dashboard, operational synchronization/notifications, safety reminders and How
+to Use instructions belong in Timesheets. This supersedes earlier blanket
+exclusions of Jobs, Planning, assignments, job interaction, operational sync and
+simple VOR visibility. It does not authorize a full TMS: GPS/live tracking,
+route optimization, invoicing, payroll processing, CRM, workshop/parts/PMI and
+maintenance management remain outside scope. D1–D6's product/data/code separation
+is unchanged. Historical references are retained as history.
+
+**Plans are optional suggestions.** Offer relevant planned unit/trailer,
+date/start time and assignment information for explicit driver acceptance,
+change or dismissal. No plan is required to start. Plans never start a shift,
+overwrite actual assets or declared hours, or change a completed timesheet.
+Actual driver records take precedence; planned and actual hours are distinct.
+A job/reference number is freshly entered or explicitly confirmed for the
+current job, never silently copied from an earlier job or plan.
+
+**Initial Jobs.** Company creates → driver receives → driver completes.
+Collection/delivery, reference, optional address/instructions, driver assignment,
+intended unit/trailer, future dates/optional planned start time, updates,
+cancellations, notifications, multiple jobs per driver per shift and completion
+reporting. Duplicate references and assignment conflicts warn rather than
+reject automatically. Draft → Send to Driver remains open (O13).
+**Driver-created jobs are deferred pending real-world pilot feedback**, excluded
+from initial Jobs implementation requirements, not permanently rejected. Revisit
+only after pilot evidence and a subsequent scope/authority decision. Do not
+implement an earlier suggestion to let drivers create jobs as an approved rule.
+
+**Unit and Trailer registers.** Only a registration/identification number is
+required. Simple lists show latest reported driver/use, damage and VOR
+indicators. Support trailer reservations for specific unit registrations,
+loaded/empty reporting and conflicting-reservation warnings. These are reports
+and plans, never inferred live positions or replacements for actual asset-use
+records. Unit assets and measurement units are different concepts; D66's
+measurement-unit preservation and existing actual-use/check fields stand.
+
+**VOR dashboard and clearance.** On administrator login, prominently show
+active VOR warnings on the main company dashboard, naming the asset and linking
+to the defect report. Asset detail alone is insufficient. Keep each warning
+visible until explicit authorized clearance; never auto-clear through a good
+check, job completion or sync. Exact clearance permissions/evidence are open
+(O14). Offline reports must not be labelled company-received. Simple VOR
+visibility is not a repair/maintenance workflow or a new authority grant.
+
+**Availability.** Weekly patterns, planned start times, days off, manual holiday
+and sickness marks, and warnings when assigning unavailable drivers. Later:
+driver holiday requests and company approval/decline. Private diary enhancements
+are later work; first-release diary scope stays open (O18).
+
+**Safety and instructions.** Once per new shift, an offline-capable reminder
+with one dismissal for that shift: phone the office directly about serious
+defects, VOR, accidents, major delays and urgent operational issues. Do not imply
+that a queued report or push proves the office has received or acknowledged it.
+Provide How to Use instructions for the relevant company and driver workflows.
+
+**Operational synchronization.** Separate from D66's receipt/submission queue.
+Survive connection loss and restart; preserve account/company isolation;
+distinguish server receipt, device delivery and acknowledgement; support
+notifications without guaranteeing push delivery; retain conflicts rather than
+silently overwrite actual records; show last sync time, never invented live
+status. Exact operational entities, state transitions, conflict handling and
+permission boundaries must be designed/proven before their own implementation.
+Do not repurpose a SubmissionContext for Jobs, planning, asset or VOR access.
+
+**Preserved contracts.** Separate account kinds and multi-company privacy;
+local-first shift recording; checks/corrections; declared times; fuel, AdBlue /
+DEF and fridge diesel; historical measurement units; account-isolated storage;
+D66 immutable submissions/amendments, company review and authoritative revisions,
+PDF/email and its exact approved snapshot contents; all authentication,
+authorization and tenant-isolation rules. Operational events never silently
+mutate a submitted snapshot, add fields to D66's PDF, make a personal day
+company-visible or use a plan as evidence of submission eligibility.
+
+**Open decisions, not agent defaults.** O1, O7 and O11 remain; see O12–O18
+below for first-release scope, Draft → Send, VOR clearance, configurable checks,
+operational sync design, holiday requests and private diary release scope.
+
+## Expanded-scope open decisions — do not infer implementation authority
+
+### O12 — First public release: Core Timesheets or expanded scope
+
+Decide which approved D67 features must accompany the D66 core at first public
+release and which follow later. D66 remains the immediate priority. Approval of
+the expanded direction alone settles neither this release boundary nor dates.
+
+### O13 — Job Draft → Send to Driver workflow
+
+Decide whether company jobs can be held as drafts and explicitly sent, including
+when driver delivery/acknowledgement states begin. Do not assume creation means
+sent, delivered or acknowledged. Driver-created jobs remain deferred pending
+pilot feedback, separately from this decision.
+
+### O14 — VOR clearance permissions and evidence
+
+Decide who may clear VOR, the required reason/evidence and the auditable
+transition. D54's company-admin gate is not a substitute for this unresolved
+specific permission. Until authorized clearance, active warnings persist.
+
+### O15 — Operational synchronization and notification contracts
+
+Decide exact job/assignment/asset-report entities, server and local authority,
+ordering, conflict presentation/resolution, permission boundaries, receipt,
+device delivery and acknowledgement states, retry and notification mechanisms.
+D67 fixes the required guarantees, not the endpoint/schema/transport design.
+No guaranteed background sending and no reuse of D66's submission authority.
+
+### O16 — Configurable checks
+
+Decide whether first release needs company-specific check configuration and, if
+so, its scope, versioning, validation and historical rendering rules. Do not
+replace existing check certificates or their stored checklist versions.
+
+### O17 — Later holiday-request workflow
+
+Driver requests and company approval/decline follow the initial manual holiday/
+sickness marking. Decide their workflow, authority and release boundary before
+implementation. Availability plans never establish actual hours worked.
+
+### O18 — Private diary first-release scope and later enhancements
+
+Decide which personal hours/pay/history functions, if any, are required at first
+release; enhancements are later work. Keep O3/O4's portability and TMS questions
+open. No company access follows from Jobs, Planning or synchronization.

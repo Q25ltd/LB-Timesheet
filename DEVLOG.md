@@ -4,6 +4,74 @@
 
 ---
 
+## 2026-10-17 — D66 stage S5: the timesheet PDF (implemented, not integrated)
+
+**Built** (`f199a46`). Template `timesheet-pdf/1` (`api/src/pdf/`). It draws
+only a stored revision, which must re-validate and still hash to its stored
+SHA-256, else it is refused. Same revision → same bytes; the exact canonical
+snapshot is attached. Nothing calls it yet: S7 (delivery) and S8 (download)
+will.
+
+**International text — owner decisions of 2026-10-17:** Option B scripts;
+Noto Bold for Latin only (other scripts draw in Regular); Han in the Japanese
+design, Korean when the text has Hangul. Fonts downloaded with permission,
+pinned commits, OFL licences alongside (`api/assets/fonts/`, ~20 MB).
+`bidi-js` 1.1.0 added; fontkit declared and pinned at 2.0.4.
+
+**Found on the way.** fontkit 2.0.4 throws on a NULL GPOS anchor
+(foliojs/fontkit#367, open upstream) — `ਸ੍ਰੀ` in Noto Sans Gurmukhi crashed
+the render. Fixed in `fontkitNullAnchor.ts` with HarfBuzz's meaning (that
+subtable does not apply), patched into the fontkit instance pdfkit loads; it
+fails loudly if fontkit's internals move. Also caught in visual review:
+fontkit decides RTL by script, not bidi class, so Arabic-Indic digits were
+reversed until runs fontkit would reverse were drawn per cluster.
+
+**Recorded for the amendment stage:** the PDF reads driver name, company name
+and payroll reference from the `Shift` header; an amendment must not rewrite
+them, or an earlier revision's PDF stops reproducing.
+
+**Evidence.** 33 unit tests + DB test TS18 (a really stored revision);
+18 mutations, all killed; `npm run check` exit 0. Tests were written after
+the first draft; their power is shown by the mutations, not a RED run.
+Not pushed or deployed. The S3–S4 independent review is still outstanding
+and blocks S6. One web test (`companyHome.test.tsx` 1b) failed once in a
+gate run and passed 3/3 on rerun — an unrelated intermittent flake, reported.
+
+---
+
+## 2026-10-17 — Approved product expansion and documentation reconciliation (D67)
+
+**Owner-authorized documentation only.** PRODUCT.md now defines the approved
+simple Jobs, Unit/Trailer registers, Planning/availability, assignments,
+damage/VOR dashboard, operational sync/notifications, safety reminder and How
+to Use scope. DECISIONS.md adds D67 and O12–O18, preserving historical decisions
+and the D66 requirements. Driver-created jobs are deferred pending real-world
+pilot feedback; initial Jobs are company-created only. Draft → Send, VOR
+clearance and first-public-release scope remain open.
+
+**Reconciled:** README/CLAUDE product boundaries; STATUS's stale onboarding,
+settings, membership, receipt/submission, units, refresh and migration summaries;
+F-15's current resolution while retaining its historical audit evidence and
+PARTIAL status; AUTH's already-settled company registration units, PUT preflight
+and D54 reference. Plans are optional, actual records win, operational sync is
+separate from D66, active VOR stays on the dashboard until authorized clearance,
+and urgent reports require a direct phone call. No security policy is weakened.
+
+**Evidence boundary.** STATUS remains the sole current implementation register,
+with D67 features explicitly planned and D66 S1–S4 evidence retained. Ongoing
+PDF/dependency changes by the D66 build agent are not claimed complete here.
+Historical devlog/audit entries are preserved; obsolete decision passages are
+annotated, not erased. No new master document or finding ID is created.
+
+**Verification:** documentation diff/whitespace, relative Markdown links,
+required-scope checks, preservation of original D66 and historical entries,
+and changed-file scope checked without executing application tests or builds.
+No application code, tests, dependencies, configuration, migrations or production
+resources modified by this task; no agent messages, commit, push or deployment.
+The full application gate was deliberately not run during concurrent D66 work.
+
+---
+
 ## 2026-10-17 — localhost restored; S3–S4 security review prepared
 
 **Cause.** The local development database (`localhost:5544/lb_timesheet`)

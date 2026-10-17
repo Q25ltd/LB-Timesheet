@@ -2,7 +2,7 @@
 
 > Read this file first, every session, no exceptions. Then AGENT_WORKFLOW.md.
 > This file owns the product and the code rules; AGENT_WORKFLOW.md owns the process.
-> Last updated: 2026-10-11 (D66: what the company may receive)
+> Last updated: 2026-10-17 (D67 product scope; D66 privacy/security preserved)
 
 ---
 
@@ -31,42 +31,47 @@ Hard rules:
 
 ## What this product is
 
-LogisticBay Timesheets replaces the two pieces of paper a truck (HGV) driver fills in
-every day — the **daily timesheet** and the **daily walkaround check sheet** —
-with a phone app. On submit it generates a PDF and emails it to the company's
-office. It is for haulage and transport companies in any country, not one
-market (D52): no UK-only wording, units or rules in new work.
+[PRODUCT.md](PRODUCT.md) is the authoritative product definition. The core is
+paper daily timesheets/check sheets → phone → immutable submission → PDF →
+company email (D66), for transport companies worldwide (D52).
 
-**Paper form → phone → PDF → company email.** That is the whole product.
+D67 approves simple company-created Jobs, Unit/Trailer registers, driver/asset
+assignments, advance Planning, availability/weekly patterns, manual holiday and
+sickness marking, damage/VOR dashboard visibility, operational sync and
+notifications, safety reminders and How to Use instructions **in Timesheets**.
+Do not redirect these approved features to the TMS or reopen the scope decision.
+**D66 remains the immediate implementation priority.** Scope approval is not a
+claim of implementation or permission to interrupt the active build agent.
+STATUS.md owns built state; O12 leaves first-public-release scope open.
 
-It is deliberately small, cheap to run, and adoptable by a small haulage company
-with no training and no fleet-management system.
+## Product boundaries and feature test
 
-## What this product is NOT
+A feature must directly support paper timesheets/checks, time submission,
+private driver utility, or the expressly approved D67 operational scope.
+Anything else needs a product decision; do not expand from simple Jobs into a
+full TMS. GPS/live tracking, routing optimization, CRM, invoicing, payroll
+processing, workshop/parts/PMI and maintenance management remain excluded.
+Timesheets/TMS code, data, accounts and deployment remain separate (D1–D6).
 
-It is **not a TMS** and must never become one. Anything involving transport
-operations belongs in the separate LogisticBay TMS product.
+Plans are optional suggestions: drivers can accept/change/ignore them and start
+without one. Never automatically start a shift, carry forward an unconfirmed
+job/reference number, overwrite actual asset/hour records or change a completed
+timesheet. Initial Jobs are company-created; **driver-created jobs are deferred
+pending real-world pilot testing**, not initial implementation requirements.
 
-**Never build here:** jobs · loads · customers · planning · dispatch · routing ·
-GPS tracking · live driver tracking · POD · delivery management · invoicing ·
-fleet utilisation · maintenance planning · vehicle scheduling · tachograph
-replacement · payroll processing · operational analytics · CRM.
+D67's operational synchronization is separate from D66's submission queue and
+its authority. Preserve account/company isolation, receipt/delivery/acknowledgement
+distinctions, conflicts and accurate last-sync information. Never claim offline
+reports reached the company or that push delivery is guaranteed. Active VOR
+warnings belong on the main dashboard until explicit authorized clearance;
+clearance policy is open (O14), not an inferred admin power. The once-per-new-
+shift safety reminder works offline and calls for a direct office phone call
+for urgent issues. Read PRODUCT.md and D67 before implementing any of this.
 
----
-
-## The feature test — apply before adding ANYTHING
-
-Ask: **does this directly**
-
-1. replace something printed on the driver's paper daily timesheet / check sheet, **or**
-2. support time submission for payroll, **or**
-3. support vehicle/trailer checks and defect reporting, **or**
-4. provide private personal value to the driver (their own hours/pay diary)?
-
-**YES** → it may belong here. **NO** → it belongs in the TMS, or should not be built.
-
-If you cannot answer "what is the user-visible change of what I just did?" in one
-sentence — stop.
+Existing security, privacy, local storage, measurement-unit and D66 snapshot/
+review/PDF/email contracts remain intact. D67 does not put operational data in
+the D66 PDF or private diary data in company records. Open decisions are in
+DECISIONS.md; do not fill them with implementation defaults.
 
 ---
 
